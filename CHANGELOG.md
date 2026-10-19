@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.4.0 (2026-10-19)
+- Backup PC guide (`docs/BACKUP-PC.md`): both sides of the setup, testing, removing a PC, troubleshooting.
 - Privacy notice (`PRIVACY.md`), linked from the README, the setup guide and the dashboard.
 - Pingwin has an icon (`assets/`), used on the dashboard and README too.
 - **Setup guide** (`docs/SETUP.md`): step by step from creating the bot to posting the first menu, with troubleshooting.

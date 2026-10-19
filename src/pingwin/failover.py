@@ -86,6 +86,7 @@ class Coordinator:
         self._last_renewed: float | None = None  # time.monotonic()
         self.last_lease: Lease | None = None  # the most recent check-in we saw (ours or another PC's)
         self._warned_channel = False
+        self._announced = False  # log the first decision even if it matches the starting state
 
     async def tick(self) -> None:
         cfg = self.bot.config.failover
@@ -173,13 +174,17 @@ class Coordinator:
         return sorted(found, key=lambda m: m.id)
 
     def _set_active(self, value: bool, reason: str) -> None:
-        if value == self.active:
+        if value == self.active and self._announced:
             return
+        self._announced = True
+        changed = value != self.active
         self.active = value
         if value:
             log.info("ACTIVE on %s: %s", self.bot.node.name, reason)
-            self.bot.dispatch("pingwin_active")
+            if changed:
+                self.bot.dispatch("pingwin_active")
         else:
             self.active_since = None
             log.info("STANDBY on %s: %s", self.bot.node.name, reason)
-            self.bot.dispatch("pingwin_standby")
+            if changed:
+                self.bot.dispatch("pingwin_standby")

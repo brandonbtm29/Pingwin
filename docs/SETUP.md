@@ -151,13 +151,8 @@ about 20 seconds when it does. To update right away, click **Restart Pingwin** o
 `/pingwin restart` in Discord. You can see what changed in [CHANGELOG.md](../CHANGELOG.md).
 
 ### A backup PC
-A second PC, ideally at a friend's house on different internet, can take over if yours goes offline.
-1. Use a synced settings folder (e.g. SyncThing) on both PCs, and point each PC's `.env` at it.
-2. Install Pingwin on the second PC (steps 1 and 3). At the token question, press Enter: the token is already in the synced folder.
-3. Make a mod-only channel such as `#pingwin-status` and let Pingwin post in it.
-4. On the dashboard's **PCs & failover** tab: turn failover on, pick that channel, and list the PCs in order of preference.
-
-The second PC holds your bot token, so only use PCs belonging to people you trust.
+A second PC can take over if yours goes offline. It works best at a friend's house, on different internet.
+See **[Adding a backup PC](BACKUP-PC.md)** for both sides of the setup and how to test it.
 
 ### A different personality
 Pingwin's messages come from `personas\pingwin.toml`. To change them, copy that file into a `personas`
