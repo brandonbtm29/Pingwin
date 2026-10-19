@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pingwin Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐧</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🐧</span>
+      <div>
+        <h1>Pingwin</h1>
+        <p class="sub" id="server-line">Connecting…</p>
+      </div>
+    </div>
+    <div class="pill" id="state-pill"><span class="dot"></span><span id="state-text">Loading</span></div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="status" aria-selected="true">Status</button>
+    <button role="tab" data-tab="roles">Role menu</button>
+    <button role="tab" data-tab="pcs">PCs &amp; failover</button>
+    <button role="tab" data-tab="logs">Logs</button>
+  </nav>
+
+  <main>
+    <!-- STATUS -->
+    <section id="tab-status" class="tab">
+      <div class="banner" id="standby-banner" hidden></div>
+      <div class="cards">
+        <div class="card"><div class="label">This PC</div><div class="value" id="s-node">–</div><div class="hint" id="s-node-role"></div></div>
+        <div class="card"><div class="label">Answering in Discord</div><div class="value" id="s-leader">–</div><div class="hint" id="s-checkin"></div></div>
+        <div class="card"><div class="label">Discord connection</div><div class="value" id="s-conn">–</div><div class="hint" id="s-latency"></div></div>
+        <div class="card"><div class="label">Version</div><div class="value" id="s-version">–</div><div class="hint" id="s-uptime"></div></div>
+      </div>
+
+      <div class="panel">
+        <h2>Controls</h2>
+        <div class="row-actions">
+          <button class="btn" data-action="reload">Reload settings</button>
+          <button class="btn" data-action="check_updates">Check for updates</button>
+          <button class="btn danger" data-action="restart">Restart Pingwin</button>
+        </div>
+        <p class="hint" id="s-update">Settings also reload on their own within a minute of changing.</p>
+      </div>
+
+      <div class="panel">
+        <h2>Where things live</h2>
+        <dl class="kv">
+          <dt>Settings folder</dt><dd id="s-folder" class="mono">–</dd>
+          <dt>Personality</dt><dd id="s-persona">–</dd>
+        </dl>
+      </div>
+    </section>
+
+    <!-- ROLE MENU -->
+    <section id="tab-roles" class="tab" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Menu</h2>
+          <div class="save-zone"><span class="dirty" id="roles-dirty" hidden>Unsaved changes</span><button class="btn primary" id="roles-save" disabled>Save</button></div>
+        </div>
+        <div class="grid2">
+          <label>Title<input id="r-title" maxlength="256"></label>
+          <label>Who can use it
+            <select id="r-gate"></select>
+          </label>
+        </div>
+        <label>Description<textarea id="r-desc" rows="2" maxlength="2000"></textarea></label>
+
+        <div class="table-wrap">
+          <table class="roles">
+            <thead><tr><th class="c-move"></th><th class="c-emoji">Emoji</th><th>Role</th><th>Description</th><th class="c-status">In Discord</th><th class="c-del"></th></tr></thead>
+            <tbody id="r-rows"></tbody>
+          </table>
+        </div>
+        <datalist id="role-names"></datalist>
+        <div class="row-actions">
+          <button class="btn" id="r-add">+ Add role</button>
+          <span class="hint" id="r-count"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Publish</h2>
+        <p class="hint">Save first. Then create any missing roles, and update the menus already posted (or post a new one).</p>
+        <div class="row-actions">
+          <button class="btn" data-action="check_roles">Check roles</button>
+          <button class="btn" data-action="create_roles">Create missing roles</button>
+          <button class="btn primary" data-action="refresh_menus">Update posted menus</button>
+        </div>
+        <div class="row-actions">
+          <select id="r-post-channel" aria-label="Channel to post in"></select>
+          <button class="btn" id="r-post">Post a new menu</button>
+        </div>
+        <ul class="report" id="r-report" hidden></ul>
+        <div id="r-posted"></div>
+      </div>
+    </section>
+
+    <!-- PCS -->
+    <section id="tab-pcs" class="tab" hidden>
+      <div class="panel">
+        <h2>Right now</h2>
+        <p id="p-live" class="lead">–</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Failover</h2>
+          <div class="save-zone"><span class="dirty" id="pcs-dirty" hidden>Unsaved changes</span><button class="btn primary" id="pcs-save" disabled>Save</button></div>
+        </div>
+        <label class="switch"><input type="checkbox" id="p-enabled"><span>Let backup PCs take over if the answering PC goes offline</span></label>
+        <label>Status channel <span class="hint">(mod-only; Pingwin posts its check-ins here)</span>
+          <select id="p-channel"></select>
+        </label>
+
+        <h3>PCs, in order of preference</h3>
+        <p class="hint">The first PC that's online answers. Names must match each PC's <code>PINGWIN_NODE</code>.</p>
+        <ol class="pcs" id="p-list"></ol>
+        <div class="row-actions">
+          <input id="p-new" placeholder="PC name, e.g. BACKUP-PC" maxlength="40">
+          <button class="btn" id="p-add">Add PC</button>
+          <button class="btn" id="p-add-me" hidden>Add this PC</button>
+        </div>
+
+        <details>
+          <summary>Timing</summary>
+          <div class="grid2">
+            <label>Check in every (seconds)<input type="number" id="p-hb" min="10"></label>
+            <label>Backups take over after (seconds)<input type="number" id="p-to" min="30"></label>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- LOGS -->
+    <section id="tab-logs" class="tab" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Recent log <span class="hint">(this PC)</span></h2>
+          <div class="row-actions tight">
+            <select id="l-level" aria-label="Filter">
+              <option value="all">Everything</option>
+              <option value="warn">Warnings and errors</option>
+            </select>
+            <label class="switch small"><input type="checkbox" id="l-follow" checked><span>Live</span></label>
+          </div>
+        </div>
+        <pre class="log" id="l-out"></pre>
+      </div>
+    </section>
+  </main>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

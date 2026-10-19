@@ -17,6 +17,7 @@ from discord.ext import commands
 
 from . import updater
 from .config import PROJECT_ROOT, Config, config_path, load_config, load_node
+from .dashboard.server import Dashboard
 from .failover import Coordinator
 from .persona import Persona, load_persona, persona_path
 
@@ -56,6 +57,8 @@ class Pingwin(commands.Bot):
         self.gateway_connected = False
         self.started_at: datetime = discord.utils.utcnow()
         self.exit_code = 0
+        self.update_status: dict | None = None  # last update check, shown on the dashboard
+        self.dashboard = Dashboard(self)
         self._watched: dict[Path, float] = {}
         self._housekeeping_task: asyncio.Task | None = None
         self._remember_settings_files()
@@ -87,6 +90,12 @@ class Pingwin(commands.Bot):
                 self.node.name,
                 list(failover.pcs),
             )
+
+        await self.dashboard.start()
+
+    async def close(self) -> None:
+        await self.dashboard.stop()
+        await super().close()
 
     async def on_ready(self) -> None:
         self.gateway_connected = True

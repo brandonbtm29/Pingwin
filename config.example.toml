@@ -25,6 +25,12 @@ pcs = ["MAIN-PC", "FRIENDS-PC"]
 heartbeat_seconds = 30
 takeover_after_seconds = 120
 
+[dashboard]
+# A settings page in your browser, on each PC that runs Pingwin.
+# Open it with scripts\open_dashboard.cmd. It only answers on that PC (127.0.0.1).
+enabled = true
+port = 8787
+
 [updates]
 # How often to check GitHub for new code (minutes). 0 = never; use /pingwin restart instead.
 check_minutes = 30

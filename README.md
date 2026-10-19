@@ -10,6 +10,7 @@ streams, game days…), so the server can stop using `@everyone` for everything.
 - **Swappable personality:** every message comes from a persona file, so you can rename it or change its voice without touching code.
 - **Runs on several PCs:** one answers, the others wait on standby and take over if it goes offline.
 - **Updates itself** from GitHub.
+- **Dashboard** in your browser for settings, status and logs.
 
 ## Commands
 
@@ -18,6 +19,7 @@ streams, game days…), so the server can stop using `@everyone` for everything.
 | `/rolemenu setup` | Manage Roles | Creates missing menu roles (pingable, no permissions) and checks the rest |
 | `/rolemenu check` | Manage Roles | Same report, changes nothing |
 | `/rolemenu post [channel]` | Manage Roles | Posts the button menu |
+| `/rolemenu refresh` | Manage Roles | Updates posted menus in place after you change the roles |
 | `/pingwin about` | Everyone | Says hi |
 | `/pingwin status` | Everyone | Which PC is answering, version, uptime |
 | `/pingwin reload` | Manage Server | Reload settings now (they also reload on their own within a minute) |
@@ -25,13 +27,28 @@ streams, game days…), so the server can stop using `@everyone` for everything.
 
 Only members with the **Friend** role can use the menu (`required_role` in `config.toml`).
 
+## Dashboard
+
+Double-click **`scripts\open_dashboard.cmd`** while Pingwin is running. It opens a page in your
+browser with four tabs:
+
+- **Status:** which PC is answering, Discord connection, version; reload, restart, check for updates
+- **Role menu:** add, remove and reorder roles, set emoji and descriptions, choose who can use the menu,
+  see which roles are ready, create missing ones, and update or post menus
+- **PCs & failover:** turn failover on, pick the status channel, order the PCs
+- **Logs:** this PC's recent log, live
+
+Every PC running Pingwin has its own dashboard. Changes save to the shared `config.toml`, so they reach
+every PC. The page only answers on that PC (`127.0.0.1:8787`; change it under `[dashboard]`), and
+`open_dashboard.cmd` signs you in with a key kept in the project folder.
+
 ## Where settings live
 
 | Where | What | Synced? |
 |---|---|---|
-| **Settings folder** (e.g. `SyncThing\Pingwin`) | `config.toml`, `secrets.env` (token), `personas\` | Yes: same on every PC |
+| **Settings folder** (e.g. `SyncThing\Pingwin`) | `config.toml`, `secrets.env` (token), `personas\`, `menus.json` | Yes: same on every PC |
 | **Project folder** `.env` | `PINGWIN_DATA` (path to the settings folder), `PINGWIN_NODE` (this PC's name) | No: one per PC |
-| **Project folder** `logs\` | `pingwin.log` | No |
+| **Project folder** `logs\`, `.dashboard-key` | Log, dashboard sign-in key | No |
 | **GitHub** | The code | Pulled by every PC |
 
 ## First-time setup
@@ -64,7 +81,8 @@ Start it with Windows: Task Scheduler → *Create Basic Task* → **When I log o
 
 ### 4. In Discord
 1. **Server Settings → Roles**: drag **Pingwin's role above** every ping role.
-2. `/rolemenu setup`, then `/rolemenu post channel:#roles`.
+2. On the dashboard's **Role menu** tab: *Create missing roles*, then *Post a new menu* in `#roles`
+   (or `/rolemenu setup` and `/rolemenu post channel:#roles` in Discord).
 3. `#roles` permissions: `@everyone` deny *View Channel*; `Friend` allow *View Channel*, deny *Send Messages*.
 
 ## Running on more than one PC (failover)
@@ -95,7 +113,7 @@ Anyone running a backup has the bot token, so only use PCs you trust.
   pulls, and reinstalls. For an immediate update on the active PC, run `/pingwin restart`.
   PCs with uncommitted code changes skip auto-updates.
 - **Settings:** edit `config.toml` or a persona on one PC. SyncThing copies it, and every Pingwin
-  reloads it within a minute. Re-run `/rolemenu post` after changing the menu.
+  reloads it within a minute. After changing the menu, click *Update posted menus* (or `/rolemenu refresh`).
 - **Personality:** copy `personas\pingwin.toml` into the settings folder's `personas\`, rename it
   (e.g. `pirate.toml`), rewrite the lines, and set `persona = "pirate"`.
 

@@ -84,6 +84,7 @@ class Coordinator:
         self.active_since: datetime | None = None
         self.leader: str | None = bot.node.name if self.active else None
         self._last_renewed: float | None = None  # time.monotonic()
+        self.last_lease: Lease | None = None  # the most recent check-in we saw (ours or another PC's)
         self._warned_channel = False
 
     async def tick(self) -> None:
@@ -119,6 +120,7 @@ class Coordinator:
                     await extra.delete()
             self._last_renewed = time.monotonic()
             self.leader = self.bot.node.name
+            self.last_lease = Lease(self.bot.node.name, now)
             if lease is None or lease.node.casefold() == self.bot.node.name.casefold():
                 reason = "no one else is active"
             elif lease.age(now) > cfg.takeover_after_seconds:
@@ -129,6 +131,7 @@ class Coordinator:
         else:
             assert lease is not None
             self.leader = lease.node
+            self.last_lease = lease
             self._set_active(False, f"{lease.node} is active")
 
     def _check_stale(self) -> None:

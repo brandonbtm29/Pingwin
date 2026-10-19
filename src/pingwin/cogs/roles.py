@@ -13,6 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from .. import menus
 from ..config import MenuRole, RolesConfig
 
 if TYPE_CHECKING:
@@ -118,6 +119,116 @@ def build_menu_embed(cfg: RolesConfig, footer: str) -> discord.Embed:
     return embed
 
 
+class MenuError(Exception):
+    """A problem posting or refreshing a menu, worded for the person who asked."""
+
+
+def menu_view(resolved: list[tuple[MenuRole, discord.Role | None]]) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    for m, role in resolved:
+        assert role is not None
+        view.add_item(RoleToggleButton(role.id, label=m.name, emoji=m.emoji))
+    return view
+
+
+def _ready_menu(bot: Pingwin, guild: discord.Guild) -> list[tuple[MenuRole, discord.Role | None]]:
+    resolved = resolve_menu(guild, bot.config.roles)
+    if not resolved:
+        raise MenuError("The menu is empty. Add some roles first.")
+    missing = [m.name for m, r in resolved if r is None]
+    if missing:
+        raise MenuError(
+            "These roles don't exist yet: " + ", ".join(f"**{n}**" for n in missing) + ". Create them first."
+        )
+    return resolved
+
+
+async def role_report(guild: discord.Guild, cfg: RolesConfig, *, create_missing: bool, actor: str) -> list[str]:
+    """Check (and optionally create) the menu roles. Returns one line per finding."""
+    lines: list[str] = []
+    if not guild.me.guild_permissions.manage_roles:
+        lines.append("❌ I don't have **Manage Roles**, so I can't hand out any roles yet.")
+
+    for m, role in resolve_menu(guild, cfg):
+        if role is None:
+            if not create_missing:
+                lines.append(f"❓ **{m.name}** doesn't exist yet")
+                continue
+            try:
+                await guild.create_role(
+                    name=m.name,
+                    permissions=discord.Permissions.none(),
+                    mentionable=True,
+                    reason=f"Pingwin role setup by {actor}",
+                )
+                lines.append(f"✅ Created **{m.name}** (pingable, no permissions)")
+            except discord.HTTPException as e:
+                lines.append(f"❌ Couldn't create **{m.name}**: {e.text or e}")
+            continue
+        issues = role_problems(guild, role)
+        lines.append(f"⚠️ **{role.name}** " + "; ".join(issues) if issues else f"👍 **{role.name}** looks good")
+
+    if cfg.required_role:
+        gate = next((r for r in guild.roles if r.name.casefold() == cfg.required_role.casefold()), None)
+        if gate is None:
+            lines.append(f"⚠️ The gate role **{cfg.required_role}** doesn't exist, so nobody can use the menu.")
+        else:
+            lines.append(f"🔒 Only members with **{gate.name}** can use the menu.")
+    else:
+        lines.append("🔓 No gate role set: anyone in the server can use the menu.")
+    if not cfg.menu:
+        lines.append("The menu is empty.")
+    return lines
+
+
+async def post_menu(bot: Pingwin, channel: discord.TextChannel | discord.Thread, *, actor: str) -> discord.Message:
+    resolved = _ready_menu(bot, channel.guild)
+    embed = build_menu_embed(bot.config.roles, bot.persona.say("menu_footer"))
+    try:
+        message = await channel.send(embed=embed, view=menu_view(resolved))
+    except discord.Forbidden as e:
+        raise MenuError(
+            f"I can't post in #{channel.name}. I need View Channel, Send Messages and Embed Links there."
+        ) from e
+    except discord.HTTPException as e:
+        raise MenuError(f"Discord rejected the menu (often a bad custom emoji): {e.text or e}") from e
+    menus.remember(menus.PostedMenu(channel.guild.id, channel.id, message.id))
+    log.info("Posted role menu in #%s (%s) by %s", channel.name, channel.guild.name, actor)
+    return message
+
+
+async def refresh_menus(bot: Pingwin) -> list[str]:
+    """Update every posted menu in place with the current roles and wording."""
+    posted = menus.load_menus()
+    if not posted:
+        return ["No posted menus on record yet. Post one first."]
+    lines: list[str] = []
+    gone: set[int] = set()
+    for pm in posted:
+        guild = bot.get_guild(pm.guild_id)
+        channel = guild.get_channel_or_thread(pm.channel_id) if guild else None
+        if guild is None or not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            lines.append(f"❓ Can't see the channel for {pm.url} anymore")
+            continue
+        try:
+            resolved = _ready_menu(bot, guild)
+            message = channel.get_partial_message(pm.message_id)
+            await message.edit(
+                embed=build_menu_embed(bot.config.roles, bot.persona.say("menu_footer")), view=menu_view(resolved)
+            )
+            lines.append(f"✅ Updated the menu in #{channel.name}")
+        except discord.NotFound:
+            gone.add(pm.message_id)
+            lines.append(f"🗑️ The menu in #{channel.name} was deleted; forgot it")
+        except MenuError as e:
+            lines.append(f"❌ #{channel.name}: {e}")
+            break
+        except discord.HTTPException as e:
+            lines.append(f"❌ #{channel.name}: {e.text or e}")
+    menus.forget(gone)
+    return lines
+
+
 @app_commands.guild_only()
 @app_commands.default_permissions(manage_roles=True)
 class RoleMenu(commands.GroupCog, group_name="rolemenu", group_description="Set up the opt-in ping role menu"):
@@ -126,44 +237,10 @@ class RoleMenu(commands.GroupCog, group_name="rolemenu", group_description="Set 
 
     async def _report(self, interaction: discord.Interaction, *, create_missing: bool) -> None:
         await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        assert guild is not None
-        cfg = self.bot.config.roles
-        lines: list[str] = []
-
-        if not guild.me.guild_permissions.manage_roles:
-            lines.append("❌ I don't have **Manage Roles**, so I can't hand out any roles yet.")
-
-        for m, role in resolve_menu(guild, cfg):
-            if role is None:
-                if not create_missing:
-                    lines.append(f"❓ **{m.name}** doesn't exist yet; run `/rolemenu setup` to create it")
-                    continue
-                try:
-                    await guild.create_role(
-                        name=m.name,
-                        permissions=discord.Permissions.none(),
-                        mentionable=True,
-                        reason=f"Pingwin /rolemenu setup by {interaction.user}",
-                    )
-                    lines.append(f"✅ Created **{m.name}** (pingable, no permissions)")
-                except discord.HTTPException as e:
-                    lines.append(f"❌ Couldn't create **{m.name}**: {e.text or e}")
-                continue
-            issues = role_problems(guild, role)
-            lines.append(f"⚠️ **{role.name}** " + "; ".join(issues) if issues else f"👍 **{role.name}** looks good")
-
-        if cfg.required_role:
-            gate = next((r for r in guild.roles if r.name.casefold() == cfg.required_role.casefold()), None)
-            if gate is None:
-                lines.append(f"⚠️ The gate role **{cfg.required_role}** doesn't exist, so nobody can use the menu.")
-            else:
-                lines.append(f"🔒 Only members with **{gate.name}** can use the menu.")
-        else:
-            lines.append("🔓 No gate role set: anyone in the server can use the menu.")
-
-        if not cfg.menu:
-            lines.append("The menu is empty. Add `[[roles.menu]]` blocks to config.toml, then `/pingwin reload`.")
+        assert interaction.guild is not None
+        lines = await role_report(
+            interaction.guild, self.bot.config.roles, create_missing=create_missing, actor=str(interaction.user)
+        )
         await interaction.followup.send("\n".join(lines)[:2000], ephemeral=True)
 
     @app_commands.command(name="check", description="Check the menu roles without changing anything")
@@ -178,51 +255,24 @@ class RoleMenu(commands.GroupCog, group_name="rolemenu", group_description="Set 
     @app_commands.describe(channel="Where to post it (defaults to this channel)")
     async def post(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
         await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        assert guild is not None
         target = channel or interaction.channel
         if not isinstance(target, (discord.TextChannel, discord.Thread)):
             await interaction.followup.send("Pick a text channel to post in.", ephemeral=True)
             return
-
-        cfg = self.bot.config.roles
-        resolved = resolve_menu(guild, cfg)
-        missing = [m.name for m, r in resolved if r is None]
-        if not resolved:
-            await interaction.followup.send("The menu in config.toml is empty.", ephemeral=True)
-            return
-        if missing:
-            await interaction.followup.send(
-                "These roles don't exist yet: "
-                + ", ".join(f"**{n}**" for n in missing)
-                + ". Run `/rolemenu setup` first.",
-                ephemeral=True,
-            )
-            return
-
-        view = discord.ui.View(timeout=None)
-        for m, role in resolved:
-            assert role is not None
-            view.add_item(RoleToggleButton(role.id, label=m.name, emoji=m.emoji))
-
         try:
-            await target.send(embed=build_menu_embed(cfg, self.bot.persona.say("menu_footer")), view=view)
-        except discord.Forbidden:
-            await interaction.followup.send(
-                f"I can't post in {target.mention}. I need View Channel, Send Messages and Embed Links there.",
-                ephemeral=True,
-            )
+            await post_menu(self.bot, target, actor=str(interaction.user))
+        except MenuError as e:
+            await interaction.followup.send(str(e), ephemeral=True)
             return
-        except discord.HTTPException as e:
-            # Most often a bad custom emoji in config.toml.
-            await interaction.followup.send(f"Discord rejected the menu: {e.text or e}", ephemeral=True)
-            return
-
-        log.info("Posted role menu in #%s (%s) by %s", target.name, guild.name, interaction.user)
         await interaction.followup.send(
-            f"Menu posted in {target.mention}. You can delete old menus; they keep working until you do.",
-            ephemeral=True,
+            f"Menu posted in {target.mention}. Use `/rolemenu refresh` after changing the roles.", ephemeral=True
         )
+
+    @app_commands.command(name="refresh", description="Update posted menus with the current roles and wording")
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        lines = await refresh_menus(self.bot)
+        await interaction.followup.send("\n".join(lines)[:2000], ephemeral=True)
 
 
 async def setup(bot: Pingwin) -> None:

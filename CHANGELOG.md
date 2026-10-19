@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (2026-10-19)
+- **Dashboard**: a settings page in your browser (`scripts\open_dashboard.cmd`), on each PC running Pingwin.
+  - Status and controls: which PC is answering, connection, version; reload, restart, check for updates.
+  - Role menu editor: add, remove, reorder roles; emoji, descriptions, gate role; live "ready / not pingable" checks.
+  - PCs & failover: order of PCs, status channel, timing.
+  - Recent log with a warnings filter.
+  - Only answers on 127.0.0.1, needs a sign-in key, and blocks requests from other websites.
+- Posted menus are remembered (`menus.json` in the settings folder) and can be updated in place:
+  `/rolemenu refresh` or "Update posted menus" on the dashboard.
+- Settings edits keep the comments in `config.toml` and are checked before they're saved.
+
 ## 0.2.0 (2026-10-18)
 - Shared settings folder (`PINGWIN_DATA`), meant for SyncThing: `config.toml`, `secrets.env`, `personas\`.
 - Failover: several PCs can run Pingwin; one answers, backups take over if it goes quiet.

@@ -99,6 +99,12 @@ class FailoverConfig:
 
 
 @dataclass(frozen=True)
+class DashboardConfig:
+    enabled: bool = True
+    port: int = 8787
+
+
+@dataclass(frozen=True)
 class Config:
     token: str
     guild_id: int | None
@@ -106,6 +112,7 @@ class Config:
     roles: RolesConfig
     failover: FailoverConfig
     update_check_minutes: int
+    dashboard: DashboardConfig = DashboardConfig()
 
 
 def _int(value: object, field: str, *, minimum: int | None = None) -> int:
@@ -165,6 +172,13 @@ def _parse_failover(raw: dict) -> FailoverConfig:
     )
 
 
+def _parse_dashboard(raw: dict) -> DashboardConfig:
+    port = _int(os.environ.get("PINGWIN_DASHBOARD_PORT") or raw.get("port", 8787), "dashboard.port", minimum=1024)
+    if port > 65535:
+        raise ConfigError(f"dashboard.port must be at most 65535, got {port}")
+    return DashboardConfig(enabled=bool(raw.get("enabled", True)), port=port)
+
+
 def load_config(path: Path | None = None, *, require_token: bool = True) -> Config:
     path = path or config_path()
     if not path.exists():
@@ -174,7 +188,11 @@ def load_config(path: Path | None = None, *, require_token: bool = True) -> Conf
             data = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path.name} has a typo: {e}") from e
+    return parse_config(data, require_token=require_token)
 
+
+def parse_config(data: dict, *, require_token: bool = True) -> Config:
+    """Build a Config from already-parsed TOML (also used to validate edits before saving)."""
     bot = data.get("bot", {})
     roles = data.get("roles", {})
 
@@ -195,5 +213,6 @@ def load_config(path: Path | None = None, *, require_token: bool = True) -> Conf
             menu=_parse_menu(roles.get("menu", [])),
         ),
         failover=_parse_failover(data.get("failover", {})),
+        dashboard=_parse_dashboard(data.get("dashboard", {})),
         update_check_minutes=_int(data.get("updates", {}).get("check_minutes", 30), "updates.check_minutes", minimum=0),
     )
