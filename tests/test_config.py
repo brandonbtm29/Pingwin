@@ -84,3 +84,41 @@ def test_pc_list(tmp_path):
         load_config(write(tmp_path, '[failover]\npcs = ["A", "a"]\n'), require_token=False)
     with pytest.raises(ConfigError, match="list of PC names"):
         load_config(write(tmp_path, '[failover]\npcs = "A"\n'), require_token=False)
+
+
+def test_backup_pc_waits_for_settings_to_sync(monkeypatch, tmp_path):
+    import logging
+
+    from pingwin import __main__ as entry
+    from pingwin.config import MissingSettings
+
+    monkeypatch.setenv("PINGWIN_DATA", str(tmp_path / "synced"))
+    calls = {"n": 0}
+
+    def fake_load():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise MissingSettings("not here yet")
+        return "config"
+
+    monkeypatch.setattr(entry, "load_config", fake_load)
+    monkeypatch.setattr(entry.time, "sleep", lambda s: None)
+    monkeypatch.setattr(entry, "_load_env", lambda: None)
+    assert entry._load_config_waiting(logging.getLogger("t")) == "config"
+    assert calls["n"] == 3
+
+
+def test_single_pc_does_not_wait(monkeypatch):
+    import logging
+
+    from pingwin import __main__ as entry
+    from pingwin.config import MissingSettings
+
+    monkeypatch.delenv("PINGWIN_DATA", raising=False)
+
+    def fake_load():
+        raise MissingSettings("missing")
+
+    monkeypatch.setattr(entry, "load_config", fake_load)
+    with pytest.raises(MissingSettings):
+        entry._load_config_waiting(logging.getLogger("t"))

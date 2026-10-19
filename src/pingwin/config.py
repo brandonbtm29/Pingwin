@@ -30,6 +30,10 @@ class ConfigError(Exception):
     """Raised when config.toml or a persona file is missing or invalid."""
 
 
+class MissingSettings(ConfigError):
+    """config.toml or the token isn't there (yet), e.g. still syncing to a new backup PC."""
+
+
 def data_dir() -> Path:
     """The shared settings folder (PINGWIN_DATA), or the project folder if unset."""
     raw = os.environ.get("PINGWIN_DATA", "").strip().strip('"')
@@ -182,7 +186,7 @@ def _parse_dashboard(raw: dict) -> DashboardConfig:
 def load_config(path: Path | None = None, *, require_token: bool = True) -> Config:
     path = path or config_path()
     if not path.exists():
-        raise ConfigError(f"No config file at {path}. Copy config.example.toml there as config.toml.")
+        raise MissingSettings(f"No config file at {path}. Copy config.example.toml there as config.toml.")
     try:
         with path.open("rb") as f:
             data = tomllib.load(f)
@@ -200,7 +204,7 @@ def parse_config(data: dict, *, require_token: bool = True) -> Config:
 
     token = os.environ.get("DISCORD_TOKEN", "").strip()
     if require_token and not token:
-        raise ConfigError(f"DISCORD_TOKEN is not set. Put it in {data_dir() / 'secrets.env'} (DISCORD_TOKEN=...).")
+        raise MissingSettings(f"DISCORD_TOKEN is not set. Put it in {data_dir() / 'secrets.env'} (DISCORD_TOKEN=...).")
 
     return Config(
         token=token,

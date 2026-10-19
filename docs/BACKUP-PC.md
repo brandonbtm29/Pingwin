@@ -10,6 +10,41 @@ friend's house.
 > **Trust first.** A backup PC holds your bot's token, and installs whatever is pushed to the GitHub
 > repo. Only use PCs belonging to people you trust.
 
+## The quick way (recommended)
+
+Two codes, and the installer does the rest. It needs SyncThing running on the main PC.
+
+**On the main PC:** open the dashboard → **PCs & failover** → **Add a backup PC** → **Create invite** →
+**Copy message**, and send the message to your friend. If your settings folder isn't in SyncThing yet,
+this adds it for you.
+
+**On the backup PC:** your friend follows the message:
+1. Open **PowerShell** (Windows key, type *PowerShell*).
+2. Paste the line from the message and press Enter. (Or download and double-click
+   [`Install-Pingwin-Backup.cmd`](../Install-Pingwin-Backup.cmd). If Windows says *Windows protected
+   your PC*, click **More info → Run anyway**.)
+3. Paste the invite code, and confirm the PC name.
+
+The installer then:
+- **Checks first:** shows whether Python, Git and SyncThing are already installed.
+- **Asks before installing:** installs only what's missing, with winget. Windows may ask permission for Git.
+- **Downloads and installs Pingwin**, and connects SyncThing to the main PC.
+- **Sets Pingwin (and SyncThing, if it set it up) to start with Windows.**
+- **Shows a reply code**, already copied, to send back.
+
+**Back on the main PC:** paste the reply code into **Add a backup PC** and click **Add PC**. This shares
+the settings folder with the backup and adds it to the end of the PC list. Within a minute or two, the
+settings arrive and the backup's Pingwin goes on standby.
+
+Then make sure failover is on with a status channel (steps 1 and 2 below), and [test it](#5-test-it).
+
+The codes only contain SyncThing device and folder IDs, which aren't secret. Nothing is shared until you
+add the reply code.
+
+---
+
+## Doing it by hand
+
 Every PC needs two things:
 - **The code**: from GitHub, so it updates itself.
 - **The shared settings folder**: synced between PCs (this guide uses [SyncThing](https://syncthing.net)).

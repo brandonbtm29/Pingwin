@@ -169,6 +169,32 @@
           </div>
         </details>
       </div>
+          <div class="panel" id="pair-panel">
+        <h2>Add a backup PC</h2>
+        <p class="hint">Connects another PC through SyncThing with two codes. Their installer checks what's already
+          installed and asks before installing anything.</p>
+        <ol class="pair-steps">
+          <li>
+            <strong>Create an invite</strong> and send the message to your friend.
+            <div class="row-actions"><button class="btn" id="pair-create">Create invite</button></div>
+            <div id="pair-invite" hidden>
+              <textarea id="pair-message" rows="13" readonly></textarea>
+              <div class="row-actions">
+                <button class="btn primary" id="pair-copy">Copy message</button>
+                <span class="hint" id="pair-notes"></span>
+              </div>
+            </div>
+          </li>
+          <li>
+            <strong>Paste the reply code</strong> their installer shows at the end.
+            <div class="row-actions">
+              <input id="pair-reply" placeholder="PINGWIN-REPLY-..." spellcheck="false" autocomplete="off">
+              <button class="btn" id="pair-accept">Add PC</button>
+            </div>
+          </li>
+        </ol>
+        <ul class="report" id="pair-report" hidden></ul>
+      </div>
     </section>
 
     <!-- LOGS -->

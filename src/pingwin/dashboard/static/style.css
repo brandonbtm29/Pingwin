@@ -189,6 +189,10 @@ li.is-done .step-title { color: var(--muted); font-weight: 500; }
 .step-actions { grid-row: 1 / span 2; grid-column: 3; display: flex; gap: .4rem; }
 @media (max-width: 560px) { .step-actions { grid-row: 3; grid-column: 2; margin-top: .3rem; } }
 
+ol.pair-steps { margin: .5rem 0 0; padding-left: 1.25rem; display: grid; gap: 1rem; }
+ol.pair-steps textarea { font: .82rem/1.45 var(--mono); margin-top: .5rem; }
+#pair-reply { font-family: var(--mono); }
+
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: grid; gap: .5rem; z-index: 10; max-width: min(26rem, calc(100vw - 2rem)); }
 .toast {
   background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);

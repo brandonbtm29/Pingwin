@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 (2026-10-19)
+- **Backup PC installer** (`scripts/install-backup.ps1`, `Install-Pingwin-Backup.cmd`): checks what's already
+  installed, asks before installing Python, Git or SyncThing with winget, downloads Pingwin, connects
+  SyncThing to the main PC, sets up startup, and shows a reply code.
+- **Add a backup PC** on the dashboard: create an invite message, then paste the reply code to share the
+  settings folder and add the PC to the list. Also available as `python -m pingwin.pairing`.
+- A backup PC now waits for its shared settings to arrive instead of stopping.
+
 ## 0.4.1 (2026-10-19)
 - Backup PC guide: a full walkthrough of the PCs & failover tab, with a screenshot and the channel permissions it needs.
 - Pingwin won't start twice on the same PC; the second window says so and stops.

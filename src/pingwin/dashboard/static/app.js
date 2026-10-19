@@ -365,6 +365,61 @@ $("pcs-save").addEventListener("click", async () => {
   }
 });
 
+// ---------- backup PC pairing ---------------------------------------------
+function friendMessage(code) {
+  const ps = "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/brandonbtm29/Pingwin/main/scripts/install-backup.ps1)))";
+  return [
+    "Hi! Here's how to set up your PC as a Pingwin backup (about 5 minutes):",
+    "",
+    "1. Press the Windows key, type PowerShell, and open it.",
+    "2. Paste this line and press Enter:",
+    "   " + ps,
+    "3. When it asks, paste this invite code:",
+    "   " + code,
+    "4. It shows what's already installed and asks before installing anything.",
+    "5. At the end it shows a reply code (already copied). Send that back to me.",
+  ].join("\n");
+}
+
+$("pair-create").addEventListener("click", async () => {
+  const btn = $("pair-create");
+  btn.disabled = true;
+  try {
+    const res = await api("/api/action", { action: "pair_invite" });
+    $("pair-message").value = friendMessage(res.code);
+    $("pair-notes").textContent = (res.lines || []).join(" ");
+    $("pair-invite").hidden = false;
+  } catch (e) { toast(e.message, true); }
+  finally { btn.disabled = false; }
+});
+
+$("pair-copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("pair-message").value);
+    toast("Copied. Paste it into a message to your friend.");
+  } catch {
+    $("pair-message").select();
+    toast("Select-all is done: press Ctrl+C to copy.");
+  }
+});
+
+$("pair-accept").addEventListener("click", async () => {
+  const code = $("pair-reply").value.trim();
+  if (!code) return toast("Paste the reply code first.", true);
+  const btn = $("pair-accept");
+  btn.disabled = true;
+  try {
+    const res = await api("/api/action", { action: "pair_accept", code });
+    const ul = $("pair-report");
+    ul.replaceChildren(...res.lines.map((l) => el("li", {}, l)));
+    ul.hidden = false;
+    $("pair-reply").value = "";
+    pcsDirty = false;
+    await loadState();
+  } catch (e) { toast(e.message, true); }
+  finally { btn.disabled = false; }
+});
+
 // ---------- actions --------------------------------------------------------
 const CONFIRM = {
   restart: "Restart Pingwin on this PC? It's back in about 30 seconds.",

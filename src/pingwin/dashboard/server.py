@@ -307,6 +307,7 @@ async def post_failover(request: web.Request) -> web.Response:
 # --------------------------------------------------------------------- actions
 async def post_action(request: web.Request) -> web.Response:
     from ..cogs.roles import MenuError, post_menu, refresh_menus, role_report
+    from ..pairing import PairingError
 
     bot = request.app[BOT]
     payload = await request.json()
@@ -345,7 +346,30 @@ async def post_action(request: web.Request) -> web.Response:
             return web.json_response({"message": f"Menu posted in #{channel.name}.", "url": message.jump_url})
         if action == "refresh_menus":
             return web.json_response({"lines": await refresh_menus(bot)})
+        if action == "pair_invite":
+            from ..pairing import Syncthing, create_invite
+
+            def make() -> tuple[str, list[str]]:
+                return create_invite(Syncthing.from_config(), data_dir())
+
+            code, notes = await asyncio.to_thread(make)
+            log.info("Created a backup PC invite code")
+            return web.json_response({"code": code, "lines": notes})
+        if action == "pair_accept":
+            from ..pairing import Syncthing, accept
+
+            code = str(payload.get("code", ""))
+
+            def run() -> list[str]:
+                return accept(Syncthing.from_config(), code, data_dir())
+
+            notes = await asyncio.to_thread(run)
+            bot.reload_settings()
+            log.info("Accepted a backup PC reply code")
+            return web.json_response({"lines": notes})
     except MenuError as e:
+        raise ApiError(str(e)) from e
+    except PairingError as e:
         raise ApiError(str(e)) from e
     raise ApiError(f"Unknown action {action!r}")
 

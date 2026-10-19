@@ -85,7 +85,8 @@ list takes over. When a PC higher in the list comes back, it takes the job back.
    ```
    To add another PC later, add its name to the end of the list. A PC that isn't listed still
    helps, but only when every listed PC is offline.
-3. Set up each backup PC, using the name it has in the list. **[Step-by-step: adding a backup PC](docs/BACKUP-PC.md)**
+3. Add each backup PC with **Add a backup PC** on the same tab: send your friend the invite message, and paste
+   back the reply code their installer shows. **[Adding a backup PC](docs/BACKUP-PC.md)**
 4. Share the SyncThing settings folder with that PC.
 
 A backup only helps with internet outages if it's on a **different network** (e.g. a friend's house).
