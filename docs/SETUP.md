@@ -33,7 +33,10 @@ the setup in Pingwin's dashboard.
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and sign in.
 2. Click **New Application**, name it (for example *Pingwin*), and accept the terms.
-3. Optional: on **General Information**, add an app icon and description. Members see these.
+3. Optional: on **General Information**, add an app icon (there's one in `assets/`) and a description.
+   Members see these. For **Privacy Policy URL** you can use
+   `https://github.com/brandonbtm29/Pingwin/blob/main/PRIVACY.md`, which describes what Pingwin stores.
+   Leave **Interactions Endpoint URL** blank: filling it in stops Pingwin's buttons and commands from working.
 4. Open the **Bot** tab:
    - Click **Reset Token**, then **Copy**. Keep it somewhere safe for step 3.
      **Treat the token like a password:** anyone who has it controls your bot.

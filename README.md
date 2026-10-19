@@ -121,5 +121,9 @@ Each feature lives in `src/pingwin/cogs/` as its own module. Anything that runs 
 - [ ] **Persona switching from Discord**
 - [ ] **AI personality** (much later)
 
+## Privacy
+Pingwin can't read messages and has no tracking. It keeps a small activity log (who opted into which
+role) on the PC that runs it. See the [privacy notice](PRIVACY.md).
+
 ## License
 MIT

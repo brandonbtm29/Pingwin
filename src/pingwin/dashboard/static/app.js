@@ -430,6 +430,7 @@ function renderAbout() {
   $("a-repo").href = state.repo;
   $("a-changes").href = `${state.repo}/blob/main/CHANGELOG.md`;
   $("a-issues").href = `${state.repo}/issues`;
+  $("a-privacy").href = `${state.repo}/blob/main/PRIVACY.md`;
   $("guide-link").href = `${state.repo}/blob/main/docs/SETUP.md`;
   $("a-invite").hidden = !state.invite;
   if (state.invite) $("a-invite").href = state.invite;
