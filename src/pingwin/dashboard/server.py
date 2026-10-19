@@ -25,9 +25,10 @@ from urllib.parse import urlparse
 import discord
 from aiohttp import web
 
-from .. import __version__, menus, updater
+from .. import REPO_URL, __version__, invite_url, menus, updater
 from ..config import PROJECT_ROOT, ConfigError, MenuRole, config_path, data_dir
 from ..configedit import save_failover, save_roles
+from .setup_check import checklist, gather_facts, summarize
 
 if TYPE_CHECKING:
     from ..bot import Pingwin
@@ -195,6 +196,8 @@ def build_state(bot: Pingwin) -> dict[str, Any]:
         "config_file": str(config_path()),
         "persona": cfg.persona,
         "update": getattr(bot, "update_status", None),
+        "repo": REPO_URL,
+        "invite": invite_url(bot.user.id) if bot.user else None,
         **_guild_info(guild),
         "config": {
             "roles": {
@@ -221,6 +224,12 @@ def build_state(bot: Pingwin) -> dict[str, Any]:
 
 async def get_state(request: web.Request) -> web.Response:
     return web.json_response(build_state(request.app[BOT]))
+
+
+async def get_setup(request: web.Request) -> web.Response:
+    bot = request.app[BOT]
+    facts = await gather_facts(bot, _guild(bot))
+    return web.json_response(summarize(checklist(facts)))
 
 
 async def get_logs(request: web.Request) -> web.Response:
@@ -351,6 +360,7 @@ def create_app(bot: Any, key: str) -> web.Application:
     app.router.add_get("/static/{name}", static)
     app.router.add_get("/api/state", get_state)
     app.router.add_get("/api/logs", get_logs)
+    app.router.add_get("/api/setup", get_setup)
     app.router.add_post("/api/roles", post_roles)
     app.router.add_post("/api/failover", post_failover)
     app.router.add_post("/api/action", post_action)

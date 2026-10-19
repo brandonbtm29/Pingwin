@@ -32,7 +32,23 @@ echo If you run Pingwin on more than one PC, make sure "%NODE%" is in the pcs li
 set TARGET=%DATA%
 if "%TARGET%"=="" set TARGET=%CD%
 if not exist "%TARGET%\config.toml" copy "config.example.toml" "%TARGET%\config.toml" >nul && echo Created %TARGET%\config.toml
-if not exist "%TARGET%\secrets.env" copy "secrets.env.example" "%TARGET%\secrets.env" >nul && echo Created %TARGET%\secrets.env ^(paste the bot token into it^)
+if exist "%TARGET%\secrets.env" goto :done
+echo.
+echo Paste your bot token (Discord Developer Portal, your app, Bot, Reset Token).
+echo Right-click pastes in this window. Leave blank to add it to secrets.env later.
+set /p TOKEN=Bot token: 
+echo.
+echo Optional: your server ID, so slash commands appear right away.
+echo (Discord: Settings, Advanced, turn on Developer Mode; then right-click your server, Copy Server ID.)
+set /p GUILD=Server ID: 
+copy "secrets.env.example" "%TARGET%\secrets.env" >nul
+if not "%TOKEN%"=="" (
+    >> "%TARGET%\secrets.env" echo DISCORD_TOKEN=%TOKEN%
+)
+if not "%GUILD%"=="" (
+    >> "%TARGET%\secrets.env" echo PINGWIN_GUILD_ID=%GUILD%
+)
+echo Created %TARGET%\secrets.env
 
 :done
 echo.

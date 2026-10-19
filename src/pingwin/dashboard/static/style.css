@@ -168,6 +168,27 @@ pre.log {
 .log .warn { color: var(--warn); }
 .log .err { color: var(--bad); }
 
+a.btn { text-decoration: none; display: inline-block; }
+a { color: var(--accent); }
+.about p { margin: 0 0 .9rem; max-width: 62ch; }
+.about .kv { margin-bottom: .5rem; }
+
+.progress { height: .4rem; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin-bottom: .75rem; }
+.progress div { height: 100%; width: 0; background: var(--ok); border-radius: 999px; transition: width .3s; }
+ol.checklist { list-style: none; margin: 0 0 .75rem; padding: 0; }
+ol.checklist li { display: grid; grid-template-columns: 1.75rem 1fr auto; gap: .2rem .6rem; align-items: start; padding: .65rem 0; border-top: 1px solid var(--border); }
+ol.checklist li:first-child { border-top: 0; }
+.mark { width: 1.4rem; height: 1.4rem; border-radius: 50%; display: grid; place-items: center; font-size: .8rem; font-weight: 700; border: 2px solid var(--border); color: var(--muted); margin-top: .1rem; }
+.mark.done { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.mark.warn { border-color: var(--warn); color: var(--warn); }
+.mark.todo { border-color: var(--accent); color: var(--accent); }
+.step-title { font-weight: 600; }
+.step-title .opt { font-weight: 400; color: var(--muted); font-size: .8rem; margin-left: .35rem; }
+.step-detail { grid-column: 2; color: var(--muted); font-size: .88rem; }
+li.is-done .step-title { color: var(--muted); font-weight: 500; }
+.step-actions { grid-row: 1 / span 2; grid-column: 3; display: flex; gap: .4rem; }
+@media (max-width: 560px) { .step-actions { grid-row: 3; grid-column: 2; margin-top: .3rem; } }
+
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: grid; gap: .5rem; z-index: 10; max-width: min(26rem, calc(100vw - 2rem)); }
 .toast {
   background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);

@@ -81,6 +81,7 @@ async function loadState() {
   if (!pcsDirty) pcsDraft = clone(state.config.failover);
   renderHeader();
   renderStatus();
+  renderAbout();
   renderRoles();
   renderPcs();
 }
@@ -401,20 +402,56 @@ async function loadLogs() {
 }
 $("l-level").addEventListener("change", loadLogs);
 
+// ---------- setup & about --------------------------------------------------
+const MARKS = { done: "✓", todo: "", warn: "!", optional: "" };
+
+async function loadSetup() {
+  let data;
+  try { data = await api("/api/setup"); } catch (e) { $("setup-progress").textContent = e.message; return; }
+  const { steps, required_done, required_total } = data;
+  $("setup-progress").textContent = required_done === required_total
+    ? "All set! 🎉"
+    : `${required_done} of ${required_total} steps done`;
+  $("setup-bar").style.width = `${Math.round((100 * required_done) / Math.max(1, required_total))}%`;
+  $("setup-list").replaceChildren(...steps.map((s) => el("li", { class: s.status === "done" ? "is-done" : "" },
+    el("span", { class: `mark ${s.status}`, "aria-label": s.status }, MARKS[s.status] ?? ""),
+    el("span", { class: "step-title" }, s.title, s.required ? null : el("span", { class: "opt" }, "optional")),
+    el("span", { class: "step-actions" },
+      s.link && s.status !== "done" ? el("a", { class: "btn", href: s.link, target: "_blank", rel: "noreferrer" }, s.link_label || "Open") : null,
+      s.tab && s.status !== "done" ? el("button", { class: "btn", onclick: () => switchTab(s.tab) }, "Go") : null),
+    el("span", { class: "step-detail" }, s.detail),
+  )));
+}
+
+function renderAbout() {
+  $("a-version").textContent = `v${state.version}`;
+  $("a-node").textContent = state.node;
+  $("a-folder").textContent = state.settings_folder;
+  $("a-repo").href = state.repo;
+  $("a-changes").href = `${state.repo}/blob/main/CHANGELOG.md`;
+  $("a-issues").href = `${state.repo}/issues`;
+  $("guide-link").href = `${state.repo}/blob/main/docs/SETUP.md`;
+  $("a-invite").hidden = !state.invite;
+  if (state.invite) $("a-invite").href = state.invite;
+}
+
 // ---------- tabs & refresh -------------------------------------------------
-let currentTab = "status";
+let currentTab = "setup";
 function switchTab(name) {
   currentTab = name;
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
   document.querySelectorAll(".tab").forEach((s) => { s.hidden = s.id !== `tab-${name}`; });
   if (name === "logs") loadLogs();
+  if (name === "setup") loadSetup();
   try { localStorage.setItem("pingwin-tab", name); } catch { /* ignore */ }
 }
 document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 
 window.addEventListener("beforeunload", (e) => { if (rolesDirty || pcsDirty) e.preventDefault(); });
 
-try { const saved = localStorage.getItem("pingwin-tab"); if (saved) switchTab(saved); } catch { /* ignore */ }
+let savedTab = null;
+try { savedTab = localStorage.getItem("pingwin-tab"); } catch { /* ignore */ }
+switchTab(savedTab && document.getElementById(`tab-${savedTab}`) ? savedTab : "setup");
 loadState();
-setInterval(loadState, 10000);
+setInterval(() => { loadState(); if (currentTab === "setup") loadSetup(); }, 10000);
 setInterval(() => { if (currentTab === "logs" && $("l-follow").checked) loadLogs(); }, 5000);

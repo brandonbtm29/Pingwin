@@ -20,15 +20,48 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="status" aria-selected="true">Status</button>
+    <button role="tab" data-tab="setup" aria-selected="true">Setup</button>
+    <button role="tab" data-tab="status">Status</button>
     <button role="tab" data-tab="roles">Role menu</button>
     <button role="tab" data-tab="pcs">PCs &amp; failover</button>
     <button role="tab" data-tab="logs">Logs</button>
   </nav>
 
   <main>
+    <!-- SETUP & ABOUT -->
+    <section id="tab-setup" class="tab">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Getting Pingwin going</h2>
+          <span class="hint" id="setup-progress"></span>
+        </div>
+        <div class="progress" aria-hidden="true"><div id="setup-bar"></div></div>
+        <ol class="checklist" id="setup-list"></ol>
+        <p class="hint">New here? The <a id="guide-link" target="_blank" rel="noreferrer">setup guide</a> walks through every step, including the Discord side.</p>
+      </div>
+
+      <div class="panel about">
+        <h2>About Pingwin</h2>
+        <p>Pingwin is a friendly, self-hosted Discord bot. Members tap buttons to choose which pings they get, so a
+          server doesn't need <code>@everyone</code> for every movie night and game day. It runs on your own PC, can keep
+          backup PCs on standby, and updates itself from GitHub.</p>
+        <dl class="kv">
+          <dt>Version</dt><dd id="a-version">–</dd>
+          <dt>Running on</dt><dd id="a-node">–</dd>
+          <dt>Settings folder</dt><dd id="a-folder" class="mono">–</dd>
+          <dt>License</dt><dd>MIT, free to use and change</dd>
+        </dl>
+        <div class="row-actions">
+          <a class="btn" id="a-repo" target="_blank" rel="noreferrer">GitHub</a>
+          <a class="btn" id="a-changes" target="_blank" rel="noreferrer">What's new</a>
+          <a class="btn" id="a-issues" target="_blank" rel="noreferrer">Report a problem</a>
+          <a class="btn" id="a-invite" target="_blank" rel="noreferrer" hidden>Invite to a server</a>
+        </div>
+      </div>
+    </section>
+
     <!-- STATUS -->
-    <section id="tab-status" class="tab">
+    <section id="tab-status" class="tab" hidden>
       <div class="banner" id="standby-banner" hidden></div>
       <div class="cards">
         <div class="card"><div class="label">This PC</div><div class="value" id="s-node">–</div><div class="hint" id="s-node-role"></div></div>

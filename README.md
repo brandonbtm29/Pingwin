@@ -12,6 +12,21 @@ streams, game days…), so the server can stop using `@everyone` for everything.
 - **Updates itself** from GitHub.
 - **Dashboard** in your browser for settings, status and logs.
 
+## Getting started
+
+**📘 New to Pingwin? Follow the [setup guide](docs/SETUP.md).** It covers everything from creating
+the bot in Discord to posting your first menu, plus troubleshooting.
+
+The short version, on a Windows PC that stays on:
+
+1. Create a bot in the [Discord Developer Portal](https://discord.com/developers/applications), copy its token, and
+   invite it with `https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=335629312`.
+2. Install [Python 3.11+](https://www.python.org/downloads/) and [Git](https://git-scm.com), then
+   `git clone https://github.com/brandonbtm29/Pingwin.git`.
+3. Double-click `scripts\setup.cmd` and paste your token when asked.
+4. Double-click `scripts\run_pingwin.cmd`, then `scripts\open_dashboard.cmd`, and follow the **Setup** tab's checklist.
+5. Optional: `scripts\install_autostart.cmd` starts Pingwin when you sign in.
+
 ## Commands
 
 | Command | Who | What |
@@ -30,8 +45,9 @@ Only members with the **Friend** role can use the menu (`required_role` in `conf
 ## Dashboard
 
 Double-click **`scripts\open_dashboard.cmd`** while Pingwin is running. It opens a page in your
-browser with four tabs:
+browser with five tabs:
 
+- **Setup:** a checklist of what's done and what's left, plus an About page with links and an invite link
 - **Status:** which PC is answering, Discord connection, version; reload, restart, check for updates
 - **Role menu:** add, remove and reorder roles, set emoji and descriptions, choose who can use the menu,
   see which roles are ready, create missing ones, and update or post menus
@@ -51,40 +67,6 @@ every PC. The page only answers on that PC (`127.0.0.1:8787`; change it under `[
 | **Project folder** `logs\`, `.dashboard-key` | Log, dashboard sign-in key | No |
 | **GitHub** | The code | Pulled by every PC |
 
-## First-time setup
-
-### 1. Create the bot in Discord (once)
-1. <https://discord.com/developers/applications> → **New Application** → `Pingwin`.
-2. **Bot** tab → **Reset Token** → copy it. Upload an avatar here too.
-3. Leave the three *Privileged Gateway Intents* **off**.
-4. **General Information** → copy the **Application ID**, then invite it (replace `APP_ID`):
-   ```
-   https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=335629312
-   ```
-   (Manage Roles, Change Nickname, View Channels, Send Messages, Embed Links, Read Message History.)
-
-Tip: under **Teams** in the Developer Portal you can make a team, add your co-manager, and move the app into it so you both manage it.
-
-### 2. Install on a PC
-1. Install [Python 3.12+](https://www.python.org/downloads/) (tick *Add to PATH*) and [Git](https://git-scm.com).
-2. `git clone` this repo (or copy the folder), then double-click **`scripts\setup.cmd`**.
-   It asks for the settings folder and this PC's name, and writes `.env`.
-3. Paste the token into `secrets.env` in the settings folder (only needed once; SyncThing copies it to the other PCs).
-4. In `config.toml`, set `guild_id` to your server ID (Discord Settings → Advanced → Developer Mode, right-click the server → Copy Server ID).
-
-### 3. Run
-Double-click **`scripts\run_pingwin.cmd`**. It pulls updates before each start, restarts Pingwin if it
-crashes, and Pingwin reconnects on its own after internet drops.
-
-Start it with Windows: Task Scheduler → *Create Basic Task* → **When I log on** → *Start a program* →
-`scripts\run_pingwin.cmd`, "Start in" = the `pingwin` folder.
-
-### 4. In Discord
-1. **Server Settings → Roles**: drag **Pingwin's role above** every ping role.
-2. On the dashboard's **Role menu** tab: *Create missing roles*, then *Post a new menu* in `#roles`
-   (or `/rolemenu setup` and `/rolemenu post channel:#roles` in Discord).
-3. `#roles` permissions: `@everyone` deny *View Channel*; `Friend` allow *View Channel*, deny *Send Messages*.
-
 ## Running on more than one PC (failover)
 
 Every PC connects to Discord, but only one answers at a time. The active PC checks in every 30 s by
@@ -101,7 +83,7 @@ list takes over. When a PC higher in the list comes back, it takes the job back.
    ```
    To add another PC later, add its name to the end of the list. A PC that isn't listed still
    helps, but only when every listed PC is offline.
-3. Set up each backup PC with step 2 above, using the name it has in the list.
+3. Set up each backup PC (see the [setup guide](docs/SETUP.md#a-backup-pc)), using the name it has in the list.
 4. Share the SyncThing settings folder with that PC.
 
 A backup only helps with internet outages if it's on a **different network** (e.g. a friend's house).

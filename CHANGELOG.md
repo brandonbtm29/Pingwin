@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 (2026-10-19)
+- **Setup guide** (`docs/SETUP.md`): step by step from creating the bot to posting the first menu, with troubleshooting.
+- **Setup tab** on the dashboard: a live checklist of what's done and what's left, with Go buttons, plus an About section
+  (version, links, invite link).
+- `setup.cmd` now asks for the bot token and server ID, so new installs need no file editing.
+- `scripts\install_autostart.cmd` / `remove_autostart.cmd`: start Pingwin when you sign in (no admin needed).
+
 ## 0.3.0 (2026-10-19)
 - **Dashboard**: a settings page in your browser (`scripts\open_dashboard.cmd`), on each PC running Pingwin.
   - Status and controls: which PC is answering, connection, version; reload, restart, check for updates.
