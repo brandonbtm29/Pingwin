@@ -44,3 +44,10 @@ def test_reads_syncthing_config(tmp_path):
 def test_missing_syncthing_is_explained(tmp_path):
     with pytest.raises(PairingError, match="Couldn't read"):
         Syncthing.from_config(tmp_path / "nope.xml")
+
+
+def test_pc_name_from_device_name():
+    from pingwin.pairing import pc_name_for_device
+
+    assert pc_name_for_device("Pingwin backup (FRIENDS-PC)") == "FRIENDS-PC"
+    assert pc_name_for_device("BTM-BMAX") == "BTM-BMAX"

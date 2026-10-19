@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from pingwin.config import load_config
-from pingwin.pairing import Syncthing, accept, create_invite, join
+from pingwin.pairing import Reply, Syncthing, accept, create_invite, forget, join, leave, shared_devices, unsync
 
 EXE = os.environ.get("PINGWIN_SYNCTHING_EXE")
 pytestmark = pytest.mark.skipif(not EXE, reason="set PINGWIN_SYNCTHING_EXE to run")
@@ -102,6 +102,33 @@ def test_invite_join_accept_syncs_settings(tmp_path, monkeypatch):
         # Running the steps again is harmless.
         create_invite(main_st, main_settings)
         accept(main_st, reply, main_settings, backup_addresses=[backup_addr])
+        backup_id = Reply.parse(reply).device_id
+        assert [d["pc"] for d in shared_devices(main_st, main_settings)] == ["TEST-BACKUP"]
+
+        # Uninstalling on the backup: it takes itself off the list, and that reaches the main PC...
+        monkeypatch.setenv("PINGWIN_DATA", str(backup_settings))
+        notes = leave(backup_st, backup_settings, "TEST-BACKUP")
+        assert "Took TEST-BACKUP off the PC list." in notes
+        monkeypatch.setenv("PINGWIN_DATA", str(main_settings))
+        for _ in range(60):
+            if "TEST-BACKUP" not in load_config(require_token=False).failover.pcs:
+                break
+            time.sleep(1)
+        else:
+            pytest.fail("the PC list change never reached the main PC")
+
+        # ...then it stops syncing. Deleting its copy must not touch the main PC's files.
+        unsync(backup_st, backup_settings)
+        assert backup_st.folder_for_path(backup_settings) is None
+        shutil.rmtree(backup_settings)
+        time.sleep(5)
+        assert (main_settings / "secrets.env").exists()
+
+        # The main PC cleans up its side.
+        forget_notes = forget(main_st, main_settings, backup_id)
+        assert any("Stopped sharing" in n for n in forget_notes)
+        assert shared_devices(main_st, main_settings) == []
+        assert main_st.device(backup_id) is None
     finally:
         for p in (proc_a, proc_b):
             stop(p)

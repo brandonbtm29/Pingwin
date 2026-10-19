@@ -403,6 +403,35 @@ $("pair-copy").addEventListener("click", async () => {
   }
 });
 
+async function loadShared() {
+  const box = $("pair-shared");
+  let res;
+  try { res = await api("/api/action", { action: "pair_shared" }); } catch { box.replaceChildren(); return; }
+  if (!res.devices.length) { box.replaceChildren(); return; }
+  box.replaceChildren(
+    el("h3", {}, "Sharing settings with"),
+    el("ul", { class: "shared-list" }, res.devices.map((d) => el("li", {},
+      el("span", { class: "name" }, d.pc || d.name || d.device_id.slice(0, 7)),
+      el("code", { class: "hint", title: d.device_id }, d.device_id.slice(0, 7)),
+      el("button", {
+        class: "btn danger",
+        onclick: async () => {
+          if (!window.confirm(`Stop sharing the settings with ${d.pc || "this PC"} and take it off the PC list?`)) return;
+          try {
+            const r = await api("/api/action", { action: "pair_forget", device_id: d.device_id });
+            const ul = $("pair-report");
+            ul.replaceChildren(...r.lines.map((l) => el("li", {}, l)));
+            ul.hidden = false;
+            pcsDirty = false;
+            await loadState();
+            await loadShared();
+          } catch (e) { toast(e.message, true); }
+        },
+      }, "Stop sharing"),
+    ))),
+  );
+}
+
 $("pair-accept").addEventListener("click", async () => {
   const code = $("pair-reply").value.trim();
   if (!code) return toast("Paste the reply code first.", true);
@@ -416,6 +445,7 @@ $("pair-accept").addEventListener("click", async () => {
     $("pair-reply").value = "";
     pcsDirty = false;
     await loadState();
+    await loadShared();
   } catch (e) { toast(e.message, true); }
   finally { btn.disabled = false; }
 });
@@ -499,6 +529,7 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((s) => { s.hidden = s.id !== `tab-${name}`; });
   if (name === "logs") loadLogs();
   if (name === "setup") loadSetup();
+  if (name === "pcs") loadShared();
   try { localStorage.setItem("pingwin-tab", name); } catch { /* ignore */ }
 }
 document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));

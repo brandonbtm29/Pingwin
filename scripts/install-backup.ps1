@@ -131,6 +131,7 @@ try {
     Say "  ------------------------" "White"
     Say "  This sets up this PC to keep Pingwin running when the main PC is offline."
     Say "  It only installs things after asking, and skips anything already here."
+    Say "  To remove it later, double-click Uninstall-Pingwin.cmd in the Pingwin folder."
 
     # Codes and names first, so nothing is changed before we know they're right.
     while (-not ($Invite -match "PINGWIN-INVITE-")) {
@@ -172,6 +173,7 @@ try {
         Say ("  Missing: " + ($missing -join ", "))
         if ($missing -contains "Git") { Say "  Windows may ask for permission while Git installs. Click Yes." "Yellow" }
         if (-not (Ask-YesNo "  Install them now with winget?")) { Stop-Setup "Install cancelled." }
+        $installedByUs = $missing
         if ($missing -contains "Python") { Install-WithWinget "Python.Python.3.12" "Python 3.12" @("--scope", "user") }
         if ($missing -contains "Git") { Install-WithWinget "Git.Git" "Git" }
         if ($missing -contains "SyncThing") { Install-WithWinget "Syncthing.Syncthing" "SyncThing" }
@@ -242,19 +244,36 @@ try {
     Step 5 "Settings and startup"
     Write-Text (Join-Path $InstallDir ".env") "# This PC's own Pingwin settings. Not synced, not committed.`r`nPINGWIN_DATA=$SettingsDir`r`nPINGWIN_NODE=$PcName`r`n"
     Ok "Saved this PC's settings (name: $PcName)."
+    $startupFiles = @()
     if ($NoAutostart) {
         Say "  Skipping Windows startup (-NoAutostart)."
     } else {
         $runCmd = Join-Path $InstallDir "scripts\run_pingwin.cmd"
         Write-Text (Join-Path $Startup "Pingwin.cmd") "@echo off`r`nrem Starts Pingwin (added by the Pingwin installer)`r`nstart `"Pingwin`" /min `"$runCmd`"`r`n"
+        $startupFiles += (Join-Path $Startup "Pingwin.cmd")
         Ok "Pingwin will start when you sign in."
         if ($ownSyncthing) {
             $stHome = Split-Path $stConfig
             $vbs = "CreateObject(""WScript.Shell"").Run """"""$syncthing"""" serve --home """"$stHome"""" --no-browser"", 0, False"
             Write-Text (Join-Path $Startup "Syncthing (Pingwin).vbs") $vbs
+            $startupFiles += (Join-Path $Startup "Syncthing (Pingwin).vbs")
             Ok "SyncThing will start in the background when you sign in."
         }
     }
+
+    # Remember what this installer changed, so Uninstall-Pingwin.cmd can undo exactly that.
+    $recordPath = Join-Path $InstallDir "install-record.json"
+    $previous = if (Test-Path $recordPath) { Get-Content $recordPath -Raw | ConvertFrom-Json } else { $null }
+    $record = [ordered]@{
+        installed      = @(@($previous.installed) + @($installedByUs) | Where-Object { $_ } | Select-Object -Unique)
+        syncthing_own  = ($ownSyncthing -or [bool]$previous.syncthing_own)
+        syncthing_home = (Split-Path $stConfig)
+        syncthing_exe  = $syncthing
+        settings_dir   = $SettingsDir
+        pc_name        = $PcName
+        startup        = @(@($previous.startup) + @($startupFiles) | Where-Object { $_ } | Select-Object -Unique)
+    }
+    Write-Text $recordPath ($record | ConvertTo-Json)
 
     # ------------------------------------------------------------ 6. reply code
     Step 6 "Almost done"

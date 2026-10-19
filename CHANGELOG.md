@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 (2026-10-19)
+- **Uninstaller** (`Uninstall-Pingwin.cmd`): stops Pingwin, removes startup items, takes the PC off the list,
+  stops syncing before offering to delete settings (so deletes can't spread), optionally removes SyncThing,
+  Python or Git if the installer added them, and deletes the Pingwin folder.
+- The backup installer records what it changed (`install-record.json`) so the uninstaller undoes exactly that.
+- Dashboard: **Stop sharing** with a backup PC, which also takes it off the PC list.
+- `python -m pingwin.pairing leave | unsync | shared | forget`.
+
 ## 0.5.0 (2026-10-19)
 - **Backup PC installer** (`scripts/install-backup.ps1`, `Install-Pingwin-Backup.cmd`): checks what's already
   installed, asks before installing Python, Git or SyncThing with winget, downloads Pingwin, connects

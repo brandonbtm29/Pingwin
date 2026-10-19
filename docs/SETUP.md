@@ -187,6 +187,21 @@ The dashboard link is written to `.dashboard-url` in the Pingwin folder when it 
 
 ## Uninstalling
 
-1. Run `scripts\remove_autostart.cmd` if you turned on autostart.
-2. Close the Pingwin window and delete the Pingwin folder (and your settings folder, if it's elsewhere).
-3. In Discord, kick the bot from your server, or delete the application in the Developer Portal.
+Double-click **`Uninstall-Pingwin.cmd`** in the Pingwin folder. It shows what it will do and asks first, then:
+
+1. Stops Pingwin and removes it from Windows startup.
+2. If the settings are shared with other PCs: takes this PC off the PC list, and stops syncing the
+   settings folder here. Your other PCs keep their settings and keep running.
+3. Asks whether to delete this PC's copy of the settings. It only offers this once syncing has stopped,
+   so the delete can't spread to your other PCs.
+4. If the backup installer set up SyncThing and nothing else uses it, asks whether to remove SyncThing too.
+   It also asks about Python or Git, if the installer installed them. The default is to keep them.
+5. Deletes the Pingwin folder.
+
+Afterwards:
+- **On the main PC**, if this was a backup: dashboard → **PCs & failover → Add a backup PC → Stop sharing**
+  next to that PC.
+- **If a PC won't be coming back:** reset the bot token in the Developer Portal and put the new one in
+  `secrets.env`, since that PC had a copy.
+- **To remove the bot from Discord entirely:** kick it from your server, or delete the application in the
+  Developer Portal.

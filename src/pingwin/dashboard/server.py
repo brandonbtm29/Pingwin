@@ -355,6 +355,25 @@ async def post_action(request: web.Request) -> web.Response:
             code, notes = await asyncio.to_thread(make)
             log.info("Created a backup PC invite code")
             return web.json_response({"code": code, "lines": notes})
+        if action == "pair_shared":
+            from ..pairing import Syncthing, shared_devices
+
+            def listing() -> list[dict[str, str]]:
+                return shared_devices(Syncthing.from_config(), data_dir())
+
+            return web.json_response({"devices": await asyncio.to_thread(listing)})
+        if action == "pair_forget":
+            from ..pairing import Syncthing, forget
+
+            device_id = str(payload.get("device_id", ""))
+
+            def run_forget() -> list[str]:
+                return forget(Syncthing.from_config(), data_dir(), device_id)
+
+            notes = await asyncio.to_thread(run_forget)
+            bot.reload_settings()
+            log.info("Stopped sharing settings with a backup PC")
+            return web.json_response({"lines": notes})
         if action == "pair_accept":
             from ..pairing import Syncthing, accept
 

@@ -253,6 +253,37 @@ class Syncthing:
     def folder_for_path(self, path: str | Path) -> dict[str, Any] | None:
         return next((f for f in self.folders() if _same_path(f.get("path", ""), path)), None)
 
+    def unshare_folder(self, folder_id: str, device_id: str) -> bool:
+        folder = self.folder(folder_id)
+        if folder is None:
+            return False
+        devices = folder.get("devices") or []
+        kept = [d for d in devices if d.get("deviceID") != device_id]
+        if len(kept) == len(devices):
+            return False
+        self._request("PATCH", f"/rest/config/folders/{folder_id}", {"devices": kept})
+        return True
+
+    def remove_folder(self, folder_id: str) -> None:
+        self._request("DELETE", f"/rest/config/folders/{folder_id}")
+
+    def remove_device(self, device_id: str) -> None:
+        self._request("DELETE", f"/rest/config/devices/{device_id}")
+
+    def device_in_any_folder(self, device_id: str) -> bool:
+        return any(any(d.get("deviceID") == device_id for d in f.get("devices") or []) for f in self.folders())
+
+    def connected(self, device_id: str) -> bool:
+        conns = self._request("GET", "/rest/system/connections").get("connections", {})
+        return bool(conns.get(device_id, {}).get("connected"))
+
+    def completion(self, folder_id: str, device_id: str) -> float:
+        data = self._request("GET", f"/rest/db/completion?folder={folder_id}&device={device_id}")
+        return float(data.get("completion", 0))
+
+    def rescan(self, folder_id: str) -> None:
+        self._request("POST", f"/rest/db/scan?folder={folder_id}")
+
 
 # ------------------------------------------------------------------ the three steps
 def create_invite(st: Syncthing, settings_folder: Path) -> tuple[str, list[str]]:
@@ -333,10 +364,125 @@ def accept(
     return notes
 
 
+# ------------------------------------------------------------------ removing a PC
+_BACKUP_NAME = re.compile(r"^Pingwin backup \((.+)\)$")
+
+
+def pc_name_for_device(device_name: str) -> str:
+    """Devices added by accept() are named "Pingwin backup (PC-NAME)"."""
+    m = _BACKUP_NAME.match(device_name or "")
+    return m.group(1) if m else device_name
+
+
+def remove_from_pc_list(pc_name: str) -> bool:
+    """Take a PC off the failover list in config.toml. Returns True if it was listed."""
+    from .config import load_config
+    from .configedit import save_failover
+
+    cfg = load_config(require_token=False).failover
+    kept = [p for p in cfg.pcs if p.casefold() != pc_name.casefold()]
+    if len(kept) == len(cfg.pcs):
+        return False
+    save_failover(
+        enabled=cfg.enabled,
+        status_channel_id=cfg.status_channel_id,
+        pcs=kept,
+        heartbeat_seconds=cfg.heartbeat_seconds,
+        takeover_after_seconds=cfg.takeover_after_seconds,
+    )
+    return True
+
+
+def shared_devices(st: Syncthing, settings_folder: Path) -> list[dict[str, str]]:
+    """Main PC: the other PCs the settings folder is shared with."""
+    folder = st.folder_for_path(settings_folder)
+    if folder is None:
+        return []
+    me = st.my_id()
+    out = []
+    for d in folder.get("devices") or []:
+        dev_id = d.get("deviceID")
+        if dev_id and dev_id != me:
+            name = (st.device(dev_id) or {}).get("name", "")
+            out.append({"device_id": dev_id, "name": name, "pc": pc_name_for_device(name)})
+    return out
+
+
+def forget(st: Syncthing, settings_folder: Path, device_id: str) -> list[str]:
+    """Main PC: stop sharing the settings folder with a PC and take it off the PC list."""
+    folder = st.folder_for_path(settings_folder)
+    if folder is None:
+        raise PairingError("Your settings folder isn't in SyncThing.")
+    dev = st.device(device_id) or {}
+    pc = pc_name_for_device(dev.get("name", "")) or device_id[:7]
+    notes = []
+    if st.unshare_folder(folder["id"], device_id):
+        notes.append(f"Stopped sharing the settings folder with {pc}.")
+    if dev.get("name", "").startswith("Pingwin") and not st.device_in_any_folder(device_id):
+        st.remove_device(device_id)
+        notes.append(f"Removed {pc} from SyncThing.")
+    try:
+        if remove_from_pc_list(pc):
+            notes.append(f"Took {pc} off the PC list.")
+    except Exception as e:  # settings problems shouldn't undo the unsharing
+        notes.append(f"Couldn't update the PC list ({e}). Remove {pc} on the dashboard.")
+    notes.append(
+        f"{pc} keeps its copy of the settings, including the bot token. If it won't be coming back, "
+        "reset the token in the Developer Portal."
+    )
+    return notes
+
+
+def leave(st: Syncthing, settings_folder: Path, pc_name: str, *, wait_seconds: int = 30) -> list[str]:
+    """This PC: take itself off the PC list, and wait for that change to reach another PC."""
+    import time
+
+    notes = []
+    if not remove_from_pc_list(pc_name):
+        return [f"{pc_name} wasn't in the PC list."]
+    notes.append(f"Took {pc_name} off the PC list.")
+    folder = st.folder_for_path(settings_folder)
+    if folder is None:
+        return notes
+    me = st.my_id()
+    others = [d["deviceID"] for d in folder.get("devices") or [] if d.get("deviceID") != me]
+    st.rescan(folder["id"])
+    deadline = time.monotonic() + wait_seconds
+    time.sleep(2)
+    while time.monotonic() < deadline:
+        for dev in others:
+            try:
+                if st.connected(dev) and st.completion(folder["id"], dev) >= 100:
+                    notes.append("The change reached the other PCs.")
+                    return notes
+            except (PairingError, KeyError):
+                pass
+        time.sleep(2)
+    notes.append("Couldn't confirm the other PCs got the change. The main PC's owner can remove it on the dashboard.")
+    return notes
+
+
+def unsync(st: Syncthing, settings_folder: Path) -> list[str]:
+    """This PC: stop syncing the settings folder, and forget devices only Pingwin added."""
+    folder = st.folder_for_path(settings_folder)
+    if folder is None:
+        return ["The settings folder wasn't being synced by SyncThing."]
+    me = st.my_id()
+    others = [d["deviceID"] for d in folder.get("devices") or [] if d.get("deviceID") != me]
+    st.remove_folder(folder["id"])
+    notes = ["SyncThing stopped syncing the settings folder on this PC (other PCs keep theirs)."]
+    for dev_id in others:
+        dev = st.device(dev_id) or {}
+        if dev.get("name", "").startswith("Pingwin") and not st.device_in_any_folder(dev_id):
+            st.remove_device(dev_id)
+            notes.append(f"Removed {dev.get('name')} from SyncThing.")
+    return notes
+
+
 # ------------------------------------------------------------------ command line
 def main(argv: list[str] | None = None) -> int:
     from .__main__ import _load_env
-    from .config import data_dir
+    from .config import ConfigError, data_dir
 
     parser = argparse.ArgumentParser(prog="python -m pingwin.pairing", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -348,6 +494,12 @@ def main(argv: list[str] | None = None) -> int:
     p_join.add_argument("--pc", required=True, help="this PC's name, as it should appear in the PC list")
     p_join.add_argument("--folder", required=True, help="where to keep the synced settings")
     sub.add_parser("check", help="check that SyncThing is reachable")
+    p_leave = sub.add_parser("leave", help="this PC: take it off the PC list")
+    p_leave.add_argument("--pc", required=True)
+    sub.add_parser("unsync", help="this PC: stop syncing the settings folder")
+    sub.add_parser("shared", help="main PC: list the PCs the settings folder is shared with")
+    p_forget = sub.add_parser("forget", help="main PC: stop sharing with a device ID")
+    p_forget.add_argument("device_id")
     args = parser.parse_args(argv)
 
     _load_env()
@@ -364,7 +516,16 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "join":
             code = join(st, args.code, Path(args.folder), args.pc)
             print(f"REPLY {code}")
-    except PairingError as e:
+        elif args.cmd == "leave":
+            print("\n".join(leave(st, data_dir(), args.pc)))
+        elif args.cmd == "unsync":
+            print("\n".join(unsync(st, data_dir())))
+        elif args.cmd == "shared":
+            for d in shared_devices(st, data_dir()):
+                print(f"{d['pc']}\t{d['device_id']}")
+        elif args.cmd == "forget":
+            print("\n".join(forget(st, data_dir(), args.device_id)))
+    except (PairingError, ConfigError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0

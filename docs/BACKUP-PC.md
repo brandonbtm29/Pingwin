@@ -23,7 +23,8 @@ this adds it for you.
 2. Paste the line from the message and press Enter. (Or download and double-click
    [`Install-Pingwin-Backup.cmd`](../Install-Pingwin-Backup.cmd). If Windows says *Windows protected
    your PC*, click **More info → Run anyway**.)
-3. Paste the invite code, and confirm the PC name.
+3. Paste the invite code. For the PC name, press Enter to use the computer's name, or type the name
+   you already put in the PC list.
 
 The installer then:
 - **Checks first:** shows whether Python, Git and SyncThing are already installed.
@@ -171,7 +172,10 @@ next to its own name and *on standby* in the summary.
 - **Updates reach every PC** automatically from GitHub.
 - **More PCs:** add more names to the list. Each one waits its turn.
 - **Removing a backup:**
-  - Take it off the list, stop sharing the folder with it, and run `scripts\remove_autostart.cmd` on it.
+  - On the backup: double-click **`Uninstall-Pingwin.cmd`** in its Pingwin folder. It takes the PC off the
+    list, stops syncing, and removes Pingwin (and SyncThing, if the installer added it), asking first.
+  - On the main PC: **PCs & failover → Add a backup PC → Stop sharing** next to that PC. This also works
+    when the backup PC is gone for good.
   - If that PC won't be coming back, **reset the bot token** in the Developer Portal and put the new one in `secrets.env`.
 
 ## Troubleshooting
