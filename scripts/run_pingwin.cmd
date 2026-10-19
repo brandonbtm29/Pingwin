@@ -13,6 +13,7 @@ call :update
 ".venv\Scripts\python.exe" -m pingwin
 set CODE=%ERRORLEVEL%
 if "%CODE%"=="2" goto settings_problem
+if "%CODE%"=="4" goto already_running
 if "%CODE%"=="3" (
     echo Restarting to install an update...
     timeout /t 2 /nobreak >nul
@@ -21,6 +22,12 @@ if "%CODE%"=="3" (
 echo Pingwin stopped ^(exit code %CODE%^). Restarting in 15 seconds...
 timeout /t 15 /nobreak >nul
 goto loop
+
+:already_running
+echo.
+echo Pingwin is already running on this PC in another window, so this one won't start.
+pause
+exit /b 4
 
 :settings_problem
 echo.

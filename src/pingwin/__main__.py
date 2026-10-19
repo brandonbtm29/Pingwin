@@ -12,6 +12,30 @@ from dotenv import load_dotenv
 from .config import PROJECT_ROOT, ConfigError, data_dir, load_config
 
 EXIT_CONFIG_ERROR = 2  # scripts/run_pingwin.cmd stops instead of restarting on this
+EXIT_ALREADY_RUNNING = 4
+LOCK_FILE = PROJECT_ROOT / ".pingwin.lock"
+
+
+def _single_instance():
+    """Hold a lock for as long as Pingwin runs, so it can't start twice on the same PC.
+
+    Returns the open lock file (keep a reference!), or None if another copy holds it.
+    """
+    handle = open(LOCK_FILE, "a+")  # noqa: SIM115 - must stay open while running
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
 
 
 def _load_env() -> None:
@@ -33,6 +57,11 @@ def main() -> int:
     _setup_logging()
     log = logging.getLogger("pingwin")
 
+    lock = _single_instance()
+    if lock is None:
+        log.error("Pingwin is already running on this PC (look for its other window). Not starting a second copy.")
+        return EXIT_ALREADY_RUNNING
+
     from .bot import Pingwin  # after logging, so import-time messages are captured
 
     try:
@@ -47,6 +76,8 @@ def main() -> int:
     except discord.LoginFailure:
         log.error("Discord rejected the token. Reset it in the Developer Portal and update secrets.env.")
         return EXIT_CONFIG_ERROR
+    finally:
+        lock.close()
     return bot.exit_code
 
 

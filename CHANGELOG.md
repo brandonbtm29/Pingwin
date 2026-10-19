@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 (2026-10-19)
+- Pingwin won't start twice on the same PC; the second window says so and stops.
+- Slash commands are only re-registered when they change, so quick restarts don't hit Discord's
+  rate limits (which made startup look stuck for up to a minute).
+
 ## 0.4.0 (2026-10-19)
 - Backup PC guide (`docs/BACKUP-PC.md`): both sides of the setup, testing, removing a PC, troubleshooting.
 - Privacy notice (`PRIVACY.md`), linked from the README, the setup guide and the dashboard.

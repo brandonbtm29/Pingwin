@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import random
 import time
@@ -28,6 +30,7 @@ EXTENSIONS = (
     "pingwin.cogs.roles",
 )
 
+SYNC_STATE = PROJECT_ROOT / ".synced-commands.json"  # per PC; remembers what Discord already has
 EXIT_RESTART = 3  # scripts/run_pingwin.cmd pulls updates and restarts right away
 
 # Discord errors meaning "another Pingwin already answered" or "too late to answer".
@@ -74,14 +77,7 @@ class Pingwin(commands.Bot):
         for ext in EXTENSIONS:
             await self.load_extension(ext)
 
-        if self.config.guild_id:
-            guild = discord.Object(id=self.config.guild_id)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            log.info("Synced %d slash command(s) to server %s", len(synced), self.config.guild_id)
-        else:
-            synced = await self.tree.sync()
-            log.info("Synced %d global slash command(s) (can take up to an hour to appear)", len(synced))
+        await self._sync_commands()
         failover = self.config.failover
         log.info("This PC is %r; settings from %s", self.node.name, config_path())
         if failover.active and failover.rank(self.node.name) > len(failover.pcs):
@@ -92,6 +88,41 @@ class Pingwin(commands.Bot):
             )
 
         await self.dashboard.start()
+
+    async def _sync_commands(self) -> None:
+        """Register slash commands with Discord, but only when they've changed.
+
+        Re-registering on every start can hit Discord's rate limits after a few quick
+        restarts, which makes startup look stuck for a while.
+        """
+        guild = discord.Object(id=self.config.guild_id) if self.config.guild_id else None
+        if guild:
+            self.tree.copy_global_to(guild=guild)
+        try:
+            payload = [c.to_dict(self.tree) for c in self.tree.get_commands(guild=guild)]
+            fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+        except Exception:  # never let the shortcut block a real sync
+            fingerprint = None
+        app_id = self.application_id or 0
+        key = f"{app_id}:{guild.id if guild else 'global'}"
+        try:
+            saved = json.loads(SYNC_STATE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            saved = {}
+        if fingerprint and saved.get(key) == fingerprint:
+            log.info("Slash commands are up to date")
+            return
+
+        log.info("Registering slash commands with Discord (this can take a moment)…")
+        synced = await self.tree.sync(guild=guild)
+        where = f"server {guild.id}" if guild else "all servers (can take up to an hour to appear)"
+        log.info("Registered %d slash command(s) for %s", len(synced), where)
+        if fingerprint:
+            saved[key] = fingerprint
+            try:
+                SYNC_STATE.write_text(json.dumps(saved, indent=2), encoding="utf-8")
+            except OSError:
+                pass
 
     async def close(self) -> None:
         await self.dashboard.stop()

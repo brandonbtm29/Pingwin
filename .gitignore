@@ -23,3 +23,5 @@ Thumbs.db
 /secrets.env
 /.dashboard-key
 /.dashboard-url
+/.pingwin.lock
+/.synced-commands.json
