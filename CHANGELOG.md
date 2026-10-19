@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.4.0 (2026-10-19)
+- Pingwin has an icon (`assets/`), used on the dashboard and README too.
 - **Setup guide** (`docs/SETUP.md`): step by step from creating the bot to posting the first menu, with troubleshooting.
 - **Setup tab** on the dashboard: a live checklist of what's done and what's left, with Go buttons, plus an About section
   (version, links, invite link).

@@ -52,7 +52,7 @@ h3 { font-size: .95rem; margin: 1.25rem 0 .25rem; }
   max-width: 980px; margin: 0 auto; padding: 1.25rem 1rem .75rem;
 }
 .brand { display: flex; align-items: center; gap: .75rem; }
-.logo { font-size: 2rem; }
+.logo { width: 44px; height: 44px; border-radius: 50%; }
 .sub { margin: 0; color: var(--muted); font-size: .9rem; }
 
 .pill {

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("pingwin.dashboard")
 
 STATIC = Path(__file__).with_name("static")
-STATIC_FILES = {"app.js": "text/javascript", "style.css": "text/css"}
+STATIC_FILES = {"app.js": "text/javascript", "style.css": "text/css", "icon.svg": "image/svg+xml"}
 KEY_FILE = PROJECT_ROOT / ".dashboard-key"
 URL_FILE = PROJECT_ROOT / ".dashboard-url"
 COOKIE = "pingwin_dashboard"

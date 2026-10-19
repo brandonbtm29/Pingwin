@@ -1,4 +1,6 @@
-# 🐧 Pingwin
+<img src="assets/pingwin-icon.svg" alt="Pingwin" width="120" align="right">
+
+# Pingwin
 
 [![CI](https://github.com/brandonbtm29/Pingwin/actions/workflows/ci.yml/badge.svg)](https://github.com/brandonbtm29/Pingwin/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
