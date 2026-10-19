@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pingwin"
+version = "0.2.0"
+description = "A friendly Discord bot for friends' servers: opt-in ping roles, with polls, game days and stream alerts on the way."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Brandon T. McReynolds" }]
+keywords = ["discord", "discord-bot", "reaction-roles", "self-hosted", "failover"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Communications :: Chat",
+]
+dependencies = [
+    "discord.py>=2.4,<3",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/brandonbtm29/Pingwin"
+Issues = "https://github.com/brandonbtm29/Pingwin/issues"
+Changelog = "https://github.com/brandonbtm29/Pingwin/blob/main/CHANGELOG.md"
+
+[project.scripts]
+pingwin = "pingwin.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pingwin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

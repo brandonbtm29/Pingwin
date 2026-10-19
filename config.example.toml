@@ -1,0 +1,94 @@
+# Pingwin settings, shared by every PC that runs Pingwin.
+# Lives in the shared settings folder (see PINGWIN_DATA in .env) as config.toml.
+# Edits are picked up automatically within a minute (or run /pingwin reload).
+# Run /rolemenu post again if you changed the menu.
+# Edit it on one PC at a time so SyncThing doesn't create conflict copies.
+
+[bot]
+# Which personality file in personas/ to use (without .toml).
+persona = "pingwin"
+# Your server ID (right-click the server icon -> Copy Server ID; needs Developer Mode on).
+# Makes slash commands show up instantly. 0 = register globally (slower).
+guild_id = 0
+
+[failover]
+# Lets backup PCs take over if the main PC goes offline.
+# 1. Make a mod-only channel (e.g. #pingwin-status) that Pingwin can see and post in.
+# 2. Put its ID here (right-click the channel -> Copy Channel ID) and set enabled = true.
+# 3. List the PCs that run Pingwin, most preferred first. The first one that's online answers.
+#    Names must match each PC's PINGWIN_NODE (normally its computer name).
+#    A PC that isn't listed can still help, but only when every listed PC is offline.
+enabled = false
+status_channel_id = 0
+pcs = ["MAIN-PC", "FRIENDS-PC"]
+# How often the active PC checks in, and how long backups wait before taking over.
+heartbeat_seconds = 30
+takeover_after_seconds = 120
+
+[updates]
+# How often to check GitHub for new code (minutes). 0 = never; use /pingwin restart instead.
+check_minutes = 30
+
+[roles]
+# Members must have this role before the menu works for them. "" turns the gate off.
+required_role = "Friend"
+menu_title = "Pick your pings"
+menu_description = "Tap a button to opt in. Tap it again to opt out. Only you see the reply."
+
+# One block per ping role (max 25). Pingwin matches roles by name.
+# emoji is optional: a normal emoji, or a custom one like "<:popcorn:123456789012345678>".
+[[roles.menu]]
+name = "Movie Night Maniac"
+emoji = "🍿"
+description = "Movie night polls and watch parties"
+
+[[roles.menu]]
+name = "Film Franchise Fanatic"
+emoji = "🎬"
+description = "Franchise marathon nights and polls"
+
+[[roles.menu]]
+name = "Stream Stan"
+emoji = "📺"
+description = "When a member goes live"
+
+[[roles.menu]]
+name = "Gamer"
+emoji = "🎮"
+description = "Game days and planning"
+
+# --- More ideas. Uncomment (remove the #) to add them. ---
+# [[roles.menu]]
+# name = "Dinner Party Devotee"
+# emoji = "🍽️"
+# description = "Themed virtual dinner parties"
+#
+# [[roles.menu]]
+# name = "Poll Pal"
+# emoji = "🗳️"
+# description = "Every #polls vote, not just movie polls"
+#
+# [[roles.menu]]
+# name = "Beanbag Buddy"
+# emoji = "🫘"
+# description = "Someone's hanging out in Beanbag Chairs, come chill"
+#
+# [[roles.menu]]
+# name = "Study Hall Scholar"
+# emoji = "📝"
+# description = "Study and focus sessions in Study Hall"
+#
+# [[roles.menu]]
+# name = "Birthday Brigade"
+# emoji = "🎂"
+# description = "Birthday shout-outs"
+#
+# [[roles.menu]]
+# name = "Auction Aficionado"
+# emoji = "🪙"
+# description = "New art and auctions"
+#
+# [[roles.menu]]
+# name = "Adventure Squad"
+# emoji = "🏞️"
+# description = "IRL outings and meetups"

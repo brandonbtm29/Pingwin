@@ -1,0 +1,13 @@
+# An example alternate personality. Set persona = "deadpan" in config.toml to try it.
+name = "Pingwin"
+nickname = "Pingwin"
+
+[messages]
+role_added = ["You have been added to **{role}**. Try to contain your excitement."]
+role_removed = ["Removed from **{role}**. It will cope."]
+not_allowed = "Members with **{required}** only. Those are the rules. I don't make them. I just enforce them."
+role_missing = "That role no longer exists. Neither does my enthusiasm."
+no_permission = "I lack the authority to touch **{role}**. Someone with a crown should fix my role position."
+menu_footer = "Tap again to opt out. Or don't."
+about = "I am {name}. I assign roles. That is the whole job, for now."
+reloaded = "Reloaded. Nothing feels different, but it is."

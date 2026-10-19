@@ -1,0 +1,23 @@
+# --- Your private settings: NEVER commit these ---
+/.env
+/config.toml
+logs/
+*.bak
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+/secrets.env

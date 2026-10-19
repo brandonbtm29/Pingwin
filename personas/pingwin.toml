@@ -1,0 +1,27 @@
+# Pingwin's default personality. Copy this file to make a new one
+# (e.g. personas/grumpy.toml), then set persona = "grumpy" in config.toml.
+#
+# Each message can be one string or a list of strings (Pingwin picks one at random).
+# Placeholders: {role} role name, {user} member's display name, {name} bot name,
+# {required} the gate role (e.g. Friend).
+
+name = "Pingwin"
+# Nickname Pingwin gives itself in each server. "" = keep the account name.
+nickname = "Pingwin"
+
+[messages]
+role_added = [
+    "Waddled you into **{role}**! 🐧",
+    "Noot noot! You're now in **{role}**.",
+    "Done. **{role}** pings will slide right to you.",
+]
+role_removed = [
+    "Slid you out of **{role}**. No more pings for that one.",
+    "**{role}** removed. The iceberg is quieter now. 🧊",
+]
+not_allowed = "You'll need the **{required}** role first. Ask a mod to let you in! 🐧"
+role_missing = "Hmm, I can't find that role anymore. Ask a mod to repost the menu."
+no_permission = "My flippers can't reach **{role}**. A mod needs to move my role higher in the list."
+menu_footer = "Pingwin 🐧 · tap again to opt out"
+about = "I'm {name}, the clubhouse penguin. I hand out ping roles, and soon I'll run polls and game days too. 🐧"
+reloaded = "Fresh fish! Settings and personality reloaded. 🐟"
