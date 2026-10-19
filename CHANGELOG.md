@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.4.1 (2026-10-19)
+- Backup PC guide: a full walkthrough of the PCs & failover tab, with a screenshot and the channel permissions it needs.
 - Pingwin won't start twice on the same PC; the second window says so and stops.
 - Slash commands are only re-registered when they change, so quick restarts don't hit Discord's
   rate limits (which made startup look stuck for up to a minute).

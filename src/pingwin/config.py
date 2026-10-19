@@ -159,7 +159,7 @@ def _parse_failover(raw: dict) -> FailoverConfig:
         )
     pcs = raw.get("pcs", [])
     if not isinstance(pcs, list) or not all(isinstance(p, str) and p.strip() for p in pcs):
-        raise ConfigError('failover.pcs must be a list of PC names, e.g. ["BTM-NOVA", "BACKUP-PC"]')
+        raise ConfigError('failover.pcs must be a list of PC names, e.g. ["MAIN-PC", "FRIENDS-PC"]')
     names = [p.strip() for p in pcs]
     if len({n.casefold() for n in names}) != len(names):
         raise ConfigError("failover.pcs lists the same PC twice")
