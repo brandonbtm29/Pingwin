@@ -113,7 +113,7 @@ class Pingwin(commands.Bot):
             log.info("Slash commands are up to date")
             return
 
-        log.info("Registering slash commands with Discord (this can take a moment)…")
+        log.info("Registering slash commands with Discord (this can take a moment)...")
         synced = await self.tree.sync(guild=guild)
         where = f"server {guild.id}" if guild else "all servers (can take up to an hour to appear)"
         log.info("Registered %d slash command(s) for %s", len(synced), where)
