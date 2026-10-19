@@ -23,6 +23,7 @@
     <button role="tab" data-tab="setup" aria-selected="true">Setup</button>
     <button role="tab" data-tab="status">Status</button>
     <button role="tab" data-tab="roles">Role menu</button>
+    <button role="tab" data-tab="features">Features</button>
     <button role="tab" data-tab="pcs">PCs &amp; failover</button>
     <button role="tab" data-tab="logs">Logs</button>
   </nav>
@@ -132,6 +133,17 @@
         </div>
         <ul class="report" id="r-report" hidden></ul>
         <div id="r-posted"></div>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="tab-features" class="tab" hidden>
+      <div class="banner" id="f-restart" hidden>A change needs Pingwin to restart (Discord intents changed).
+        <button class="btn" data-action="restart">Restart Pingwin</button></div>
+      <div id="f-sections"></div>
+      <div class="panel" id="f-watchlist" hidden>
+        <h2>Movie watchlists</h2>
+        <div id="f-watchlist-body"></div>
       </div>
     </section>
 

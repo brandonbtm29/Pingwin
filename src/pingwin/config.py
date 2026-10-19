@@ -19,6 +19,7 @@ import socket
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -117,6 +118,7 @@ class Config:
     failover: FailoverConfig
     update_check_minutes: int
     dashboard: DashboardConfig = DashboardConfig()
+    features: Any = None  # pingwin.features.Features
 
 
 def _int(value: object, field: str, *, minimum: int | None = None) -> int:
@@ -183,6 +185,12 @@ def _parse_dashboard(raw: dict) -> DashboardConfig:
     return DashboardConfig(enabled=bool(raw.get("enabled", True)), port=port)
 
 
+def _parse_features(data: dict):
+    from .features import parse_features  # imported here to avoid a circular import
+
+    return parse_features(data)
+
+
 def load_config(path: Path | None = None, *, require_token: bool = True) -> Config:
     path = path or config_path()
     if not path.exists():
@@ -218,5 +226,6 @@ def parse_config(data: dict, *, require_token: bool = True) -> Config:
         ),
         failover=_parse_failover(data.get("failover", {})),
         dashboard=_parse_dashboard(data.get("dashboard", {})),
+        features=_parse_features(data),
         update_check_minutes=_int(data.get("updates", {}).get("check_minutes", 30), "updates.check_minutes", minimum=0),
     )

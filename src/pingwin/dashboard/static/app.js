@@ -450,6 +450,133 @@ $("pair-accept").addEventListener("click", async () => {
   finally { btn.disabled = false; }
 });
 
+// ---------- features -------------------------------------------------------
+let featureData = null;
+const featureDrafts = {};
+const openSections = new Set();
+
+async function loadFeatures(force = false) {
+  if (featureData && !force && Object.values(featureDrafts).some((d) => d.dirty)) return;
+  try { featureData = await api("/api/features"); } catch (e) { toast(e.message, true); return; }
+  $("f-restart").hidden = !featureData.restart_needed;
+  renderFeatures();
+  loadWatchlist();
+}
+
+function channelOptions(current) {
+  const opts = [el("option", { value: "" }, "None")];
+  for (const c of state?.channels || []) opts.push(el("option", { value: c.id }, `#${c.name}${c.category ? "  ·  " + c.category : ""}`));
+  if (current && !(state?.channels || []).some((c) => c.id === current)) opts.push(el("option", { value: current }, `Channel ${current} (Pingwin can't post there)`));
+  return opts;
+}
+
+function roleOptions(current) {
+  const opts = [el("option", { value: "" }, "None")];
+  for (const r of (state?.roles || []).filter((r) => !r.managed)) opts.push(el("option", { value: r.name }, r.name));
+  if (current && !(state?.roles || []).some((r) => r.name.toLowerCase() === current.toLowerCase())) opts.push(el("option", { value: current }, `${current} (doesn't exist yet)`));
+  return opts;
+}
+
+function fieldInput(field, value, onChange) {
+  const t = field.type;
+  if (t === "toggle") {
+    return el("label", { class: "switch" }, el("input", { type: "checkbox", checked: !!value, onchange: (e) => onChange(e.target.checked) }), el("span", {}, field.label));
+  }
+  let input;
+  if (t === "channel") { input = el("select", { onchange: (e) => onChange(e.target.value) }, channelOptions(value)); input.value = value || ""; }
+  else if (t === "role") { input = el("select", { onchange: (e) => onChange(e.target.value) }, roleOptions(value)); input.value = value || ""; }
+  else if (t === "number") input = el("input", { type: "number", min: field.min, max: field.max, value: value ?? "", oninput: (e) => onChange(e.target.value) });
+  else if (t === "textarea") input = el("textarea", { rows: "3", oninput: (e) => onChange(e.target.value) }, value || "");
+  else if (t === "select") { input = el("select", { onchange: (e) => onChange(e.target.value) }, field.options.map(([v, l]) => el("option", { value: v }, l))); input.value = value; }
+  else if (t === "secret") input = el("input", { type: "password", autocomplete: "off", placeholder: value ? "Saved ✓ (type to replace)" : "Not set", oninput: (e) => onChange(e.target.value) });
+  else if (t === "rows") return rowsInput(field, value || [], onChange);
+  else input = el("input", { value: value ?? "", oninput: (e) => onChange(e.target.value) });
+  return el("label", {}, field.label, input);
+}
+
+function rowsInput(field, rows, onChange) {
+  const wrap = el("div", { class: "field" });
+  const draw = () => {
+    const body = rows.map((row, i) => el("tr", {},
+      field.columns.map((col) => {
+        const set = (v) => { row[col.key] = v; onChange(rows); };
+        let inp;
+        if (col.type === "role") { inp = el("select", { onchange: (e) => set(e.target.value) }, roleOptions(row[col.key])); inp.value = row[col.key] || ""; }
+        else if (col.type === "channel") { inp = el("select", { onchange: (e) => set(e.target.value) }, channelOptions(row[col.key])); inp.value = row[col.key] || ""; }
+        else inp = el("input", { value: row[col.key] || "", "aria-label": col.label, oninput: (e) => set(e.target.value) });
+        return el("td", {}, inp);
+      }),
+      el("td", {}, el("button", { class: "btn icon", "aria-label": "Remove", onclick: () => { rows.splice(i, 1); onChange(rows); draw(); } }, "✕")),
+    ));
+    wrap.replaceChildren(
+      el("div", { class: "label-text" }, el("strong", {}, field.label)),
+      el("div", { class: "table-wrap" }, el("table", { class: "rows-table" },
+        el("thead", {}, el("tr", {}, field.columns.map((c) => el("th", {}, c.label)), el("th", {}))),
+        el("tbody", {}, body))),
+      el("div", { class: "row-actions" }, el("button", { class: "btn", onclick: () => { rows.push(Object.fromEntries(field.columns.map((c) => [c.key, ""]))); onChange(rows); draw(); } }, "+ Add row")),
+      field.help ? el("span", { class: "hint" }, field.help) : null,
+    );
+  };
+  draw();
+  return wrap;
+}
+
+function renderFeatures() {
+  const box = $("f-sections");
+  box.replaceChildren(...featureData.sections.map((section) => {
+    const values = JSON.parse(JSON.stringify(featureData.values[section.key]));
+    const draft = featureDrafts[section.key] = { values, dirty: false };
+    const saveBtn = el("button", { class: "btn primary", disabled: true }, "Save");
+    const dirtyNote = el("span", { class: "dirty", hidden: true }, "Unsaved changes");
+    const mark = () => { draft.dirty = true; saveBtn.disabled = false; dirtyNote.hidden = false; };
+    const fields = section.fields.map((field) => {
+      const node = fieldInput(field, values[field.key], (v) => { values[field.key] = v; mark(); });
+      return el("div", { class: "field" }, node, field.help && field.type !== "rows" ? el("span", { class: "hint" }, field.help) : null);
+    });
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
+      try {
+        const res = await api("/api/features", { section: section.key, values });
+        draft.dirty = false;
+        toast(res.message);
+        await loadFeatures(true);
+      } catch (e) { saveBtn.disabled = false; toast(e.message, true); }
+    });
+    const enabled = "enabled" in values ? values.enabled : null;
+    const needs = section.needs ? el("div", { class: "needs" },
+      "Needs the ", el("strong", {}, section.key === "modlog" ? "Server Members and Message Content intents" : "Server Members intent"),
+      " turned on: Discord Developer Portal → your app → Bot → Privileged Gateway Intents. Restart Pingwin after saving.") : null;
+    const details = el("details", { class: "feature", open: openSections.has(section.key) },
+      el("summary", {}, el("h2", {}, section.title),
+        enabled === null ? null : el("span", { class: enabled ? "status-on" : "status-off" }, enabled ? "On" : "Off")),
+      el("div", { class: "feature-body" },
+        el("p", { class: "desc" }, section.description), needs, ...fields,
+        el("div", { class: "row-actions" }, saveBtn, dirtyNote)),
+    );
+    details.addEventListener("toggle", () => { details.open ? openSections.add(section.key) : openSections.delete(section.key); });
+    return details;
+  }));
+}
+
+async function loadWatchlist() {
+  let data;
+  try { data = await api("/api/watchlist"); } catch { return; }
+  const panel = $("f-watchlist");
+  panel.hidden = !data.series.length;
+  $("f-watchlist-body").replaceChildren(...data.series.map((s) => el("div", { class: "watch-series" },
+    el("h3", {}, s.name, s.open_poll ? el("span", { class: "tag live" }, " poll running") : null),
+    s.nominations.length ? el("ul", { class: "watch-list" }, s.nominations.map((n) => el("li", { class: n.watched ? "watched" : "" },
+      el("span", { class: "t" }, n.title),
+      el("button", { class: "btn", onclick: () => watchAction(s.key, n.id, "watched") }, n.watched ? "Unwatch" : "Watched"),
+      el("button", { class: "btn icon", "aria-label": "Remove", onclick: () => { if (window.confirm(`Remove ${n.title}?`)) watchAction(s.key, n.id, "remove"); } }, "✕"),
+    ))) : el("p", { class: "hint" }, "Nothing nominated yet. Members use /movienight nominate."),
+  )));
+}
+
+async function watchAction(series, id, action) {
+  try { await api("/api/watchlist", { series, id, action }); await loadWatchlist(); } catch (e) { toast(e.message, true); }
+}
+
 // ---------- actions --------------------------------------------------------
 const CONFIRM = {
   restart: "Restart Pingwin on this PC? It's back in about 30 seconds.",
@@ -530,11 +657,14 @@ function switchTab(name) {
   if (name === "logs") loadLogs();
   if (name === "setup") loadSetup();
   if (name === "pcs") loadShared();
+  if (name === "features") loadFeatures();
   try { localStorage.setItem("pingwin-tab", name); } catch { /* ignore */ }
 }
 document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 
-window.addEventListener("beforeunload", (e) => { if (rolesDirty || pcsDirty) e.preventDefault(); });
+window.addEventListener("beforeunload", (e) => {
+  if (rolesDirty || pcsDirty || Object.values(featureDrafts).some((d) => d.dirty)) e.preventDefault();
+});
 
 let savedTab = null;
 try { savedTab = localStorage.getItem("pingwin-tab"); } catch { /* ignore */ }

@@ -1,6 +1,6 @@
 # Privacy notice
 
-*Last updated: October 19, 2026*
+*Last updated: October 19, 2026 (version 0.7.0)*
 
 Pingwin is a self-hosted Discord bot. This notice explains what it sees, what it keeps, and where.
 
@@ -15,13 +15,25 @@ operators of that copy.
 
 ## What Pingwin sees
 
-Pingwin connects to Discord without any of Discord's "privileged intents". That means:
+With its default settings, Pingwin connects to Discord without any of Discord's "privileged intents". That means:
 
 - **It can't read message content.** It doesn't read, store or log anyone's messages.
 - **It doesn't download the member list** or see anyone's online status or activity.
 - **It does see:**
   - the server's name, channels and roles, which it needs to set up and hand out roles
   - the username and current roles of whoever clicks one of its buttons or uses one of its commands
+  - Discord Events in the server (name, description, time, who clicked *Interested*), if event reminders are on
+
+Two optional features change this, and only when the operator turns them on:
+
+- **Welcome and approval** and the **mod log** use the *Server Members* intent, so Pingwin is told when
+  someone joins or leaves and when their roles change.
+- The **mod log** can also use the *Message Content* intent, so it can show what an edited or deleted
+  message said. It posts that to a channel the operator chooses (meant to be mod-only) and doesn't keep its
+  own copy beyond Discord's usual short-lived memory of recent messages.
+
+**Stream alerts** check public Twitch and YouTube pages of the streamers the operator lists. They don't
+involve any Discord member's data.
 
 ## What Pingwin keeps
 
@@ -32,6 +44,11 @@ Everything stays on the operator's computers (and any backup PCs they set up):
 | **Activity log**: when someone opts into or out of a role (their Discord username and the role name), which admin ran a settings command, and errors | Troubleshooting | The log rotates automatically: once it reaches about 6 MB, the oldest lines are deleted |
 | **Menu locations**: the server, channel and message IDs of posted role menus | Updating menus in place | Until the menu is deleted |
 | **Settings**: role names, channel IDs and the names of the PCs running Pingwin | Running the bot | Until the operator changes them |
+| **Birthdays** (if on): your Discord user ID with the month and day you entered. Never the year | Posting the shout-out | Until you run `/birthday remove` or a mod removes it |
+| **Movie watchlists** (if on): each nominated title, who nominated it (user ID) and when, and running polls | Running movie night | Until the movie is removed |
+| **Game day sign-ups** (if on): the title, time, host and who answered In / Maybe / Can't (user IDs) | Reminders | About two days after the game |
+| **Welcome approvals** (if on): the new member's user ID and whether a mod approved or denied them | Keeping the buttons working | Until the operator deletes `state/approvals.json` |
+| **What's been announced** (events, streams): event and stream IDs | Not posting twice | Old entries are dropped automatically |
 
 The roles you pick are stored by **Discord**, as normal server roles. You can see them on your profile in that
 server, and you can remove one at any time by tapping its button again.
@@ -42,6 +59,8 @@ server, and you can remove one at any time by tapping its button again.
   [Discord's Privacy Policy](https://discord.com/privacy).
 - **GitHub:** if auto-update is on, Pingwin checks GitHub for new versions of its code. No user data is
   sent.
+- **Twitch and YouTube:** if stream alerts are on, Pingwin asks them whether the listed streamers are live.
+  No Discord user data is sent.
 - **Nobody else.** Pingwin's dashboard only answers on the operator's own computer.
 
 If an operator runs Pingwin on more than one PC, they may sync its settings between those PCs (for example
@@ -50,6 +69,7 @@ with SyncThing). That's under their control.
 ## Your choices
 
 - **Stop getting pings:** tap the role's button again in the menu.
+- **Remove your birthday:** `/birthday remove`. **Remove a nomination:** `/movienight remove`.
 - **Remove what's been logged about you:** ask the server's admins. They can delete Pingwin's log files at any time.
 - **Remove Pingwin entirely:** an admin can kick the bot from the server. That stops it from seeing anything there.
 

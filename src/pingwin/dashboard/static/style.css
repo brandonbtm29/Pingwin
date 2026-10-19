@@ -196,6 +196,28 @@ ul.shared-list { list-style: none; padding: 0; margin: .25rem 0 0; }
 ul.shared-list li { display: flex; align-items: center; gap: .6rem; padding: .4rem 0; border-top: 1px solid var(--border); }
 ul.shared-list .name { font-weight: 600; flex: 1; }
 
+details.feature { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+details.feature > summary { list-style: none; display: flex; align-items: center; gap: .75rem; padding: .9rem 1.1rem; cursor: pointer; margin: 0; color: var(--text); }
+details.feature > summary::-webkit-details-marker { display: none; }
+details.feature > summary h2 { margin: 0; flex: 1; }
+details.feature[open] > summary { border-bottom: 1px solid var(--border); }
+.feature-body { padding: 1rem 1.1rem; }
+.feature-body > p.desc { margin: 0 0 .9rem; color: var(--muted); max-width: 70ch; }
+.feature-body .field { margin-bottom: .85rem; }
+.feature-body .field > .hint { display: block; margin-top: .2rem; }
+.rows-table { width: 100%; border-collapse: collapse; }
+.rows-table th { text-align: left; font-size: .78rem; color: var(--muted); font-weight: 500; padding: .25rem; }
+.rows-table td { padding: .25rem; border-top: 1px solid var(--border); }
+.status-on { color: var(--ok); font-size: .85rem; }
+.status-off { color: var(--muted); font-size: .85rem; }
+.needs { border-left: 3px solid var(--warn); padding: .5rem .75rem; background: color-mix(in srgb, var(--warn) 10%, var(--surface)); border-radius: 6px; margin-bottom: .9rem; font-size: .9rem; }
+.watch-series h3 { margin-top: .5rem; }
+.watch-list { list-style: none; padding: 0; margin: 0; }
+.watch-list li { display: flex; gap: .5rem; align-items: center; padding: .35rem 0; border-top: 1px solid var(--border); }
+.watch-list li .t { flex: 1; }
+.watch-list li.watched .t { color: var(--muted); text-decoration: line-through; }
+#f-sections { display: grid; gap: .75rem; }
+
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: grid; gap: .5rem; z-index: 10; max-width: min(26rem, calc(100vw - 2rem)); }
 .toast {
   background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);

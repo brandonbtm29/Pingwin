@@ -44,15 +44,35 @@ The short version, on a Windows PC that stays on:
 
 Only members with the **Friend** role can use the menu (`required_role` in `config.toml`).
 
+## Features
+
+Seven optional features, all off until you switch them on in the dashboard's **Features** tab.
+**[How to set them up](docs/FEATURES.md)**
+
+| Feature | Commands | What it does |
+|---|---|---|
+| Event reminders | (automatic) | Pings the roles whose keywords match a new Discord Event, reminds before it starts |
+| Birthdays | `/birthday set · remove · upcoming` | A shout-out on the day; optional birthday role |
+| Movie night | `/movienight nominate · list · poll · endpoll · watched · remove` | A watchlist per series, turned into a Discord poll that announces the winner |
+| Game day sign-ups | `/gameday create · cancel` | "Who's in?" buttons and a reminder to everyone who's in |
+| Stream alerts | (automatic) | Posts once when a streamer goes live on Twitch or YouTube |
+| Welcome and approval | (buttons) | Welcomes new members; mods click Approve to give them Friend |
+| Mod log | (automatic) | Joins, leaves, bans, role changes, edited and deleted messages, in a private channel |
+
+Admins decide how movie night works: who can nominate, who can start polls, how the poll's movies are
+picked, how long it runs, and what happens on a tie. Welcome and the mod log need privileged intents
+([details](docs/FEATURES.md#turning-on-intents)).
+
 ## Dashboard
 
 Double-click **`scripts\open_dashboard.cmd`** while Pingwin is running. It opens a page in your
-browser with five tabs:
+browser with six tabs:
 
 - **Setup:** a checklist of what's done and what's left, plus an About page with links and an invite link
 - **Status:** which PC is answering, Discord connection, version; reload, restart, check for updates
 - **Role menu:** add, remove and reorder roles, set emoji and descriptions, choose who can use the menu,
   see which roles are ready, create missing ones, and update or post menus
+- **Features:** switch on and set up the optional features, and manage movie watchlists
 - **PCs & failover:** turn failover on, pick the status channel, order the PCs
 - **Logs:** this PC's recent log, live
 
@@ -115,16 +135,15 @@ Each feature lives in `src/pingwin/cogs/` as its own module. Anything that runs 
 (reminders, polls) must check `bot.is_active` so standby PCs stay quiet.
 
 ## Roadmap
-- [ ] **Polls**: movie-night polls that ping the right role, close on a deadline, announce the winner
-- [ ] **Event reminders**: "starting in 1 hour" pings to the event's role
-- [ ] **Game day sign-ups**: "who's in?" with a reminder to everyone who joined
-- [ ] **Stream alerts**: ping the stream role when a member goes live
+- [x] Movie-night polls, event reminders, game day sign-ups, stream alerts (0.7.0)
+- [x] Birthdays, welcome and approval, mod log (0.7.0)
 - [ ] **Persona switching from Discord**
 - [ ] **AI personality** (much later)
 
 ## Privacy
-Pingwin can't read messages and has no tracking. It keeps a small activity log (who opted into which
-role) on the PC that runs it. See the [privacy notice](PRIVACY.md).
+With the default features, Pingwin can't read messages and has no tracking. It keeps a small activity log
+(who opted into which role) on the PC that runs it. The mod log, if you turn it on, can read messages so it
+can record edits and deletes. See the [privacy notice](PRIVACY.md).
 
 ## License
 MIT

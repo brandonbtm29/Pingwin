@@ -98,3 +98,7 @@ description = "Game days and planning"
 # name = "Adventure Squad"
 # emoji = "🏞️"
 # description = "IRL outings and meetups"
+
+# Optional features (event reminders, birthdays, movie night, game day, stream alerts,
+# welcome and approval, mod log) each get their own section, like [events] or [movienight].
+# The easiest way to set them up is the dashboard's Features tab. See docs/FEATURES.md.

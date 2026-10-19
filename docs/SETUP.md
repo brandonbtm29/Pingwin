@@ -40,7 +40,8 @@ the setup in Pingwin's dashboard.
 4. Open the **Bot** tab:
    - Click **Reset Token**, then **Copy**. Keep it somewhere safe for step 3.
      **Treat the token like a password:** anyone who has it controls your bot.
-   - Leave all three **Privileged Gateway Intents** turned **off**. Pingwin doesn't need them.
+   - Leave all three **Privileged Gateway Intents** turned **off** for now. The ping menu doesn't need them.
+     (Welcome and approval and the mod log do; see [Features](FEATURES.md#turning-on-intents).)
 5. Open **General Information** again and copy the **Application ID**.
 6. Invite the bot to your server. Paste this link into your browser, replacing `APP_ID` with the
    Application ID:

@@ -80,3 +80,69 @@ def save_failover(
         f["takeover_after_seconds"] = takeover_after_seconds
 
     return edit_config(change, path)
+
+
+def save_section(key: str, values: dict, path: Path | None = None) -> Config:
+    """Save one Features-tab section. Secrets go to secrets.env; everything else to config.toml."""
+    from .features import SECTION_BY_KEY, to_toml_value
+
+    section = SECTION_BY_KEY.get(key)
+    if section is None:
+        raise ConfigError(f"Unknown settings section {key!r}")
+    secrets = {}
+
+    def change(doc: TOMLDocument) -> None:
+        table = _table(doc, key)
+        for field in section["fields"]:
+            if field["key"] not in values:
+                continue
+            value = values[field["key"]]
+            if field["type"] == "secret":
+                if value not in (None, True, False):  # True/False just mean "set"/"not set"
+                    secrets[field["key"]] = str(value).strip()
+                continue
+            toml_value = to_toml_value(field, value)
+            if field["type"] == "rows":
+                aot = tomlkit.aot()
+                for row in toml_value:
+                    t = tomlkit.table()
+                    for k, v in row.items():
+                        t[k] = v
+                    aot.append(t)
+                table[field["key"]] = aot
+            else:
+                table[field["key"]] = toml_value
+
+    config = edit_config(change, path)
+    if secrets:
+        save_secrets(secrets)
+    return config
+
+
+def save_secrets(values: dict[str, str]) -> None:
+    """Set (or clear, with "") lines in secrets.env, keeping everything else."""
+    import os
+
+    from .config import data_dir
+
+    path = data_dir() / "secrets.env"
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    remaining = dict(values)
+    out = []
+    for line in lines:
+        name = line.split("=", 1)[0].strip()
+        if name in remaining:
+            if remaining[name]:
+                out.append(f"{name}={remaining[name]}")
+            remaining.pop(name)
+        else:
+            out.append(line)
+    out += [f"{k}={v}" for k, v in remaining.items() if v]
+    tmp = path.with_name(path.name + ".pingwin-tmp")
+    tmp.write_text("\n".join(out) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    for k, v in values.items():
+        if v:
+            os.environ[k] = v
+        else:
+            os.environ.pop(k, None)

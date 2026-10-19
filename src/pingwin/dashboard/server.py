@@ -226,6 +226,79 @@ async def get_state(request: web.Request) -> web.Response:
     return web.json_response(build_state(request.app[BOT]))
 
 
+async def get_features(request: web.Request) -> web.Response:
+    from ..features import SECTIONS
+
+    bot = request.app[BOT]
+    f = bot.config.features
+    return web.json_response(
+        {
+            "sections": SECTIONS,
+            "values": f.as_json(),
+            "intents": {"members": f.needs_members, "message_content": f.needs_message_content},
+            "restart_needed": getattr(bot, "restart_needed", False),
+        }
+    )
+
+
+async def post_features(request: web.Request) -> web.Response:
+    from ..configedit import save_section
+
+    bot = request.app[BOT]
+    payload = await request.json()
+    key, values = payload.get("section"), payload.get("values")
+    if not isinstance(key, str) or not isinstance(values, dict):
+        raise ApiError("section and values are required")
+    save_section(key, values)
+    bot.reload_settings()
+    log.info("Saved %s settings from the dashboard", key)
+    restart = getattr(bot, "restart_needed", False)
+    msg = "Saved." + (" Restart Pingwin to apply the Discord intent change." if restart else "")
+    return web.json_response({"ok": True, "message": msg, "restart_needed": restart})
+
+
+async def get_watchlist(request: web.Request) -> web.Response:
+    from .. import store
+    from ..features import slug
+
+    bot = request.app[BOT]
+    state = store.load("movienight")
+    series = []
+    for s in bot.config.features.movienight.series:
+        if not s.name:
+            continue
+        data = state.get(slug(s.name), {})
+        series.append(
+            {
+                "name": s.name,
+                "key": slug(s.name),
+                "nominations": data.get("nominations", []),
+                "open_poll": any(p.get("status") == "open" for p in data.get("polls", [])),
+            }
+        )
+    return web.json_response({"series": series})
+
+
+async def post_watchlist(request: web.Request) -> web.Response:
+    from .. import store
+
+    payload = await request.json()
+    key, nom_id, action = payload.get("series"), payload.get("id"), payload.get("action")
+    state = store.load("movienight")
+    noms = state.get(key, {}).get("nominations", [])
+    n = next((x for x in noms if x.get("id") == nom_id), None)
+    if n is None:
+        raise ApiError("That movie isn't on the list anymore.", 404)
+    if action == "remove":
+        noms.remove(n)
+    elif action == "watched":
+        n["watched"] = None if n.get("watched") else discord.utils.utcnow().isoformat()
+    else:
+        raise ApiError("Unknown action")
+    store.save("movienight", state)
+    return web.json_response({"ok": True})
+
+
 async def get_setup(request: web.Request) -> web.Response:
     bot = request.app[BOT]
     facts = await gather_facts(bot, _guild(bot))
@@ -404,6 +477,10 @@ def create_app(bot: Any, key: str) -> web.Application:
     app.router.add_get("/api/state", get_state)
     app.router.add_get("/api/logs", get_logs)
     app.router.add_get("/api/setup", get_setup)
+    app.router.add_get("/api/features", get_features)
+    app.router.add_post("/api/features", post_features)
+    app.router.add_get("/api/watchlist", get_watchlist)
+    app.router.add_post("/api/watchlist", post_watchlist)
     app.router.add_post("/api/roles", post_roles)
     app.router.add_post("/api/failover", post_failover)
     app.router.add_post("/api/action", post_action)

@@ -28,6 +28,13 @@ log = logging.getLogger("pingwin")
 EXTENSIONS = (
     "pingwin.cogs.core",
     "pingwin.cogs.roles",
+    "pingwin.cogs.events",
+    "pingwin.cogs.birthdays",
+    "pingwin.cogs.movienight",
+    "pingwin.cogs.gameday",
+    "pingwin.cogs.streams",
+    "pingwin.cogs.welcome",
+    "pingwin.cogs.modlog",
 )
 
 SYNC_STATE = PROJECT_ROOT / ".synced-commands.json"  # per PC; remembers what Discord already has
@@ -45,10 +52,13 @@ class PingwinTree(app_commands.CommandTree):
 
 class Pingwin(commands.Bot):
     def __init__(self, config: Config) -> None:
-        # Default intents are enough: no message content or member list needed.
+        intents = discord.Intents.default()
+        # Privileged intents only when a feature needs them (they must also be on in the Developer Portal).
+        intents.members = config.features.needs_members
+        intents.message_content = config.features.needs_message_content
         super().__init__(
             command_prefix=commands.when_mentioned,
-            intents=discord.Intents.default(),
+            intents=intents,
             help_command=None,
             tree_cls=PingwinTree,
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True),
@@ -61,6 +71,7 @@ class Pingwin(commands.Bot):
         self.started_at: datetime = discord.utils.utcnow()
         self.exit_code = 0
         self.update_status: dict | None = None  # last update check, shown on the dashboard
+        self.restart_needed = False
         self.dashboard = Dashboard(self)
         self._watched: dict[Path, float] = {}
         self._housekeeping_task: asyncio.Task | None = None
@@ -202,6 +213,13 @@ class Pingwin(commands.Bot):
         """Reload config.toml and the persona. Raises ConfigError on bad files."""
         config = load_config(require_token=False)
         persona = load_persona(config.persona)
+        old = self.config.features
+        if (old.needs_members, old.needs_message_content) != (
+            config.features.needs_members,
+            config.features.needs_message_content,
+        ):
+            log.warning("A feature change needs different Discord intents; restart Pingwin to apply it")
+            self.restart_needed = True
         self.config = replace(config, token=self.config.token)
         self.persona = persona
         self._remember_settings_files()
@@ -209,6 +227,35 @@ class Pingwin(commands.Bot):
             asyncio.get_running_loop().create_task(self.apply_nickname())
 
     # ----- helpers -------------------------------------------------------
+    @property
+    def home_guild(self) -> discord.Guild | None:
+        """The server Pingwin looks after (guild_id, or the only server it's in)."""
+        if self.config.guild_id and (g := self.get_guild(self.config.guild_id)):
+            return g
+        return self.guilds[0] if self.guilds else None
+
+    @property
+    def features(self):
+        return self.config.features
+
+    def role_named(self, guild: discord.Guild | None, name: str | None) -> discord.Role | None:
+        if not guild or not name:
+            return None
+        key = name.casefold()
+        return next((r for r in guild.roles if r.name.casefold() == key), None)
+
+    def text_channel(self, channel_id: int | None) -> discord.TextChannel | None:
+        ch = self.get_channel(channel_id) if channel_id else None
+        return ch if isinstance(ch, discord.TextChannel) else None
+
+    def is_mod(self, member: discord.abc.User, mod_role: str | None = None) -> bool:
+        if not isinstance(member, discord.Member):
+            return False
+        if mod_role and any(r.name.casefold() == mod_role.casefold() for r in member.roles):
+            return True
+        perms = member.guild_permissions
+        return perms.manage_roles or perms.manage_guild or perms.administrator
+
     async def apply_nickname(self, guild: discord.Guild | None = None) -> None:
         nick = self.persona.nickname
         if not nick:

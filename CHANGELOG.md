@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0 (2026-10-19)
+Seven optional features, all off by default. Set them up on the dashboard's new **Features** tab, or see
+[docs/FEATURES.md](docs/FEATURES.md).
+- **Event reminders:** pings roles whose keywords match a new Discord Event, reminds before it starts, and
+  posts when it starts.
+- **Birthdays:** `/birthday set | remove | upcoming` (and `set_for` / `remove_for` for mods), a daily
+  shout-out at the hour you choose, and an optional role for the day.
+- **Movie night:** a watchlist per series, `/movienight nominate | list | poll | endpoll | watched | remove`,
+  native Discord polls that ping the series' role and announce the winner. Admins choose who can nominate
+  and start polls, how options are picked (hand-picked, oldest or random), poll length, single or multiple
+  votes, and tie handling.
+- **Game day sign-ups:** `/gameday create | cancel`, with I'm in / Maybe / Can't buttons and reminders.
+- **Stream alerts:** Twitch and YouTube, one post per stream.
+- **Welcome and approval:** a welcome message plus Approve / Deny buttons for mods; Approve gives the member role.
+- **Mod log:** joins, leaves, kicks, bans, role changes, and edited or deleted messages.
+- Pingwin explains which privileged intent to turn on if a feature needs one, and the dashboard says when
+  a restart is needed.
+- Feature data (birthdays, watchlists, sign-ups) is kept in the shared settings folder under `state/`, so
+  backup PCs pick up where the main PC left off.
+
 ## 0.6.0 (2026-10-19)
 - **Uninstaller** (`Uninstall-Pingwin.cmd`): stops Pingwin, removes startup items, takes the PC off the list,
   stops syncing before offering to delete settings (so deletes can't spread), optionally removes SyncThing,
