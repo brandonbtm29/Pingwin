@@ -1,6 +1,6 @@
 """Pingwin: a friendly Discord bot for friends' servers."""
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 REPO_URL = "https://github.com/brandonbtm29/Pingwin"
 # Manage Roles, Change Nickname, View Channels, Send Messages, Embed Links, Read Message History
 INVITE_PERMISSIONS = 335629312

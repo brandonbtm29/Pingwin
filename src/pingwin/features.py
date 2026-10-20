@@ -40,7 +40,7 @@ SECTIONS: list[dict[str, Any]] = [
                 "text",
                 "Time zone",
                 "America/New_York",
-                "Used for birthdays and game day times. A name like America/New_York or Europe/London.",
+                "For members who haven't picked their own with /timezone set. A name like America/New_York.",
             ),
         ],
     },
@@ -77,7 +77,7 @@ SECTIONS: list[dict[str, Any]] = [
         "fields": [
             F("enabled", "toggle", "Turn on birthdays", False),
             F("channel", "channel", "Post in", None, "For example #birthdays."),
-            F("hour", "number", "Post at this hour (0-23, in the time zone above)", 9, min=0, max=23),
+            F("hour", "number", "Post at this hour (0-23, in each member's own time zone)", 9, min=0, max=23),
             F(
                 "message",
                 "textarea",

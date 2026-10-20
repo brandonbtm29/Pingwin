@@ -179,3 +179,54 @@ def test_parse_when_rejects(text):
     from pingwin.timeparse import parse_when
 
     assert parse_when(text, NOW) is None
+
+
+def test_zone_names_and_abbreviations():
+    from pingwin import zones
+
+    assert zones.zone("Mountain").key == "America/Denver"
+    assert zones.zone("ct").key == "America/Chicago"
+    assert zones.zone("America/New_York").key == "America/New_York"
+    assert zones.zone("Nowhere/Land") is None
+    assert zones.split_zone("fri 8pm MT") == ("fri 8pm", ZoneInfo("America/Denver"))
+    assert zones.split_zone("fri 8pm") == ("fri 8pm", None)
+    assert zones.split_zone("8") == ("8", None)
+    assert zones.label(ZoneInfo("America/Chicago")) == "Central"
+    assert zones.search("")[0] == ("Eastern", "America/New_York")
+    assert ("America/Boise", "America/Boise") in zones.search("boise")
+
+
+def test_member_zones_are_saved(tmp_path, monkeypatch):
+    from pingwin import zones
+
+    monkeypatch.setenv("PINGWIN_DATA", str(tmp_path))
+    eastern = ZoneInfo("America/New_York")
+    assert zones.for_member(42, eastern) is eastern
+    zones.set_for(42, "America/Denver")
+    assert zones.for_member(42, eastern).key == "America/Denver"
+    zones.set_for(42, None)
+    assert zones.get(42) is None
+
+
+def test_typed_times_use_the_members_zone():
+    from pingwin import zones
+    from pingwin.timeparse import parse_when
+
+    now = datetime(2026, 10, 19, 12, 0, tzinfo=ZoneInfo("UTC"))
+    text, tz = zones.split_zone("tomorrow 8pm MT")
+    start = parse_when(text, now.astimezone(tz))
+    eastern = parse_when("tomorrow 8pm", now.astimezone(ZoneInfo("America/New_York")))
+    assert start - eastern == timedelta(hours=2)
+
+
+def test_birthdays_go_out_in_each_members_morning():
+    from pingwin.cogs.birthdays import due_now
+
+    eastern = ZoneInfo("America/New_York")
+    people = {"1": {"m": 10, "d": 20}, "2": {"m": 10, "d": 20}}
+    saved = {"2": "America/Denver"}
+    at = datetime(2026, 10, 20, 9, 30, tzinfo=eastern)  # 9:30 ET = 7:30 MT
+    assert due_now(people, {}, saved, eastern, 9, at) == [("1", "2026-10-20")]
+    later = datetime(2026, 10, 20, 11, 5, tzinfo=eastern)  # 9:05 MT
+    assert due_now(people, {"1": "2026-10-20"}, saved, eastern, 9, later) == [("2", "2026-10-20")]
+    assert due_now(people, {"1": "2026-10-20", "2": "2026-10-20"}, saved, eastern, 9, later) == []

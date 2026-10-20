@@ -11,7 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import store
+from .. import store, zones
 from ..timeparse import parse_when
 
 if TYPE_CHECKING:
@@ -110,7 +110,7 @@ class GameDay(commands.GroupCog, group_name="gameday", group_description="Game d
     @app_commands.command(name="create", description="Post a 'Who's in?' sign-up")
     @app_commands.describe(
         title="What you're playing",
-        when="e.g. 'fri 8pm', 'tomorrow 7:30pm', 'in 2 hours'",
+        when="In your time zone, e.g. 'fri 8pm', 'tomorrow 7:30pm', 'in 2 hours', or add one: 'sat 7pm CT'",
         note="Anything else people should know",
     )
     async def create(
@@ -123,12 +123,14 @@ class GameDay(commands.GroupCog, group_name="gameday", group_description="Game d
         if not self.cfg.enabled:
             await interaction.response.send_message("Game day sign-ups aren't turned on.", ephemeral=True)
             return
-        now = datetime.now(self.bot.features.tz)
-        start = parse_when(when, now)
+        text, typed_zone = zones.split_zone(when)
+        tz = typed_zone or zones.for_member(interaction.user.id, self.bot.features.tz)
+        now = datetime.now(tz)
+        start = parse_when(text, now)
         if start is None or start <= now:
             await interaction.response.send_message(
                 f"I couldn't understand **{when}** as a future time. Try `fri 8pm`, `tomorrow 7:30pm`, "
-                "`10/24 8pm` or `in 2 hours`.",
+                "`10/24 8pm`, `in 2 hours`, or add a zone like `sat 7pm CT`.",
                 ephemeral=True,
             )
             return
@@ -167,7 +169,14 @@ class GameDay(commands.GroupCog, group_name="gameday", group_description="Game d
         state = store.load(STATE)
         state[gid] = game
         store.save(STATE, state)
-        await interaction.followup.send(f"Posted: {msg.jump_url}", ephemeral=True)
+        note_zone = ""
+        if typed_zone is None and zones.get(interaction.user.id) is None:
+            note_zone = " Set yours with `/timezone set` if that's not your time zone."
+        await interaction.followup.send(
+            f"Posted: {msg.jump_url}\nI read **{when}** as {start.strftime('%a %b %d, %I:%M %p').replace(' 0', ' ')} "
+            f"{zones.label(tz)}. Everyone sees it in their own time.{note_zone}",
+            ephemeral=True,
+        )
 
     async def game_autocomplete(self, interaction: discord.Interaction, current: str):
         state = store.load(STATE)

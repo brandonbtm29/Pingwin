@@ -48,6 +48,7 @@ Everything stays on the operator's computers (and any backup PCs they set up):
 | **Movie watchlists** (if on): each nominated title, who nominated it (user ID) and when, and running polls | Running movie night | Until the movie is removed |
 | **Game day sign-ups** (if on): the title, time, host and who answered In / Maybe / Can't (user IDs) | Reminders | About two days after the game |
 | **Welcome approvals** (if on): the new member's user ID and whether a mod approved or denied them | Keeping the buttons working | Until the operator deletes `state/approvals.json` |
+| **Time zones**: your user ID and the time zone you picked with `/timezone set` | Reading the times you type; birthday timing | Until you run `/timezone remove` |
 | **What's been announced** (events, streams): event and stream IDs | Not posting twice | Old entries are dropped automatically |
 
 The roles you pick are stored by **Discord**, as normal server roles. You can see them on your profile in that
@@ -69,7 +70,7 @@ with SyncThing). That's under their control.
 ## Your choices
 
 - **Stop getting pings:** tap the role's button again in the menu.
-- **Remove your birthday:** `/birthday remove`. **Remove a nomination:** `/movienight remove`.
+- **Remove your birthday:** `/birthday remove`. **Remove your time zone:** `/timezone remove`. **Remove a nomination:** `/movienight remove`.
 - **Remove what's been logged about you:** ask the server's admins. They can delete Pingwin's log files at any time.
 - **Remove Pingwin entirely:** an admin can kick the bot from the server. That stops it from seeing anything there.
 

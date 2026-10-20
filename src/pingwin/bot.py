@@ -28,6 +28,7 @@ log = logging.getLogger("pingwin")
 EXTENSIONS = (
     "pingwin.cogs.core",
     "pingwin.cogs.roles",
+    "pingwin.cogs.timezones",
     "pingwin.cogs.events",
     "pingwin.cogs.birthdays",
     "pingwin.cogs.movienight",

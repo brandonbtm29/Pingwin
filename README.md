@@ -37,6 +37,7 @@ The short version, on a Windows PC that stays on:
 | `/rolemenu check` | Manage Roles | Same report, changes nothing |
 | `/rolemenu post [channel]` | Manage Roles | Posts the button menu |
 | `/rolemenu refresh` | Manage Roles | Updates posted menus in place after you change the roles |
+| `/timezone set · show · remove` | Everyone | Pick your time zone, so times you type mean your time |
 | `/pingwin about` | Everyone | Says hi |
 | `/pingwin status` | Everyone | Which PC is answering, version, uptime |
 | `/pingwin reload` | Manage Server | Reload settings now (they also reload on their own within a minute) |

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 (2026-10-19)
+- **Time zones per member:** `/timezone set | show | remove`. Times typed into `/gameday create` mean the
+  creator's own time, or add a zone (`sat 7pm CT`, `8pm MT`); Pingwin replies with how it read the time.
+- Birthday shout-outs go out at the chosen hour in each member's own time zone.
+
 ## 0.7.0 (2026-10-19)
 Seven optional features, all off by default. Set them up on the dashboard's new **Features** tab, or see
 [docs/FEATURES.md](docs/FEATURES.md).

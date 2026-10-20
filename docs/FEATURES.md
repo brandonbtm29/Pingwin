@@ -21,9 +21,26 @@ Before you start:
 - **Restart Pingwin once** after updating to 0.7.0 so the new slash commands show up (`/pingwin restart`).
 - **Pingwin has to be able to see and post in** every channel you pick. If a channel is private, add
   Pingwin (or its role) to it with *View Channel*, *Send Messages* and *Embed Links*.
-- **Time zone:** under *General*, set your time zone (like `America/New_York`). Birthdays and game day
-  times use it.
+- **Time zones:** under *General*, set the server's time zone (like `America/New_York`). Members in other
+  zones can pick their own with `/timezone set`. See [Time zones](#time-zones).
 - "Mods" below means anyone with *Manage Roles*, *Manage Server* or *Administrator*.
+
+## Time zones
+
+Every time Pingwin posts (game days, event reminders, poll deadlines) is a Discord timestamp, so each person
+sees it in **their own** time automatically. Time zones only matter when someone *types* a time, and for
+the hour birthday shout-outs go out.
+
+| Command | What |
+|---|---|
+| `/timezone set zone` | Pick yours (Eastern, Central, Mountain, Pacific, ... or any zone like `America/Boise`) |
+| `/timezone show` | See which one Pingwin uses for you |
+| `/timezone remove` | Go back to the server's |
+
+- `/gameday create when:fri 8pm` means 8 pm in the creator's zone. Anyone can also add a zone to the
+  time: `sat 7pm CT`, `8:30pm MT`, `tomorrow 6pm eastern`. Pingwin replies with how it read the time.
+- Birthday shout-outs go out at the chosen hour in the birthday person's own zone.
+- Members who haven't picked one use the server's time zone from the Features tab.
 
 ## Event reminders
 
@@ -54,7 +71,7 @@ Each event is announced, reminded and started only once, even when several PCs a
 | `/birthday set_for member month day` | Mods | Set someone else's |
 | `/birthday remove_for member` | Mods | Remove someone else's |
 
-On the dashboard, pick the channel, the hour to post (in your time zone) and the message (`{mentions}`
+On the dashboard, pick the channel, the hour to post (in each member's own time zone) and the message (`{mentions}`
 becomes the birthday people). Optionally ping a role, or give a role for the day (Pingwin takes it back
 the next day). Feb 29 birthdays are celebrated on Feb 28 in other years.
 
@@ -89,7 +106,7 @@ The **watchlist** panel on the Features tab lets you mark movies watched, unwatc
 
 `/gameday create title when [note]` posts a card with **I'm in**, **Maybe** and **Can't** buttons and
 pings the game role. *when* can be things like `fri 8pm`, `tomorrow 7:30pm`, `10/31 9pm` or `in 2 hours`
-(a bare `8` means 8 pm). Pingwin reminds everyone who's in before it starts (set the minutes on the
+(a bare `8` means 8 pm). The time is in your own zone (`/timezone set`), or add one like `sat 7pm CT`. Pingwin reminds everyone who's in before it starts (set the minutes on the
 dashboard) and pings them when it starts. `/gameday cancel` cancels it (the host or a mod).
 
 ## Stream alerts

@@ -1,17 +1,21 @@
-"""Birthdays: members save theirs (month and day), and Pingwin posts a shout-out that day."""
+"""Birthdays: members save theirs (month and day), and Pingwin posts a shout-out that day.
+
+The shout-out goes out at the chosen hour in each member's own time zone (/timezone set), or the
+server's if they haven't picked one.
+"""
 
 from __future__ import annotations
 
 import calendar
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, tzinfo
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import store
+from .. import store, zones
 
 if TYPE_CHECKING:
     from ..bot import Pingwin
@@ -44,6 +48,24 @@ def upcoming(people: dict[str, dict], today: date, limit: int = 10) -> list[tupl
                 out.append(((when - today).days, uid, m, d))
                 break
     return sorted(out)[:limit]
+
+
+def due_now(
+    people: dict[str, dict],
+    posted_for: dict[str, str],
+    saved_zones: dict[str, str],
+    default_tz: tzinfo,
+    hour: int,
+    now: datetime,
+) -> list[tuple[str, str]]:
+    """(user id, their local date) for everyone whose shout-out is due and not yet posted."""
+    out = []
+    for uid, p in people.items():
+        local = now.astimezone(zones.for_member(int(uid), default_tz, saved_zones))
+        key = local.date().isoformat()
+        if local.hour >= hour and is_birthday(p["m"], p["d"], local.date()) and posted_for.get(uid) != key:
+            out.append((uid, key))
+    return out
 
 
 def _fmt(month: int, day: int) -> str:
@@ -103,7 +125,7 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
         if await self._off(interaction):
             return
         people = store.load(STATE).get("people", {})
-        today = datetime.now(self.bot.features.tz).date()
+        today = datetime.now(zones.for_member(interaction.user.id, self.bot.features.tz)).date()
         rows = upcoming(people, today)
         if not rows:
             await interaction.response.send_message(
@@ -153,51 +175,59 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
         if guild is None:
             return
         now = datetime.now(self.bot.features.tz)
-        today = now.date()
         state = store.load(STATE)
         people = state.get("people", {})
-        posted = state.setdefault("posted", {})
-        key = today.isoformat()
+        saved_zones = zones.all_members()
+        posted_for = state.setdefault("posted_for", {})
+        for day, uids in state.pop("posted", {}).items():  # older format: {date: [user ids]}
+            for uid in uids:
+                posted_for[uid] = max(posted_for.get(uid, ""), day)
         changed = False
 
+        def local_key(uid: str) -> str:
+            return now.astimezone(zones.for_member(int(uid), self.bot.features.tz, saved_zones)).date().isoformat()
+
         role = self.bot.role_named(guild, self.cfg.birthday_role)
-        if role:  # take yesterday's birthday role away
+        if role:  # take the birthday role away once their day is over
             for uid, given in list(state.setdefault("role_given", {}).items()):
-                if given != key:
+                if given != local_key(uid):
                     member = guild.get_member(int(uid)) or await self._fetch(guild, int(uid))
                     if member and role in member.roles:
                         await member.remove_roles(role, reason="Pingwin: birthday is over")
                     state["role_given"].pop(uid)
                     changed = True
 
-        if now.hour >= self.cfg.hour and key not in posted:
-            due = [uid for uid, p in people.items() if is_birthday(p["m"], p["d"], today)]
-            if due:
-                channel = self.bot.text_channel(self.cfg.channel)
-                if channel is None:
-                    log.warning("Birthdays: no channel set, or Pingwin can't see it")
-                    return
-                ping = self.bot.role_named(guild, self.cfg.ping_role)
-                mentions = " ".join(f"<@{u}>" for u in due)
-                text = self.cfg.message.replace("{mentions}", mentions).replace("{mention}", mentions)
-                if ping:
-                    text = f"{ping.mention} {text}"
-                await channel.send(
-                    text[:2000],
-                    allowed_mentions=discord.AllowedMentions(
-                        everyone=False, users=[discord.Object(int(u)) for u in due], roles=[ping] if ping else False
-                    ),
-                )
-                log.info("Posted birthdays for %d member(s)", len(due))
+        due = due_now(people, posted_for, saved_zones, self.bot.features.tz, self.cfg.hour, now)
+        if due:
+            channel = self.bot.text_channel(self.cfg.channel)
+            if channel is None:
+                log.warning("Birthdays: no channel set, or Pingwin can't see it")
+                if changed:
+                    store.save(STATE, state)
+                return
+            uids = [u for u, _ in due]
+            ping = self.bot.role_named(guild, self.cfg.ping_role)
+            mentions = " ".join(f"<@{u}>" for u in uids)
+            text = self.cfg.message.replace("{mentions}", mentions).replace("{mention}", mentions)
+            if ping:
+                text = f"{ping.mention} {text}"
+            await channel.send(
+                text[:2000],
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, users=[discord.Object(int(u)) for u in uids], roles=[ping] if ping else False
+                ),
+            )
+            log.info("Posted birthdays for %d member(s)", len(uids))
+            for uid, key in due:
+                posted_for[uid] = key
                 if role:
-                    for uid in due:
-                        member = guild.get_member(int(uid)) or await self._fetch(guild, int(uid))
-                        if member:
-                            await member.add_roles(role, reason="Pingwin: happy birthday")
-                            state.setdefault("role_given", {})[uid] = key
-            posted[key] = due
-            for old in [k for k in posted if k < (today.replace(day=1)).isoformat()]:
-                posted.pop(old)
+                    member = guild.get_member(int(uid)) or await self._fetch(guild, int(uid))
+                    if member:
+                        await member.add_roles(role, reason="Pingwin: happy birthday")
+                        state.setdefault("role_given", {})[uid] = key
+            changed = True
+        for uid in [u for u in posted_for if u not in people]:
+            posted_for.pop(uid)
             changed = True
         if changed:
             store.save(STATE, state)
