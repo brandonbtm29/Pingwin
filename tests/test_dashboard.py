@@ -14,11 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 KEY = "k" * 32
 
 
+@pytest.fixture(autouse=True)
+def private_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("PINGWIN_DATA", str(tmp_path))
+
+
 @pytest.fixture
 def cfg_file(tmp_path, monkeypatch):
     p = tmp_path / "config.toml"
     p.write_text((ROOT / "config.example.toml").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setenv("PINGWIN_CONFIG", str(p))
+    monkeypatch.setenv("PINGWIN_DATA", str(tmp_path))
     return p
 
 

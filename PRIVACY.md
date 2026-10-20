@@ -49,6 +49,8 @@ Everything stays on the operator's computers (and any backup PCs they set up):
 | **Game day sign-ups** (if on): the title, time, host and who answered In / Maybe / Can't (user IDs) | Reminders | About two days after the game |
 | **Welcome approvals** (if on): the new member's user ID and whether a mod approved or denied them | Keeping the buttons working | Until the operator deletes `state/approvals.json` |
 | **Time zones**: your user ID and the time zone you picked with `/timezone set` | Reading the times you type; birthday timing | Until you run `/timezone remove` |
+| **Dashboard sign-ins** (if the operator puts the dashboard online): the Discord ID, name and picture link of admins who sign in with Discord | Keeping them signed in | 14 days, or until they sign out |
+| **Who's editing**: the names of admins with a dashboard open, and who last saved each settings section | Warning people who edit at the same time | Removed about a minute after they close it; last-saved names until the next save |
 | **What's been announced** (events, streams): event and stream IDs | Not posting twice | Old entries are dropped automatically |
 
 The roles you pick are stored by **Discord**, as normal server roles. You can see them on your profile in that
@@ -62,7 +64,9 @@ server, and you can remove one at any time by tapping its button again.
   sent.
 - **Twitch and YouTube:** if stream alerts are on, Pingwin asks them whether the listed streamers are live.
   No Discord user data is sent.
-- **Nobody else.** Pingwin's dashboard only answers on the operator's own computer.
+- **Tailscale:** only if the operator puts the dashboard online. Visitors' requests pass through
+  Tailscale's Funnel relay. See [Tailscale's privacy policy](https://tailscale.com/privacy-policy).
+- **Nobody else.** Unless the operator puts it online, Pingwin's dashboard only answers on their own computer.
 
 If an operator runs Pingwin on more than one PC, they may sync its settings between those PCs (for example
 with SyncThing). That's under their control.

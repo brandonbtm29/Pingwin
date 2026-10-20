@@ -37,6 +37,11 @@ the hour birthday shout-outs go out.
 | `/timezone show` | See which one Pingwin uses for you |
 | `/timezone remove` | Go back to the server's |
 
+**Time zone menu.** On the dashboard's **Role menu** tab, click **+ Time zone menu**. It makes a second
+button menu (Eastern, Central, Mountain, Pacific; change them as you like) where picking a role also sets
+that person's time zone, and picking another swaps it. `/timezone set` gives the matching role too, so the
+two always agree. Click **Create missing roles**, then post it with **Post it**.
+
 - `/gameday create when:fri 8pm` means 8 pm in the creator's zone. Anyone can also add a zone to the
   time: `sat 7pm CT`, `8:30pm MT`, `tomorrow 6pm eastern`. Pingwin replies with how it read the time.
 - Birthday shout-outs go out at the chosen hour in the birthday person's own zone.
@@ -70,6 +75,9 @@ Each event is announced, reminded and started only once, even when several PCs a
 | `/birthday upcoming` | Everyone | The next birthdays |
 | `/birthday set_for member month day` | Mods | Set someone else's |
 | `/birthday remove_for member` | Mods | Remove someone else's |
+
+You can also add, change or remove anyone's birthday in the **Birthday list** on the Features tab: type
+the start of their name, pick them, choose the date, and click **Save birthday**.
 
 On the dashboard, pick the channel, the hour to post (in each member's own time zone) and the message (`{mentions}`
 becomes the birthday people). Optionally ping a role, or give a role for the day (Pingwin takes it back

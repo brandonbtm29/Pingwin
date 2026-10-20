@@ -21,6 +21,7 @@ class PostedMenu:
     guild_id: int
     channel_id: int
     message_id: int
+    menu: str = "main"  # which menu (see [[roles.extra]]); older files don't say, so "main"
 
     @property
     def url(self) -> str:
@@ -37,7 +38,10 @@ def load_menus() -> list[PostedMenu]:
         return []
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return [PostedMenu(int(m["guild_id"]), int(m["channel_id"]), int(m["message_id"])) for m in raw]
+        return [
+            PostedMenu(int(m["guild_id"]), int(m["channel_id"]), int(m["message_id"]), str(m.get("menu") or "main"))
+            for m in raw
+        ]
     except (OSError, ValueError, KeyError, TypeError) as e:
         log.warning("Couldn't read %s (%s); starting a fresh list", path, e)
         return []

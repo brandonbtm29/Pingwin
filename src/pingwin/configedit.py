@@ -15,7 +15,7 @@ import tomlkit
 from tomlkit.items import Table
 from tomlkit.toml_document import TOMLDocument
 
-from .config import Config, ConfigError, MenuRole, config_path, parse_config
+from .config import Config, ConfigError, MenuConfig, MenuRole, config_path, parse_config
 
 
 def _table(doc: TOMLDocument, key: str) -> Table:
@@ -40,24 +40,67 @@ def edit_config(change: Callable[[TOMLDocument], None], path: Path | None = None
     return config
 
 
+def _roles_aot(menu: list[MenuRole] | tuple[MenuRole, ...]):
+    aot = tomlkit.aot()
+    for m in menu:
+        t = tomlkit.table()
+        t["name"] = m.name
+        if m.emoji:
+            t["emoji"] = m.emoji
+        if m.description:
+            t["description"] = m.description
+        if m.zone:
+            t["zone"] = m.zone
+        aot.append(t)
+    return aot
+
+
 def save_roles(
-    *, title: str, description: str, required_role: str | None, menu: list[MenuRole], path: Path | None = None
+    *,
+    title: str,
+    description: str,
+    required_role: str | None,
+    menu: list[MenuRole],
+    extra: list[MenuConfig] | None = None,
+    path: Path | None = None,
 ) -> Config:
+    """Save the ping menu, and the extra menus too when `extra` is given (None leaves them alone)."""
+
     def change(doc: TOMLDocument) -> None:
         roles = _table(doc, "roles")
         roles["required_role"] = required_role or ""
         roles["menu_title"] = title
         roles["menu_description"] = description
-        aot = tomlkit.aot()
-        for m in menu:
-            t = tomlkit.table()
-            t["name"] = m.name
-            if m.emoji:
-                t["emoji"] = m.emoji
-            if m.description:
+        menu_aot = _roles_aot(menu)
+        extra_aot = None
+        if extra is not None:
+            extra_aot = tomlkit.aot()
+            for m in extra:
+                t = tomlkit.table()
+                t["key"] = m.key
+                t["title"] = m.title
                 t["description"] = m.description
-            aot.append(t)
-        roles["menu"] = aot
+                t["mode"] = m.mode
+                t["roles"] = _roles_aot(m.roles)
+                extra_aot.append(t)
+        # Arrays of tables have to come after the plain values, and "menu" before "extra" reads best.
+        for k in ("menu", "extra"):
+            if k in roles:
+                if k == "extra" and extra_aot is None:
+                    extra_aot = roles[k]
+                del roles[k]
+        roles["menu"] = menu_aot
+        if extra_aot is not None and len(extra_aot):
+            roles["extra"] = extra_aot
+
+    return edit_config(change, path)
+
+
+def save_dashboard(*, admin_role: str | None, remote_full_access: bool, path: Path | None = None) -> Config:
+    def change(doc: TOMLDocument) -> None:
+        t = _table(doc, "dashboard")
+        t["admin_role"] = admin_role or ""
+        t["remote_full_access"] = remote_full_access
 
     return edit_config(change, path)
 

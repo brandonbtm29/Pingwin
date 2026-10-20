@@ -26,3 +26,5 @@ Thumbs.db
 /.pingwin.lock
 /.synced-commands.json
 /install-record.json
+/.dashboard-sessions.json
+/state/

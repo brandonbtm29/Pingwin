@@ -30,6 +30,11 @@ takeover_after_seconds = 120
 # Open it with scripts\open_dashboard.cmd. It only answers on that PC (127.0.0.1).
 enabled = true
 port = 8787
+# Co-admins can also use it from anywhere once it's put online (Status tab -> Remote access);
+# they sign in with Discord. Anyone with Manage Server can, plus members with this role:
+admin_role = ""
+# Let signed-in admins also add/remove backup PCs and change remote access:
+remote_full_access = false
 
 [updates]
 # How often to check GitHub for new code (minutes). 0 = never; use /pingwin restart instead.

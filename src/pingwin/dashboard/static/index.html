@@ -16,7 +16,10 @@
         <p class="sub" id="server-line">Connecting…</p>
       </div>
     </div>
-    <div class="pill" id="state-pill"><span class="dot"></span><span id="state-text">Loading</span></div>
+    <div class="top-right">
+      <div class="viewer" id="viewer" hidden></div>
+      <div class="pill" id="state-pill"><span class="dot"></span><span id="state-text">Loading</span></div>
+    </div>
   </header>
 
   <nav class="tabs" role="tablist">
@@ -28,7 +31,20 @@
     <button role="tab" data-tab="logs">Logs</button>
   </nav>
 
+  <div class="presence" id="presence" hidden></div>
+
   <main>
+    <div class="banner warn-banner" id="stale-banner" hidden>
+      <span id="stale-text"></span>
+      <button class="btn" id="stale-reload">Discard my changes and reload</button>
+    </div>
+    <div class="panel conflicts" id="conflicts-panel" hidden>
+      <h2>Two versions of the settings</h2>
+      <p class="hint">Two PCs saved the same file before SyncThing could copy it, so SyncThing kept both. Pick one
+        for each file. Until then Pingwin uses the current version.</p>
+      <div id="conflicts-list"></div>
+    </div>
+
     <!-- SETUP & ABOUT -->
     <section id="tab-setup" class="tab">
       <div class="panel">
@@ -39,6 +55,14 @@
         <div class="progress" aria-hidden="true"><div id="setup-bar"></div></div>
         <ol class="checklist" id="setup-list"></ol>
         <p class="hint">New here? The <a id="guide-link" target="_blank" rel="noreferrer">setup guide</a> walks through every step, including the Discord side.</p>
+      </div>
+
+      <div class="panel" id="access-panel">
+        <div class="panel-head">
+          <h2>Can Pingwin reach everything?</h2>
+          <button class="btn" id="access-refresh">Check again</button>
+        </div>
+        <ul class="access" id="access-list"><li class="hint">Checking…</li></ul>
       </div>
 
       <div class="panel about">
@@ -82,6 +106,17 @@
         <p class="hint" id="s-update">Settings also reload on their own within a minute of changing.</p>
       </div>
 
+      <div class="panel" id="remote-panel">
+        <div class="panel-head">
+          <h2>Remote access</h2>
+          <button class="btn" id="rm-refresh">Check again</button>
+        </div>
+        <p class="hint">Let co-admins open this dashboard from anywhere and sign in with Discord. It uses Tailscale
+          Funnel on this PC, so they don't need to install anything. Discord in the server keeps working from the
+          backup PCs even when this PC (and so this link) is off.</p>
+        <div id="rm-body"><p class="hint">Checking Tailscale…</p></div>
+      </div>
+
       <div class="panel">
         <h2>Where things live</h2>
         <dl class="kv">
@@ -95,20 +130,36 @@
     <section id="tab-roles" class="tab" hidden>
       <div class="panel">
         <div class="panel-head">
-          <h2>Menu</h2>
+          <h2>Menus</h2>
           <div class="save-zone"><span class="dirty" id="roles-dirty" hidden>Unsaved changes</span><button class="btn primary" id="roles-save" disabled>Save</button></div>
+        </div>
+        <p class="hint">Each menu is its own message in Discord, like one for pings and one for time zones.</p>
+        <div class="menu-picker" id="r-menus" role="tablist" aria-label="Menus"></div>
+        <label>Who can use the menus
+          <select id="r-gate"></select>
+        </label>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2 id="r-menu-heading">Menu</h2>
+          <button class="btn danger" id="r-menu-delete" hidden>Delete this menu</button>
         </div>
         <div class="grid2">
           <label>Title<input id="r-title" maxlength="256"></label>
-          <label>Who can use it
-            <select id="r-gate"></select>
+          <label>How it works
+            <select id="r-mode">
+              <option value="many">Pick any: each button turns its role on or off</option>
+              <option value="one">Pick one: choosing a role swaps out the others</option>
+            </select>
           </label>
         </div>
         <label>Description<textarea id="r-desc" rows="2" maxlength="2000"></textarea></label>
+        <label class="switch" id="r-tz-wrap"><input type="checkbox" id="r-tz"><span>Time zone menu: each role also sets the member's time zone (same as <code>/timezone set</code>)</span></label>
 
         <div class="table-wrap">
           <table class="roles">
-            <thead><tr><th class="c-move"></th><th class="c-emoji">Emoji</th><th>Role</th><th>Description</th><th class="c-status">In Discord</th><th class="c-del"></th></tr></thead>
+            <thead><tr><th class="c-move"></th><th class="c-emoji">Emoji</th><th>Role</th><th>Description</th><th class="c-zone" id="r-zone-head" hidden>Time zone</th><th class="c-status">In Discord</th><th class="c-del"></th></tr></thead>
             <tbody id="r-rows"></tbody>
           </table>
         </div>
@@ -128,8 +179,9 @@
           <button class="btn primary" data-action="refresh_menus">Update posted menus</button>
         </div>
         <div class="row-actions">
+          <select id="r-post-menu" aria-label="Menu to post"></select>
           <select id="r-post-channel" aria-label="Channel to post in"></select>
-          <button class="btn" id="r-post">Post a new menu</button>
+          <button class="btn" id="r-post">Post it</button>
         </div>
         <ul class="report" id="r-report" hidden></ul>
         <div id="r-posted"></div>
@@ -141,6 +193,20 @@
       <div class="banner" id="f-restart" hidden>A change needs Pingwin to restart (Discord intents changed).
         <button class="btn" data-action="restart">Restart Pingwin</button></div>
       <div id="f-sections"></div>
+      <div class="panel" id="f-birthdays">
+        <h2>Birthday list</h2>
+        <p class="hint">Members add their own with <code>/birthday set</code>. Add or fix anyone's here (month and day only).</p>
+        <div class="row-actions bday-add">
+          <div class="picker">
+            <input id="b-search" placeholder="Find a member…" autocomplete="off" aria-label="Member">
+            <ul class="results" id="b-results" hidden></ul>
+          </div>
+          <select id="b-month" aria-label="Month"></select>
+          <select id="b-day" aria-label="Day"></select>
+          <button class="btn primary" id="b-save">Save birthday</button>
+        </div>
+        <div class="table-wrap"><table class="rows-table" id="b-table"></table></div>
+      </div>
       <div class="panel" id="f-watchlist" hidden>
         <h2>Movie watchlists</h2>
         <div id="f-watchlist-body"></div>

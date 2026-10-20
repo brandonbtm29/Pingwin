@@ -35,15 +35,18 @@ The short version, on a Windows PC that stays on:
 |---|---|---|
 | `/rolemenu setup` | Manage Roles | Creates missing menu roles (pingable, no permissions) and checks the rest |
 | `/rolemenu check` | Manage Roles | Same report, changes nothing |
-| `/rolemenu post [channel]` | Manage Roles | Posts the button menu |
+| `/rolemenu post [channel] [menu]` | Manage Roles | Posts a button menu (the ping menu, or another one like time zones) |
 | `/rolemenu refresh` | Manage Roles | Updates posted menus in place after you change the roles |
 | `/timezone set · show · remove` | Everyone | Pick your time zone, so times you type mean your time |
 | `/pingwin about` | Everyone | Says hi |
 | `/pingwin status` | Everyone | Which PC is answering, version, uptime |
+| `/pingwin dashboard` | Manage Server | Links to the dashboard (when it's online) |
 | `/pingwin reload` | Manage Server | Reload settings now (they also reload on their own within a minute) |
 | `/pingwin restart` | Manage Server | Restart and install any update from GitHub |
 
-Only members with the **Friend** role can use the menu (`required_role` in `config.toml`).
+Only members with the **Friend** role can use the menus (`required_role` in `config.toml`). Besides the
+ping menu you can add more menus, each its own message, such as a **time zone** menu where picking a
+role also sets that person's time zone. A menu can let people pick any number of roles, or just one.
 
 ## Features
 
@@ -69,17 +72,25 @@ picked, how long it runs, and what happens on a tie. Welcome and the mod log nee
 Double-click **`scripts\open_dashboard.cmd`** while Pingwin is running. It opens a page in your
 browser with six tabs:
 
-- **Setup:** a checklist of what's done and what's left, plus an About page with links and an invite link
-- **Status:** which PC is answering, Discord connection, version; reload, restart, check for updates
-- **Role menu:** add, remove and reorder roles, set emoji and descriptions, choose who can use the menu,
-  see which roles are ready, create missing ones, and update or post menus
-- **Features:** switch on and set up the optional features, and manage movie watchlists
+- **Setup:** a checklist of what's done and what's left, a check that Pingwin can reach every channel and
+  role it's been given, and an About page
+- **Status:** which PC is answering, Discord connection, version; reload, restart, check for updates;
+  remote access
+- **Role menu:** several menus (pings, time zones, ...); add, remove and reorder roles, set emoji and
+  descriptions, choose who can use them, see which roles are ready, create missing ones, and post menus
+- **Features:** switch on and set up the optional features, the birthday list, and movie watchlists
 - **PCs & failover:** turn failover on, pick the status channel, order the PCs
 - **Logs:** this PC's recent log, live
 
 Every PC running Pingwin has its own dashboard. Changes save to the shared `config.toml`, so they reach
 every PC. The page only answers on that PC (`127.0.0.1:8787`; change it under `[dashboard]`), and
 `open_dashboard.cmd` signs you in with a key kept in the project folder.
+
+**Co-admins** can use it from anywhere too: put it online with Tailscale Funnel and they sign in with
+Discord (Manage Server or a role you pick), with nothing to install.
+**[Remote dashboard and co-admins](docs/REMOTE-DASHBOARD.md)**. When several people have it open, it shows
+who's where, stops a save that would overwrite someone's newer change, and helps sort out SyncThing
+conflicts.
 
 ## Where settings live
 

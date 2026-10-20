@@ -1,22 +1,27 @@
-"""Pingwin's local dashboard: settings and controls in a browser, on this PC only.
+"""Pingwin's dashboard: settings and controls in a browser.
 
 Security model
-* Listens on 127.0.0.1 only, and rejects requests whose Host isn't localhost
-  (blocks DNS-rebinding tricks from websites).
-* Needs a secret key, stored in the project folder (.dashboard-key). Opening
-  scripts\\open_dashboard.cmd signs you in with it and sets an HttpOnly,
-  SameSite=Strict cookie.
-* Changes (POST) also need an `X-Pingwin: 1` header, which other websites
-  can't send to it, so they can't change settings behind your back.
+* Listens on 127.0.0.1 only. Requests must be for localhost, or for this PC's Tailscale Funnel
+  address when the dashboard has been put online (anything else is refused, which also blocks
+  DNS-rebinding tricks from websites).
+* On this PC: a secret key from the project folder (.dashboard-key). Opening
+  scripts\\open_dashboard.cmd signs you in with it (HttpOnly, SameSite=Strict cookie). The key
+  never works through Funnel.
+* Through Funnel: Sign in with Discord, for members with Manage Server (or the dashboard admin
+  role). See auth.py.
+* Changes (POST) also need an `X-Pingwin: 1` header and a matching Origin, which other websites
+  can't send, so they can't change settings behind your back.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hmac
+import html
 import logging
 import math
 import secrets
+import time
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -25,9 +30,24 @@ from urllib.parse import urlparse
 import discord
 from aiohttp import web
 
-from .. import REPO_URL, __version__, invite_url, menus, updater
-from ..config import PROJECT_ROOT, ConfigError, MenuRole, config_path, data_dir
-from ..configedit import save_failover, save_roles
+from .. import REPO_URL, __version__, invite_url, menus, store, updater
+from .. import zones as _zones
+from ..config import MENU_MODES, PROJECT_ROOT, ConfigError, MenuConfig, MenuRole, config_path, data_dir
+from ..configedit import save_dashboard, save_failover, save_roles, save_secrets
+from . import access, editing, tailscale
+from .auth import (
+    SECRET_NAME,
+    SESSION_COOKIE,
+    SESSION_SECONDS,
+    STATE_COOKIE,
+    Sessions,
+    SignInError,
+    Viewer,
+    authorize_url,
+    check_member,
+    client_secret,
+    exchange_code,
+)
 from .setup_check import checklist, gather_facts, summarize
 
 if TYPE_CHECKING:
@@ -45,6 +65,13 @@ LOG_FILE = PROJECT_ROOT / "logs" / "pingwin.log"
 
 BOT: web.AppKey[Any] = web.AppKey("bot", object)
 KEY: web.AppKey[str] = web.AppKey("key", str)
+REMOTE: web.AppKey[Any] = web.AppKey("remote", object)
+SESSIONS: web.AppKey[Any] = web.AppKey("sessions", object)
+PRESENCE: web.AppKey[Any] = web.AppKey("presence", object)
+OPEN_PATHS = {"/login", "/auth/login", "/auth/callback"}
+DASHBOARDS = "dashboards"  # shared: each PC's public dashboard link, for /pingwin dashboard
+PUBLIC: web.RequestKey[bool] = web.RequestKey("public", bool)
+VIEWER: web.RequestKey[Any] = web.RequestKey("viewer", object)
 
 LOCKED_PAGE = """<!doctype html><meta charset="utf-8"><title>Pingwin</title>
 <body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem;line-height:1.5">
@@ -81,21 +108,103 @@ class ApiError(Exception):
         self.status = status
 
 
+def _pc(bot: Any) -> str:
+    node = getattr(bot, "node", None)
+    return node.name if node else "this PC"
+
+
+class Remote:
+    """What Tailscale says about this PC, refreshed now and then (the guard needs it on every request)."""
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+        self.status = tailscale.Status()
+        self.checked = 0.0
+
+    @property
+    def host(self) -> str | None:
+        """The public hostname requests may use, when the dashboard is online."""
+        return self.status.dns_name.lower() if self.status.funnel_on and self.status.dns_name else None
+
+    @property
+    def url(self) -> str | None:
+        return self.status.public_url
+
+    async def refresh(self) -> tailscale.Status:
+        self.status = await asyncio.to_thread(tailscale.status, self.port)
+        self.checked = time.time()
+        return self.status
+
+
+def is_public(request: web.Request) -> bool:
+    """Did this request come through Tailscale Funnel (or any proxy) rather than from this PC?"""
+    return (
+        "Tailscale-Funnel-Request" in request.headers
+        or "X-Forwarded-For" in request.headers
+        or _hostname(request.host) not in LOCAL_HOSTS
+    )
+
+
+async def identify(request: web.Request) -> Viewer | None:
+    app = request.app
+    bot = app[BOT]
+    if not request[PUBLIC] and hmac.compare_digest(request.cookies.get(COOKIE, ""), app[KEY]):
+        return Viewer("owner", f"{_pc(bot)} (this PC)", sid=f"pc-{_pc(bot)}", full_access=True)
+    token = request.cookies.get(SESSION_COOKIE)
+    item = app[SESSIONS].get(token)
+    if item is None:
+        return None
+    if time.time() - item["checked"] > 300:
+        ok, reason, member = await check_member(bot, int(item["user_id"]))
+        if not ok:
+            log.info("Signed %s out of the dashboard: %s", item["name"], reason)
+            app[SESSIONS].end(token)
+            return None
+        item["checked"] = time.time()
+        if member is not None:
+            item["name"] = member.display_name
+    app[SESSIONS].touch(item)
+    cfg = getattr(getattr(bot, "config", None), "dashboard", None)
+    return Viewer(
+        "discord",
+        item["name"],
+        user_id=item["user_id"],
+        avatar=item.get("avatar"),
+        sid=item["sid"],
+        full_access=bool(cfg and cfg.remote_full_access),
+    )
+
+
 # --------------------------------------------------------------------- guard
 @web.middleware
 async def guard(request: web.Request, handler):
-    if _hostname(request.host) not in LOCAL_HOSTS:
+    public = is_public(request)
+    request[PUBLIC] = public
+    remote = request.app[REMOTE]
+    host = _hostname(request.host)
+    if public:
+        if not remote.host or host != remote.host:
+            return web.Response(status=403, text="Pingwin's dashboard isn't available here.")
+    elif host not in LOCAL_HOSTS:
         return web.Response(status=403, text="Pingwin's dashboard only answers on this PC.")
 
-    if request.path != "/login":
-        if not hmac.compare_digest(request.cookies.get(COOKIE, ""), request.app[KEY]):
+    if not (request.path in OPEN_PATHS or request.path.startswith("/static/")):
+        viewer = await identify(request)
+        if viewer is None:
             if request.path.startswith("/api/"):
-                return web.json_response({"error": "Not signed in. Open scripts\\open_dashboard.cmd."}, status=401)
+                msg = (
+                    "Not signed in. Reload the page." if public else "Not signed in. Open scripts\\open_dashboard.cmd."
+                )
+                return web.json_response({"error": msg}, status=401)
+            if public:
+                return _secure(request, signin_page(request))
             return web.Response(text=LOCKED_PAGE, content_type="text/html", status=401)
+        request[VIEWER] = viewer
         if request.method not in ("GET", "HEAD"):
             origin = request.headers.get("Origin")
+            allowed = {remote.host} if public else LOCAL_HOSTS
             if request.headers.get("X-Pingwin") != "1" or (
-                origin and _hostname(urlparse(origin).netloc) not in LOCAL_HOSTS
+                (origin or public) and _hostname(urlparse(origin or "").netloc) not in allowed
             ):
                 return web.json_response({"error": "Blocked: request didn't come from the dashboard."}, status=403)
 
@@ -103,22 +212,130 @@ async def guard(request: web.Request, handler):
         response = await handler(request)
     except ApiError as e:
         response = web.json_response({"error": str(e)}, status=e.status)
+    except editing.StaleEdit as e:
+        response = web.json_response({"error": str(e), "stale": True}, status=409)
     except ConfigError as e:
         response = web.json_response({"error": str(e)}, status=400)
+    return _secure(request, response)
+
+
+def _secure(request: web.Request, response: web.StreamResponse) -> web.StreamResponse:
     response.headers["Content-Security-Policy"] = CSP
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Cache-Control"] = "no-store"
+    if request.get(PUBLIC):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
     return response
+
+
+def viewer_of(request: web.Request) -> Viewer:
+    return request.get(VIEWER) or Viewer("owner", "this PC", sid="pc", full_access=True)
+
+
+def need_full_access(request: web.Request) -> Viewer:
+    viewer = viewer_of(request)
+    if not viewer.full_access:
+        raise ApiError(
+            "Only the PC's owner can do that (or turn on full access for signed-in admins under Remote access).", 403
+        )
+    return viewer
 
 
 # --------------------------------------------------------------------- pages
 async def login(request: web.Request) -> web.StreamResponse:
-    if not hmac.compare_digest(request.query.get("key", ""), request.app[KEY]):
+    if request[PUBLIC] or not hmac.compare_digest(request.query.get("key", ""), request.app[KEY]):
         return web.Response(text=LOCKED_PAGE, content_type="text/html", status=401)
     response = web.HTTPFound("/")
     response.set_cookie(COOKIE, request.app[KEY], httponly=True, samesite="Strict", path="/", max_age=365 * 86400)
+    return response
+
+
+def _page(body: str, status: int = 200) -> web.Response:
+    doc = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Pingwin</title>'
+        '<link rel="icon" href="/static/icon.svg"><link rel="stylesheet" href="/static/style.css"></head>'
+        '<body><main class="signin"><img src="/static/icon.svg" alt="" width="72" height="72">'
+        f"{body}</main></body></html>"
+    )
+    return web.Response(text=doc, content_type="text/html", status=status)
+
+
+def signin_page(request: web.Request, error: str = "", status: int = 401) -> web.Response:
+    bot = request.app[BOT]
+    guild = getattr(bot, "home_guild", None)
+    server = html.escape(guild.name) if guild else "your server"
+    err = f'<p class="signin-error">{html.escape(error)}</p>' if error else ""
+    ready = bool(client_secret())
+    button = (
+        '<a class="btn primary big" href="/auth/login">Sign in with Discord</a>'
+        if ready
+        else "<p class=\"hint\">Discord sign-in isn't set up yet. The PC's owner can finish it on the Status tab.</p>"
+    )
+    return _page(
+        f"<h1>Pingwin</h1><p>Manage Pingwin for <strong>{server}</strong>.</p>{err}{button}"
+        f'<p class="hint">For members with Manage Server in {server}. Pingwin only sees your Discord name and '
+        "picture, and can't read your messages or servers.</p>",
+        status,
+    )
+
+
+async def auth_login(request: web.Request) -> web.StreamResponse:
+    bot = request.app[BOT]
+    remote = request.app[REMOTE]
+    if not request[PUBLIC] or not remote.url:
+        raise web.HTTPFound("/")
+    if not client_secret() or not getattr(bot, "application_id", None):
+        return _secure(request, signin_page(request, "Discord sign-in isn't set up yet."))
+    state = secrets.token_urlsafe(24)
+    response = web.HTTPFound(authorize_url(str(bot.application_id), f"{remote.url}/auth/callback", state))
+    response.set_cookie(STATE_COOKIE, state, httponly=True, secure=True, samesite="Lax", path="/auth", max_age=600)
+    return response
+
+
+async def auth_callback(request: web.Request) -> web.StreamResponse:
+    bot = request.app[BOT]
+    remote = request.app[REMOTE]
+    if not request[PUBLIC] or not remote.url:
+        raise web.HTTPFound("/")
+    q = request.query
+    if q.get("error"):
+        return signin_page(request, "Sign-in was cancelled." if q["error"] == "access_denied" else "Discord said no.")
+    expected = request.cookies.get(STATE_COOKIE, "")
+    if not expected or not hmac.compare_digest(expected, q.get("state", "")) or not q.get("code"):
+        return signin_page(request, "That sign-in link expired. Try again.")
+    try:
+        user = await exchange_code(str(bot.application_id), q["code"], f"{remote.url}/auth/callback")
+    except SignInError as e:
+        return signin_page(request, str(e))
+    except Exception:  # network trouble etc.
+        log.exception("Discord sign-in failed")
+        return signin_page(request, "Couldn't reach Discord. Try again in a minute.")
+    ok, reason, member = await check_member(bot, int(user["id"]))
+    if not ok:
+        log.warning("Dashboard sign-in refused for %s (%s): %s", user["name"], user["id"], reason)
+        return signin_page(request, reason, 403)
+    if member is not None:
+        user["name"] = member.display_name
+    token = request.app[SESSIONS].create(user)
+    log.info("%s (%s) signed in to the dashboard from outside this PC", user["name"], user["id"])
+    # A same-site hop to "/" so the browser treats the new cookie as first-party.
+    response = _page('<p>Signed in. Opening the dashboard…</p><meta http-equiv="refresh" content="0;url=/">')
+    response.set_cookie(
+        SESSION_COOKIE, token, httponly=True, secure=True, samesite="Lax", path="/", max_age=SESSION_SECONDS
+    )
+    response.del_cookie(STATE_COOKIE, path="/auth")
+    return response
+
+
+async def signout(request: web.Request) -> web.Response:
+    viewer = viewer_of(request)
+    request.app[SESSIONS].end(request.cookies.get(SESSION_COOKIE))
+    request.app[PRESENCE].leave(viewer.sid)
+    response = web.json_response({"ok": True, "public": request[PUBLIC]})
+    response.del_cookie(SESSION_COOKIE, path="/")
     return response
 
 
@@ -181,7 +398,15 @@ def build_state(bot: Pingwin) -> dict[str, Any]:
     posted = []
     for m in menus.load_menus():
         ch = guild.get_channel(m.channel_id) if guild and guild.id == m.guild_id else None
-        posted.append({"url": m.url, "channel": ch.name if ch else None})
+        menu = cfg.roles.get_menu(m.menu)
+        posted.append(
+            {
+                "url": m.url,
+                "channel": ch.name if ch else None,
+                "menu": m.menu,
+                "menu_title": menu.title if menu else None,
+            }
+        )
     return {
         "version": __version__,
         "node": bot.node.name,
@@ -201,11 +426,20 @@ def build_state(bot: Pingwin) -> dict[str, Any]:
         **_guild_info(guild),
         "config": {
             "roles": {
-                "title": cfg.roles.menu_title,
-                "description": cfg.roles.menu_description,
                 "required_role": cfg.roles.required_role or "",
-                "menu": [
-                    {"name": m.name, "emoji": m.emoji or "", "description": m.description} for m in cfg.roles.menu
+                "menus": [
+                    {
+                        "key": menu.key,
+                        "title": menu.title,
+                        "description": menu.description,
+                        "mode": menu.mode,
+                        "timezone": menu.is_timezone,
+                        "roles": [
+                            {"name": m.name, "emoji": m.emoji or "", "description": m.description, "zone": m.zone or ""}
+                            for m in menu.roles
+                        ],
+                    }
+                    for menu in cfg.roles.menus
                 ],
             },
             "failover": {
@@ -219,11 +453,17 @@ def build_state(bot: Pingwin) -> dict[str, Any]:
             },
         },
         "menus": posted,
+        "zones": [{"label": label, "zone": zone} for label, zone in _zones.COMMON],
     }
 
 
 async def get_state(request: web.Request) -> web.Response:
-    return web.json_response(build_state(request.app[BOT]))
+    state = build_state(request.app[BOT])
+    state["viewer"] = viewer_of(request).as_json()
+    state["public"] = request[PUBLIC]
+    state["versions"] = editing.versions()
+    state["last_edits"] = editing.last_edits()
+    return web.json_response(state)
 
 
 async def get_features(request: web.Request) -> web.Response:
@@ -237,6 +477,7 @@ async def get_features(request: web.Request) -> web.Response:
             "values": f.as_json(),
             "intents": {"members": f.needs_members, "message_content": f.needs_message_content},
             "restart_needed": getattr(bot, "restart_needed", False),
+            "versions": editing.versions(),
         }
     )
 
@@ -249,9 +490,12 @@ async def post_features(request: web.Request) -> web.Response:
     key, values = payload.get("section"), payload.get("values")
     if not isinstance(key, str) or not isinstance(values, dict):
         raise ApiError("section and values are required")
+    viewer = viewer_of(request)
+    editing.check(key, payload.get("base_version"), editing.versions().get(key, ""))
     save_section(key, values)
+    editing.record(key, viewer.name, _pc(bot))
     bot.reload_settings()
-    log.info("Saved %s settings from the dashboard", key)
+    log.info("Saved %s settings from the dashboard (%s)", key, viewer.name)
     restart = getattr(bot, "restart_needed", False)
     msg = "Saved." + (" Restart Pingwin to apply the Discord intent change." if restart else "")
     return web.json_response({"ok": True, "message": msg, "restart_needed": restart})
@@ -317,6 +561,242 @@ async def get_logs(request: web.Request) -> web.Response:
     return web.json_response({"lines": list(lines), "file": str(LOG_FILE)})
 
 
+# --------------------------------------------------------------------- working together
+async def post_presence(request: web.Request) -> web.Response:
+    payload = await request.json()
+    viewer = viewer_of(request)
+    presence = request.app[PRESENCE]
+    if payload.get("leaving"):
+        presence.leave(viewer.sid)
+        return web.json_response({"ok": True})
+    presence.ping(viewer, str(payload.get("tab", "")), bool(payload.get("dirty")))
+    return web.json_response(
+        {
+            "others": presence.others(viewer.sid),
+            "conflicts": len(await asyncio.to_thread(editing.find_conflicts)),
+            "versions": editing.versions(),
+        }
+    )
+
+
+async def get_conflicts(request: web.Request) -> web.Response:
+    return web.json_response({"conflicts": await asyncio.to_thread(editing.find_conflicts)})
+
+
+async def post_conflicts(request: web.Request) -> web.Response:
+    payload = await request.json()
+    viewer = viewer_of(request)
+    msg = editing.resolve_conflict(str(payload.get("file", "")), str(payload.get("action", "")))
+    log.info("Sync conflict %s: %s (%s)", payload.get("file"), msg, viewer.name)
+    request.app[BOT].reload_settings()
+    return web.json_response({"ok": True, "message": msg})
+
+
+# --------------------------------------------------------------------- remote access
+async def get_remote(request: web.Request) -> web.Response:
+    bot = request.app[BOT]
+    remote = request.app[REMOTE]
+    viewer = viewer_of(request)
+    if request.query.get("refresh") or time.time() - remote.checked > 30:
+        await remote.refresh()
+    cfg = bot.config.dashboard
+    redirect = (
+        f"{remote.url}/auth/callback"
+        if remote.url
+        else (
+            f"https://{remote.status.dns_name}:{tailscale.FUNNEL_PORT}/auth/callback"
+            if remote.status.dns_name
+            else None
+        )
+    )
+    return web.json_response(
+        {
+            "tailscale": remote.status.as_json(),
+            "secret_set": bool(client_secret()),
+            "redirect_uri": redirect,
+            "app_id": str(getattr(bot, "application_id", "") or ""),
+            "admin_role": cfg.admin_role or "",
+            "remote_full_access": cfg.remote_full_access,
+            "can_manage": viewer.full_access,
+            "sessions": request.app[SESSIONS].listing() if viewer.full_access else [],
+            "dashboards": store.load(DASHBOARDS),
+        }
+    )
+
+
+async def post_remote(request: web.Request) -> web.Response:
+    bot = request.app[BOT]
+    remote = request.app[REMOTE]
+    viewer = need_full_access(request)
+    payload = await request.json()
+    action = payload.get("action")
+    if action == "funnel_on":
+        res = await asyncio.to_thread(tailscale.publish, remote.port)
+        await remote.refresh()
+        publish_link(bot, remote)
+        if remote.url:
+            log.info("Dashboard put online at %s (%s)", remote.url, viewer.name)
+            return web.json_response({"ok": True, "message": f"The dashboard is online at {remote.url}"})
+        if res.approve_url:
+            return web.json_response(
+                {
+                    "ok": False,
+                    "approve_url": res.approve_url,
+                    "message": "Tailscale needs you to allow Funnel first. Open the link, approve, "
+                    "then press the button again.",
+                }
+            )
+        raise ApiError(res.output or "Tailscale couldn't put the dashboard online.")
+    if action == "funnel_off":
+        res = await asyncio.to_thread(tailscale.unpublish)
+        await remote.refresh()
+        publish_link(bot, remote)
+        log.info("Dashboard taken offline (%s)", viewer.name)
+        return web.json_response({"ok": res.ok, "message": "The dashboard is only on this PC again."})
+    if action == "save":
+        role = _str(payload, "admin_role", 100) or None
+        base = payload.get("base_version")
+        editing.check("dashboard", base, editing.versions().get("dashboard", ""))
+        save_dashboard(admin_role=role, remote_full_access=bool(payload.get("remote_full_access")))
+        secret = payload.get("client_secret")
+        if isinstance(secret, str) and secret.strip():
+            save_secrets({SECRET_NAME: secret.strip()})
+        editing.record("dashboard", viewer.name, _pc(bot))
+        bot.reload_settings()
+        log.info("Remote access settings saved (%s)", viewer.name)
+        return web.json_response({"ok": True, "message": "Saved."})
+    if action == "revoke":
+        n = (
+            request.app[SESSIONS].revoke(sid=str(payload.get("sid") or ""))
+            if payload.get("sid")
+            else (request.app[SESSIONS].revoke())
+        )
+        log.info("Signed out %d dashboard session(s) (%s)", n, viewer.name)
+        return web.json_response({"ok": True, "message": f"Signed out {n} session(s)."})
+    raise ApiError(f"Unknown action {action!r}")
+
+
+def publish_link(bot: Any, remote: Remote) -> None:
+    """Keep the shared list of dashboard links (for /pingwin dashboard) up to date for this PC."""
+    try:
+        links = store.load(DASHBOARDS)
+        pc = _pc(bot)
+        current = links.get(pc, {}).get("url")
+        if remote.url and current != remote.url:
+            links[pc] = {"url": remote.url, "at": time.time()}
+        elif not remote.url and pc in links:
+            links.pop(pc)
+        else:
+            return
+        store.save(DASHBOARDS, links)
+    except OSError as e:
+        log.warning("Couldn't update the shared dashboard links: %s", e)
+
+
+# --------------------------------------------------------------------- birthdays & members
+_names: dict[int, tuple[str, str | None]] = {}
+
+
+async def _member_name(guild: discord.Guild | None, user_id: int) -> tuple[str, str | None]:
+    if user_id in _names:
+        return _names[user_id]
+    member = guild.get_member(user_id) if guild else None
+    if member is None and guild is not None:
+        try:
+            member = await guild.fetch_member(user_id)
+        except discord.HTTPException:
+            member = None
+    found = (
+        (member.display_name, member.display_avatar.with_size(64).url)
+        if member
+        else (f"Left the server ({user_id})", None)
+    )
+    _names[user_id] = found
+    return found
+
+
+async def get_birthdays(request: web.Request) -> web.Response:
+    bot = request.app[BOT]
+    guild = _guild(bot)
+    people = store.load("birthdays").get("people", {})
+    rows = []
+    for uid, p in people.items():
+        name, avatar = await _member_name(guild, int(uid))
+        rows.append({"user_id": uid, "name": name, "avatar": avatar, "month": p["m"], "day": p["d"]})
+    rows.sort(key=lambda r: (r["month"], r["day"], r["name"].casefold()))
+    return web.json_response({"people": rows, "version": editing.state_version("birthdays")})
+
+
+async def post_birthdays(request: web.Request) -> web.Response:
+    from ..cogs.birthdays import valid_date
+
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    payload = await request.json()
+    uid = str(payload.get("user_id", ""))
+    if not uid.isdigit():
+        raise ApiError("Pick someone first.")
+    state = store.load("birthdays")
+    people = state.setdefault("people", {})
+    if payload.get("action") == "remove":
+        people.pop(uid, None)
+        verb = "Removed"
+    else:
+        try:
+            month, day = int(payload.get("month")), int(payload.get("day"))
+        except (TypeError, ValueError) as e:
+            raise ApiError("Pick a month and day.") from e
+        if not valid_date(month, day):
+            raise ApiError("That date doesn't exist.")
+        people[uid] = {"m": month, "d": day}
+        verb = "Saved"
+    store.save("birthdays", state)
+    _names.pop(int(uid), None)
+    name, _ = await _member_name(_guild(bot), int(uid))
+    editing.record("birthday-list", viewer.name, _pc(bot))
+    log.info("%s %s's birthday from the dashboard (%s)", verb, name, viewer.name)
+    return web.json_response({"ok": True, "message": f"{verb} {name}'s birthday."})
+
+
+async def get_members(request: web.Request) -> web.Response:
+    """Find members by name for pickers (works without the Server Members intent)."""
+    guild = _guild(request.app[BOT])
+    q = request.query.get("q", "").strip()
+    if guild is None or len(q) < 1:
+        return web.json_response({"members": []})
+    found: dict[int, discord.Member] = {}
+    key = q.casefold()
+    for m in guild.members:  # whatever's cached (everyone, with the Server Members intent)
+        if not m.bot and (key in m.display_name.casefold() or key in m.name.casefold()):
+            found[m.id] = m
+        if len(found) >= 10:
+            break
+    if len(found) < 10:
+        try:
+            for m in await guild.query_members(q, limit=10):
+                if not m.bot:
+                    found.setdefault(m.id, m)
+        except (TimeoutError, discord.HTTPException, discord.ClientException):
+            pass
+    return web.json_response(
+        {
+            "members": [
+                {
+                    "id": str(m.id),
+                    "name": m.display_name,
+                    "username": m.name,
+                    "avatar": m.display_avatar.with_size(64).url,
+                }
+                for m in list(found.values())[:10]
+            ]
+        }
+    )
+
+
+async def get_access(request: web.Request) -> web.Response:
+    return web.json_response(access.report(request.app[BOT]))
+
+
 # --------------------------------------------------------------------- saving
 def _str(payload: dict, key: str, limit: int = 2000) -> str:
     value = payload.get(key, "")
@@ -325,35 +805,79 @@ def _str(payload: dict, key: str, limit: int = 2000) -> str:
     return value.strip()[:limit]
 
 
-async def post_roles(request: web.Request) -> web.Response:
-    bot = request.app[BOT]
-    payload = await request.json()
-    raw_menu = payload.get("menu")
-    if not isinstance(raw_menu, list):
-        raise ApiError("menu must be a list")
-    menu = []
-    for row in raw_menu:
+def _menu_roles(raw: Any, where: str) -> list[MenuRole]:
+    if not isinstance(raw, list):
+        raise ApiError(f"{where} must be a list")
+    out = []
+    for row in raw:
         if not isinstance(row, dict):
             raise ApiError("Each menu row must be an object")
         name = _str(row, "name", 100)
         if name:
-            menu.append(
-                MenuRole(name=name, emoji=_str(row, "emoji", 100) or None, description=_str(row, "description", 200))
+            out.append(
+                MenuRole(
+                    name=name,
+                    emoji=_str(row, "emoji", 100) or None,
+                    description=_str(row, "description", 200),
+                    zone=_str(row, "zone", 64) or None,
+                )
             )
-    save_roles(
-        title=_str(payload, "title", 256) or "Pick your pings",
-        description=_str(payload, "description", 2000),
-        required_role=_str(payload, "required_role", 100) or None,
-        menu=menu,
-    )
+    return out
+
+
+async def post_roles(request: web.Request) -> web.Response:
+    bot = request.app[BOT]
+    payload = await request.json()
+    viewer = viewer_of(request)
+    editing.check("roles", payload.get("base_version"), editing.versions().get("roles", ""))
+    required = _str(payload, "required_role", 100) or None
+    if "menus" in payload:  # every menu
+        raw = payload["menus"]
+        if not isinstance(raw, list) or not raw or not isinstance(raw[0], dict):
+            raise ApiError("menus must be a list, starting with the ping menu")
+        main = raw[0]
+        extra = []
+        for m in raw[1:]:
+            if not isinstance(m, dict):
+                raise ApiError("Each menu must be an object")
+            mode = _str(m, "mode", 10) or "many"
+            if mode not in MENU_MODES:
+                raise ApiError("mode must be 'many' or 'one'")
+            title = _str(m, "title", 256) or "Menu"
+            extra.append(
+                MenuConfig(
+                    key=_str(m, "key", 40) or title,
+                    title=title,
+                    description=_str(m, "description", 2000),
+                    mode=mode,
+                    roles=tuple(_menu_roles(m.get("roles", []), "roles")),
+                )
+            )
+        save_roles(
+            title=_str(main, "title", 256) or "Pick your pings",
+            description=_str(main, "description", 2000),
+            required_role=required,
+            menu=_menu_roles(main.get("roles", []), "roles"),
+            extra=extra,
+        )
+    else:  # older pages: just the ping menu
+        save_roles(
+            title=_str(payload, "title", 256) or "Pick your pings",
+            description=_str(payload, "description", 2000),
+            required_role=required,
+            menu=_menu_roles(payload.get("menu", []), "menu"),
+        )
+    editing.record("roles", viewer.name, _pc(bot))
     bot.reload_settings()
-    log.info("Role menu settings saved from the dashboard")
-    return web.json_response({"ok": True, "message": "Saved. Refresh posted menus to show the changes in Discord."})
+    log.info("Role menu settings saved from the dashboard (%s)", viewer.name)
+    return web.json_response({"ok": True, "message": "Saved. Update posted menus to show the changes in Discord."})
 
 
 async def post_failover(request: web.Request) -> web.Response:
     bot = request.app[BOT]
     payload = await request.json()
+    viewer = viewer_of(request)
+    editing.check("failover", payload.get("base_version"), editing.versions().get("failover", ""))
     channel = _str(payload, "status_channel_id", 30)
     if channel and not channel.isdigit():
         raise ApiError("Status channel must be a channel ID")
@@ -372,8 +896,9 @@ async def post_failover(request: web.Request) -> web.Response:
         heartbeat_seconds=heartbeat,
         takeover_after_seconds=takeover,
     )
+    editing.record("failover", viewer.name, _pc(bot))
     bot.reload_settings()
-    log.info("Failover settings saved from the dashboard")
+    log.info("Failover settings saved from the dashboard (%s)", viewer.name)
     return web.json_response({"ok": True, "message": "Saved. Every PC picks this up within a minute."})
 
 
@@ -385,6 +910,9 @@ async def post_action(request: web.Request) -> web.Response:
     bot = request.app[BOT]
     payload = await request.json()
     action = payload.get("action")
+    viewer = viewer_of(request)
+    if str(action).startswith("pair_"):
+        need_full_access(request)
     guild = _guild(bot)
 
     def need_guild() -> discord.Guild:
@@ -397,6 +925,7 @@ async def post_action(request: web.Request) -> web.Response:
             bot.reload_settings()
             return web.json_response({"message": "Settings reloaded."})
         if action == "restart":
+            log.info("Restart requested from the dashboard (%s)", viewer.name)
             asyncio.get_running_loop().call_later(1, lambda: asyncio.ensure_future(bot.restart()))
             return web.json_response({"message": "Restarting… this page reconnects in about 30 seconds."})
         if action == "check_updates":
@@ -406,7 +935,10 @@ async def post_action(request: web.Request) -> web.Response:
             return web.json_response({"message": msg, "available": available})
         if action in ("check_roles", "create_roles"):
             lines = await role_report(
-                need_guild(), bot.config.roles, create_missing=action == "create_roles", actor="the dashboard"
+                need_guild(),
+                bot.config.roles,
+                create_missing=action == "create_roles",
+                actor=f"{viewer.name} (dashboard)",
             )
             return web.json_response({"lines": lines})
         if action == "post_menu":
@@ -415,7 +947,9 @@ async def post_action(request: web.Request) -> web.Response:
             channel = g.get_channel(int(channel_id)) if channel_id.isdigit() else None
             if not isinstance(channel, discord.TextChannel):
                 raise ApiError("Pick a text channel first.")
-            message = await post_menu(bot, channel, actor="the dashboard")
+            message = await post_menu(
+                bot, channel, actor=f"{viewer.name} on the dashboard", menu_key=str(payload.get("menu") or "main")
+            )
             return web.json_response({"message": f"Menu posted in #{channel.name}.", "url": message.jump_url})
         if action == "refresh_menus":
             return web.json_response({"lines": await refresh_menus(bot)})
@@ -467,23 +1001,41 @@ async def post_action(request: web.Request) -> web.Response:
 
 
 # --------------------------------------------------------------------- app
-def create_app(bot: Any, key: str) -> web.Application:
+def create_app(
+    bot: Any, key: str, *, remote: Remote | None = None, sessions: Sessions | None = None
+) -> web.Application:
     app = web.Application(middlewares=[guard], client_max_size=256 * 1024)
     app[BOT] = bot
     app[KEY] = key
+    port = getattr(getattr(getattr(bot, "config", None), "dashboard", None), "port", 8787)
+    app[REMOTE] = remote or Remote(port)
+    app[SESSIONS] = sessions or Sessions()
+    app[PRESENCE] = editing.Presence(_pc(bot))
     app.router.add_get("/", index)
     app.router.add_get("/login", login)
+    app.router.add_get("/auth/login", auth_login)
+    app.router.add_get("/auth/callback", auth_callback)
     app.router.add_get("/static/{name}", static)
     app.router.add_get("/api/state", get_state)
     app.router.add_get("/api/logs", get_logs)
     app.router.add_get("/api/setup", get_setup)
+    app.router.add_get("/api/access", get_access)
     app.router.add_get("/api/features", get_features)
     app.router.add_post("/api/features", post_features)
     app.router.add_get("/api/watchlist", get_watchlist)
     app.router.add_post("/api/watchlist", post_watchlist)
+    app.router.add_get("/api/birthdays", get_birthdays)
+    app.router.add_post("/api/birthdays", post_birthdays)
+    app.router.add_get("/api/members", get_members)
     app.router.add_post("/api/roles", post_roles)
     app.router.add_post("/api/failover", post_failover)
     app.router.add_post("/api/action", post_action)
+    app.router.add_post("/api/presence", post_presence)
+    app.router.add_get("/api/conflicts", get_conflicts)
+    app.router.add_post("/api/conflicts", post_conflicts)
+    app.router.add_get("/api/remote", get_remote)
+    app.router.add_post("/api/remote", post_remote)
+    app.router.add_post("/api/signout", signout)
     return app
 
 
@@ -491,13 +1043,20 @@ class Dashboard:
     def __init__(self, bot: Pingwin) -> None:
         self.bot = bot
         self.runner: web.AppRunner | None = None
+        self.remote: Remote | None = None
+        self._task: asyncio.Task | None = None
 
     async def start(self) -> None:
         cfg = self.bot.config.dashboard
         if not cfg.enabled:
             return
         key = load_or_create_key()
-        self.runner = web.AppRunner(create_app(self.bot, key), access_log=None)
+        self.remote = Remote(cfg.port)
+        try:
+            await self.remote.refresh()
+        except Exception as e:  # Tailscale trouble must never stop the dashboard
+            log.warning("Couldn't ask Tailscale about remote access: %s", e)
+        self.runner = web.AppRunner(create_app(self.bot, key, remote=self.remote), access_log=None)
         await self.runner.setup()
         try:
             await web.TCPSite(self.runner, "127.0.0.1", cfg.port).start()
@@ -508,8 +1067,27 @@ class Dashboard:
             return
         URL_FILE.write_text(f"http://127.0.0.1:{cfg.port}/login?key={key}\n", encoding="utf-8")
         log.info("Dashboard ready at http://127.0.0.1:%d (open it with scripts\\open_dashboard.cmd)", cfg.port)
+        if self.remote.url:
+            log.info("Dashboard is also online at %s (Sign in with Discord)", self.remote.url)
+        publish_link(self.bot, self.remote)
+        self._task = asyncio.get_running_loop().create_task(self._watch_remote())
+
+    async def _watch_remote(self) -> None:
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await self.remote.refresh()
+                publish_link(self.bot, self.remote)
+            except Exception as e:
+                log.debug("Tailscale check failed: %s", e)
+
+    @property
+    def public_url(self) -> str | None:
+        return self.remote.url if self.remote else None
 
     async def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
         if self.runner:
             await self.runner.cleanup()
             self.runner = None

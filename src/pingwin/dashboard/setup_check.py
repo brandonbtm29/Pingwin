@@ -222,11 +222,12 @@ async def gather_facts(bot: Pingwin, guild: discord.Guild | None) -> Facts:
     problems: list[str] = []
     gate_exists = False
     if guild is not None:
-        for m, role in resolve_menu(guild, cfg.roles):
-            if role is None:
-                missing.append(m.name)
-            elif role_problems(guild, role):
-                problems.append(role.name)
+        for menu in cfg.roles.menus:
+            for m, role in resolve_menu(guild, menu):
+                if role is None:
+                    missing.append(m.name)
+                elif role_problems(guild, role, pingable=not menu.is_timezone):
+                    problems.append(role.name)
         if cfg.roles.required_role:
             key = cfg.roles.required_role.casefold()
             gate_exists = any(r.name.casefold() == key for r in guild.roles)

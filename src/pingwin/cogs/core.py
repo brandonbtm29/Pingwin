@@ -38,6 +38,43 @@ class Core(commands.GroupCog, group_name="pingwin", group_description="About Pin
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
+    @app_commands.command(name="dashboard", description="Get the link to Pingwin's dashboard (admins)")
+    async def dashboard(self, interaction: discord.Interaction) -> None:
+        from .. import store
+
+        bot = self.bot
+        member = interaction.user
+        role = bot.config.dashboard.admin_role
+        allowed = isinstance(member, discord.Member) and (
+            member.guild_permissions.manage_guild
+            or member.guild_permissions.administrator
+            or (role and any(r.name.casefold() == role.casefold() for r in member.roles))
+        )
+        if not allowed:
+            need = "Manage Server" + (f" or the {role} role" if role else "")
+            await interaction.response.send_message(f"The dashboard is for members with {need}.", ephemeral=True)
+            return
+        links = store.load("dashboards")
+        if not links:
+            await interaction.response.send_message(
+                "The dashboard isn't online yet. On the PC running Pingwin, open the dashboard and turn it on "
+                "under **Status → Remote access**.",
+                ephemeral=True,
+            )
+            return
+        order = list(bot.config.failover.pcs)
+        rank = {pc.casefold(): i for i, pc in enumerate(order)}
+        lines = [
+            f"**{pc}**{' (answering now)' if pc.casefold() == bot.node.name.casefold() else ''}: {info['url']}"
+            for pc, info in sorted(links.items(), key=lambda kv: rank.get(kv[0].casefold(), 99))
+        ]
+        await interaction.response.send_message(
+            "🐧 **Pingwin dashboard**\n" + "\n".join(lines) + "\n-# Sign in with Discord. If a link doesn't open, "
+            "that PC is off: try the next one.",
+            ephemeral=True,
+            suppress_embeds=True,
+        )
+
     @app_commands.command(name="reload", description="Reload settings and personality now (mods only)")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def reload(self, interaction: discord.Interaction) -> None:

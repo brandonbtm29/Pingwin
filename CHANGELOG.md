@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0 (2026-10-19)
+- **Co-admins can use the dashboard from anywhere:** put it online with Tailscale Funnel (port 10000) from
+  **Status → Remote access**, and admins sign in with Discord. Only people with Manage Server (or a role
+  you pick) get in, rechecked every few minutes. Backup PCs and remote access stay owner-only unless you
+  allow more. `/pingwin dashboard` gives admins the link(s). Guide: [docs/REMOTE-DASHBOARD.md](docs/REMOTE-DASHBOARD.md).
+- **Editing together:** the dashboard shows who else has it open (on any PC), which tab, and whether they
+  have unsaved changes; a save that would overwrite someone's newer change is stopped with a note saying who
+  changed what; and SyncThing conflict copies are listed with a diff so you can keep one.
+- **More than one role menu:** each its own message, with "pick any" or "pick one" behaviour.
+  `/rolemenu post` takes a `menu`.
+- **Time zone menu:** one click on the Role menu tab. Picking a time zone role sets your `/timezone`, and
+  `/timezone set` gives the matching role.
+- **Birthday list** on the Features tab: add, change or remove anyone's birthday, with a member search.
+- **Can Pingwin reach everything?** on the Setup tab: checks every channel in use, the role order, and how
+  many channels Pingwin can see, with how to fix each problem.
+
 ## 0.7.1 (2026-10-19)
 - **Time zones per member:** `/timezone set | show | remove`. Times typed into `/gameday create` mean the
   creator's own time, or add a zone (`sat 7pm CT`, `8pm MT`); Pingwin replies with how it read the time.

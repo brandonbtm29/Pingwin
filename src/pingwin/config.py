@@ -63,6 +63,25 @@ class MenuRole:
     name: str
     emoji: str | None = None
     description: str = ""
+    zone: str | None = None  # time zone menus: picking this role sets the member's time zone
+
+
+MENU_MODES = ("many", "one")  # many: toggle each role; one: picking a role swaps out the others
+
+
+@dataclass(frozen=True)
+class MenuConfig:
+    """One button menu. "main" is the original ping menu; others are extra menus like a time zone picker."""
+
+    key: str
+    title: str
+    description: str
+    mode: str
+    roles: tuple[MenuRole, ...]
+
+    @property
+    def is_timezone(self) -> bool:
+        return any(r.zone for r in self.roles)
 
 
 @dataclass(frozen=True)
@@ -71,9 +90,27 @@ class RolesConfig:
     menu_title: str
     menu_description: str
     menu: tuple[MenuRole, ...]
+    extra: tuple[MenuConfig, ...] = ()
+
+    @property
+    def menus(self) -> tuple[MenuConfig, ...]:
+        main = MenuConfig("main", self.menu_title, self.menu_description, "many", self.menu)
+        return (main, *self.extra)
+
+    def get_menu(self, key: str | None) -> MenuConfig | None:
+        key = (key or "main").casefold()
+        return next((m for m in self.menus if m.key.casefold() == key), None)
+
+    def find_role(self, role_name: str) -> tuple[MenuConfig, MenuRole] | None:
+        key = role_name.casefold()
+        for menu in self.menus:
+            for r in menu.roles:
+                if r.name.casefold() == key:
+                    return menu, r
+        return None
 
     def is_menu_role(self, role_name: str) -> bool:
-        return role_name.casefold() in {m.name.casefold() for m in self.menu}
+        return self.find_role(role_name) is not None
 
 
 @dataclass(frozen=True)
@@ -107,6 +144,10 @@ class FailoverConfig:
 class DashboardConfig:
     enabled: bool = True
     port: int = 8787
+    # Who may sign in with Discord from outside this PC: anyone with Manage Server, plus this role.
+    admin_role: str | None = None
+    # Signed-in admins may also add/remove backup PCs and change remote access (normally only this PC's owner).
+    remote_full_access: bool = False
 
 
 @dataclass(frozen=True)
@@ -131,17 +172,17 @@ def _int(value: object, field: str, *, minimum: int | None = None) -> int:
     return number
 
 
-def _parse_menu(raw: object) -> tuple[MenuRole, ...]:
+def _parse_menu(raw: object, where: str = "roles.menu") -> tuple[MenuRole, ...]:
     if not isinstance(raw, list):
-        raise ConfigError("[[roles.menu]] must be a list of role blocks")
+        raise ConfigError(f"[[{where}]] must be a list of role blocks")
     menu: list[MenuRole] = []
     seen: set[str] = set()
     for i, entry in enumerate(raw, start=1):
         if not isinstance(entry, dict):
-            raise ConfigError(f"roles.menu entry {i} is not a table")
+            raise ConfigError(f"{where} entry {i} is not a table")
         name = str(entry.get("name", "")).strip()
         if not name:
-            raise ConfigError(f"roles.menu entry {i} is missing a name")
+            raise ConfigError(f"{where} entry {i} is missing a name")
         if len(name) > MAX_LABEL_LENGTH:
             raise ConfigError(f"Role name is too long for a button (max {MAX_LABEL_LENGTH}): {name}")
         key = name.casefold()
@@ -149,10 +190,57 @@ def _parse_menu(raw: object) -> tuple[MenuRole, ...]:
             raise ConfigError(f"Role listed twice in the menu: {name}")
         seen.add(key)
         emoji = str(entry.get("emoji") or "").strip() or None
-        menu.append(MenuRole(name=name, emoji=emoji, description=str(entry.get("description", "")).strip()))
+        zone = str(entry.get("zone") or "").strip() or None
+        if zone:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+            try:
+                ZoneInfo(zone)
+            except (ZoneInfoNotFoundError, ValueError) as e:
+                raise ConfigError(f"{name}: unknown time zone {zone!r} (use a name like America/Denver)") from e
+        menu.append(MenuRole(name=name, emoji=emoji, description=str(entry.get("description", "")).strip(), zone=zone))
     if len(menu) > MAX_MENU_ROLES:
-        raise ConfigError(f"The menu has {len(menu)} roles; Discord allows at most {MAX_MENU_ROLES} buttons")
+        raise ConfigError(f"A menu has {len(menu)} roles; Discord allows at most {MAX_MENU_ROLES} buttons")
     return tuple(menu)
+
+
+def _menu_key(text: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "-", text.casefold()).strip("-")[:40]
+
+
+def _parse_extra_menus(raw: object, main: tuple[MenuRole, ...]) -> tuple[MenuConfig, ...]:
+    if raw in (None, []):
+        return ()
+    if not isinstance(raw, list):
+        raise ConfigError("[[roles.extra]] must be a list of menus")
+    out: list[MenuConfig] = []
+    keys = {"main"}
+    seen_roles = {m.name.casefold(): "the ping menu" for m in main}
+    for i, entry in enumerate(raw, start=1):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"roles.extra menu {i} is not a table")
+        title = str(entry.get("title", "")).strip() or f"Menu {i + 1}"
+        key = _menu_key(str(entry.get("key", "")) or title) or f"menu-{i + 1}"
+        if key in keys:
+            raise ConfigError(f"Two menus share the name {key!r}; give each menu its own title")
+        keys.add(key)
+        mode = str(entry.get("mode", "many")).strip().lower()
+        if mode not in MENU_MODES:
+            raise ConfigError(f"Menu {title!r}: mode must be 'many' or 'one'")
+        roles = _parse_menu(entry.get("roles", []), f"roles.extra.roles (menu {title!r})")
+        for r in roles:
+            other = seen_roles.get(r.name.casefold())
+            if other:
+                raise ConfigError(f"{r.name} is in two menus ({other} and {title!r}); a role can only be in one")
+            seen_roles[r.name.casefold()] = repr(title)
+        out.append(
+            MenuConfig(
+                key=key, title=title, description=str(entry.get("description", "")).strip(), mode=mode, roles=roles
+            )
+        )
+    return tuple(out)
 
 
 def _parse_failover(raw: dict) -> FailoverConfig:
@@ -182,7 +270,12 @@ def _parse_dashboard(raw: dict) -> DashboardConfig:
     port = _int(os.environ.get("PINGWIN_DASHBOARD_PORT") or raw.get("port", 8787), "dashboard.port", minimum=1024)
     if port > 65535:
         raise ConfigError(f"dashboard.port must be at most 65535, got {port}")
-    return DashboardConfig(enabled=bool(raw.get("enabled", True)), port=port)
+    return DashboardConfig(
+        enabled=bool(raw.get("enabled", True)),
+        port=port,
+        admin_role=str(raw.get("admin_role", "")).strip() or None,
+        remote_full_access=bool(raw.get("remote_full_access", False)),
+    )
 
 
 def _parse_features(data: dict):
@@ -208,6 +301,7 @@ def parse_config(data: dict, *, require_token: bool = True) -> Config:
     bot = data.get("bot", {})
     roles = data.get("roles", {})
 
+    main_menu = _parse_menu(roles.get("menu", []))
     guild_id = _int(os.environ.get("PINGWIN_GUILD_ID") or bot.get("guild_id") or 0, "guild_id") or None
 
     token = os.environ.get("DISCORD_TOKEN", "").strip()
@@ -222,7 +316,8 @@ def parse_config(data: dict, *, require_token: bool = True) -> Config:
             required_role=str(roles.get("required_role", "")).strip() or None,
             menu_title=str(roles.get("menu_title", "Pick your pings")),
             menu_description=str(roles.get("menu_description", "")),
-            menu=_parse_menu(roles.get("menu", [])),
+            menu=main_menu,
+            extra=_parse_extra_menus(roles.get("extra", []), main_menu),
         ),
         failover=_parse_failover(data.get("failover", {})),
         dashboard=_parse_dashboard(data.get("dashboard", {})),

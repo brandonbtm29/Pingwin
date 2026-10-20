@@ -224,3 +224,65 @@ details.feature[open] > summary { border-bottom: 1px solid var(--border); }
   border-radius: 8px; padding: .65rem .85rem; box-shadow: 0 6px 20px rgba(0,0,0,.18); font-size: .9rem;
 }
 .toast.error { border-left-color: var(--bad); }
+
+/* ---------- working together ---------- */
+.top-right { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: flex-end; }
+.viewer { display: inline-flex; align-items: center; gap: .45rem; font-size: .9rem; }
+.avatar { width: 22px; height: 22px; border-radius: 50%; flex: none; object-fit: cover; }
+.avatar.letter { display: inline-grid; place-items: center; background: var(--surface-2); color: var(--muted); font-size: .75rem; font-weight: 700; }
+.btn.small { padding: .15rem .55rem; font-size: .85rem; }
+.btn.big { padding: .6rem 1.2rem; font-size: 1rem; text-decoration: none; display: inline-block; }
+.presence {
+  max-width: 980px; margin: .25rem auto 0; padding: .45rem 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem;
+  font-size: .88rem; color: var(--muted);
+}
+.presence .who { display: inline-flex; align-items: center; gap: .35rem; }
+.presence .who.here strong { color: var(--text); }
+.presence.busy { background: color-mix(in srgb, var(--warn) 12%, transparent); border-radius: var(--radius); }
+.presence em { color: var(--warn); font-style: normal; }
+.warn-banner { border-color: var(--warn); display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+.warn-text { color: var(--warn); }
+.conflicts { border-color: var(--warn); margin-bottom: 1rem; }
+#stale-banner { margin-bottom: 1rem; }
+.conflict + .conflict { border-top: 1px solid var(--border); margin-top: .75rem; padding-top: .25rem; }
+pre.diff { max-height: 18rem; overflow: auto; background: var(--surface-2); padding: .6rem; border-radius: 8px; font: .8rem/1.4 var(--mono); white-space: pre; }
+
+/* ---------- menus ---------- */
+.menu-picker { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 1rem; }
+.menu-pill {
+  display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .8rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit;
+}
+.menu-pill.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.menu-pill .count { font-size: .75rem; color: var(--muted); }
+.c-zone select { min-width: 9rem; }
+
+/* ---------- birthdays & pickers ---------- */
+.picker { position: relative; flex: 1 1 14rem; min-width: 0; }
+.picker input { width: 100%; }
+.results {
+  position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: .25rem; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
+}
+.results li { padding: .2rem .4rem; }
+.results button { display: flex; align-items: center; gap: .45rem; width: 100%; background: none; border: 0; color: inherit; font: inherit; text-align: left; padding: .3rem; border-radius: 6px; cursor: pointer; }
+.results button:hover { background: var(--surface-2); }
+.who { display: inline-flex; align-items: center; gap: .45rem; }
+.row-btns { white-space: nowrap; text-align: right; }
+
+/* ---------- access & remote ---------- */
+.access { list-style: none; padding: 0; margin: 0; display: grid; gap: .6rem; }
+.access li { display: grid; grid-template-columns: 1.6rem 1fr; gap: .6rem; align-items: start; }
+.access .fix { font-size: .88rem; margin-top: .15rem; }
+.mark.bad { border-color: var(--bad); color: var(--bad); }
+.remote-steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem; }
+.remote-steps > li { display: grid; grid-template-columns: 1.6rem 1fr; gap: .6rem; }
+.remote-steps p { margin: .2rem 0; }
+.step-body { min-width: 0; overflow-wrap: anywhere; }
+.sub-steps { margin: .3rem 0; padding-left: 1.2rem; }
+.sub-steps li { margin: .2rem 0; }
+
+/* ---------- sign-in page ---------- */
+.signin { max-width: 26rem; margin: 12vh auto; padding: 0 1rem; text-align: center; display: grid; gap: .75rem; justify-items: center; }
+.signin img { border-radius: 50%; }
+.signin-error { color: var(--bad); }
