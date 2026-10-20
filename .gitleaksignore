@@ -1,2 +1,3 @@
-# False positive: a time zone name in a test (`.key == "America/Chicago"`), not a secret.
+# False positives: a time zone name in a test, not a secret.
 164104db540c74f878e85a3c75170b516ebc9b9b:tests/test_features.py:generic-api-key:188
+22a4b1e5243a5dec9420fc15f05453cd0048073e:.gitleaksignore:generic-api-key:1
