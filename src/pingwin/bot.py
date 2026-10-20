@@ -40,6 +40,7 @@ EXTENSIONS = (
 
 SYNC_STATE = PROJECT_ROOT / ".synced-commands.json"  # per PC; remembers what Discord already has
 EXIT_RESTART = 3  # scripts/run_pingwin.cmd pulls updates and restarts right away
+EXIT_STOP = 5  # scripts/run_pingwin.cmd stops instead of restarting
 
 # Discord errors meaning "another Pingwin already answered" or "too late to answer".
 ALREADY_HANDLED = {40060, 10062}
@@ -184,6 +185,11 @@ class Pingwin(commands.Bot):
 
     async def restart(self) -> None:
         self.exit_code = EXIT_RESTART
+        await self.close()
+
+    async def stop(self) -> None:
+        """Shut down for good (until someone starts Pingwin again)."""
+        self.exit_code = EXIT_STOP
         await self.close()
 
     # ----- settings ------------------------------------------------------

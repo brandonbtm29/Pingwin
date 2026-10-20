@@ -1,6 +1,7 @@
 @echo off
 rem Runs Pingwin. Before each start it grabs updates from GitHub, and it
 rem restarts Pingwin if it crashes. Close the window to stop it.
+rem scripts\start_hidden.vbs runs this with no window (PINGWIN_HIDDEN=1).
 title Pingwin
 setlocal
 cd /d "%~dp0.."
@@ -14,6 +15,10 @@ call :update
 set CODE=%ERRORLEVEL%
 if "%CODE%"=="2" goto settings_problem
 if "%CODE%"=="4" goto already_running
+if "%CODE%"=="5" (
+    echo Pingwin was stopped.
+    exit /b 0
+)
 if "%CODE%"=="3" (
     echo Restarting to install an update...
     timeout /t 2 /nobreak >nul
@@ -24,12 +29,19 @@ timeout /t 15 /nobreak >nul
 goto loop
 
 :already_running
+if defined PINGWIN_HIDDEN exit /b 4
 echo.
 echo Pingwin is already running on this PC in another window, so this one won't start.
 pause
 exit /b 4
 
 :settings_problem
+if defined PINGWIN_HIDDEN (
+    rem Nobody can see this window, so open a visible one that shows the problem.
+    set PINGWIN_HIDDEN=
+    start "Pingwin" "%~f0"
+    exit /b 2
+)
 echo.
 echo Pingwin stopped because of a settings problem ^(see the message above^).
 echo Fix .env, config.toml or secrets.env, then run this again.

@@ -248,10 +248,10 @@ try {
     if ($NoAutostart) {
         Say "  Skipping Windows startup (-NoAutostart)."
     } else {
-        $runCmd = Join-Path $InstallDir "scripts\run_pingwin.cmd"
-        Write-Text (Join-Path $Startup "Pingwin.cmd") "@echo off`r`nrem Starts Pingwin (added by the Pingwin installer)`r`nstart `"Pingwin`" /min `"$runCmd`"`r`n"
-        $startupFiles += (Join-Path $Startup "Pingwin.cmd")
-        Ok "Pingwin will start when you sign in."
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "scripts\create_shortcuts.ps1") -Startup -Quiet
+        $startupFiles += (Join-Path $Startup "Pingwin.lnk")
+        Ok "Pingwin will start in the background when you sign in."
+        Ok "Added a Pingwin Dashboard shortcut to the desktop."
         if ($ownSyncthing) {
             $stHome = Split-Path $stConfig
             $vbs = "CreateObject(""WScript.Shell"").Run """"""$syncthing"""" serve --home """"$stHome"""" --no-browser"", 0, False"
@@ -286,8 +286,8 @@ try {
     if ($copied) { Say "  (It's already copied. Just paste it into your message.)" }
     Say "  Once they add it, the settings arrive within a minute or two and Pingwin starts on standby."
     if (-not $NoStart) {
-        Start-Process -FilePath (Join-Path $InstallDir "scripts\run_pingwin.cmd") -WindowStyle Minimized
-        Say "  Pingwin is starting in a minimized window. It waits there until the settings arrive."
+        Start-Process wscript.exe -ArgumentList "`"$(Join-Path $InstallDir 'scripts\start_hidden.vbs')`""
+        Say "  Pingwin is starting in the background. It waits until the settings arrive."
     }
     Say ""
     Say "  All set on this PC. Keep it on and awake (Settings > System > Power > Sleep: Never)." "White"

@@ -1,10 +1,4 @@
 @echo off
-rem Opens Pingwin's dashboard in your browser and signs you in. Pingwin must be running.
-cd /d "%~dp0.."
-if not exist ".dashboard-url" (
-    echo The dashboard isn't ready yet. Start Pingwin with scripts\run_pingwin.cmd first.
-    pause
-    exit /b 1
-)
-set /p URL=<".dashboard-url"
-start "" "%URL%"
+rem Opens Pingwin's dashboard in your browser and signs you in.
+rem Starts Pingwin in the background first if it isn't running.
+powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0open_dashboard.ps1"

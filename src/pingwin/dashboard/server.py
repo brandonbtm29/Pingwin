@@ -928,6 +928,13 @@ async def post_action(request: web.Request) -> web.Response:
             log.info("Restart requested from the dashboard (%s)", viewer.name)
             asyncio.get_running_loop().call_later(1, lambda: asyncio.ensure_future(bot.restart()))
             return web.json_response({"message": "Restarting… this page reconnects in about 30 seconds."})
+        if action == "stop":
+            need_full_access(request)
+            log.info("Stop requested from the dashboard (%s)", viewer.name)
+            asyncio.get_running_loop().call_later(1, lambda: asyncio.ensure_future(bot.stop()))
+            return web.json_response(
+                {"message": "Stopping Pingwin on this PC. Start it again with the Pingwin Dashboard shortcut."}
+            )
         if action == "check_updates":
             available = await updater.update_available(PROJECT_ROOT)
             bot.update_status = {"available": available, "checked_at": discord.utils.utcnow().isoformat()}
@@ -1066,7 +1073,7 @@ class Dashboard:
             self.runner = None
             return
         URL_FILE.write_text(f"http://127.0.0.1:{cfg.port}/login?key={key}\n", encoding="utf-8")
-        log.info("Dashboard ready at http://127.0.0.1:%d (open it with scripts\\open_dashboard.cmd)", cfg.port)
+        log.info("Dashboard ready at http://127.0.0.1:%d (open it with the Pingwin Dashboard shortcut)", cfg.port)
         if self.remote.url:
             log.info("Dashboard is also online at %s (Sign in with Discord)", self.remote.url)
         publish_link(self.bot, self.remote)

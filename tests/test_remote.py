@@ -134,6 +134,8 @@ def test_discord_sessions_can_edit_but_not_pair(tmp_path):
         assert r.status == 403
         r = await client.post("/api/remote", json={"action": "funnel_off"}, headers={**hdr, "Origin": ORIGIN})
         assert r.status == 403
+        r = await client.post("/api/action", json={"action": "stop"}, headers={**hdr, "Origin": ORIGIN})
+        assert r.status == 403
         r = await client.post("/api/signout", json={}, headers={**hdr, "Origin": ORIGIN})
         assert r.status == 200
         r = await client.get("/api/logs", headers=hdr)

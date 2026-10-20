@@ -1018,6 +1018,7 @@ $("access-refresh").addEventListener("click", loadAccess);
 const CONFIRM = {
   restart: "Restart Pingwin on this PC? It's back in about 30 seconds.",
   create_roles: "Create any missing menu roles in Discord?",
+  stop: "Stop Pingwin on this PC? Backup PCs take over in about 2 minutes. To start it again, use the Pingwin Dashboard shortcut on this PC.",
 };
 
 document.querySelectorAll("[data-action]").forEach((btn) => {
@@ -1030,7 +1031,7 @@ document.querySelectorAll("[data-action]").forEach((btn) => {
       const res = await api("/api/action", { action });
       if (res.lines) { showReport(res.lines); switchTab("roles"); }
       if (res.message) toast(res.message);
-      if (action !== "restart") await loadState();
+      if (action !== "restart" && action !== "stop") await loadState();
     } catch (e) { toast(e.message, true); }
     finally { btn.disabled = false; }
   });

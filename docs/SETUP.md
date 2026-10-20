@@ -141,8 +141,15 @@ A few things only you can do in Discord's own settings:
 ## 7. Optional extras
 
 ### Start Pingwin with Windows
-Double-click **`scripts\install_autostart.cmd`**. Pingwin then starts (minimized) whenever you sign in.
-To undo it, run `scripts\remove_autostart.cmd`.
+Double-click **`scripts\install_autostart.cmd`**. Pingwin then starts in the background, with no window,
+whenever you sign in, and you get a **Pingwin Dashboard** shortcut on your desktop that opens the dashboard
+(starting Pingwin first if it isn't running). Its log is on the dashboard's **Logs** tab.
+
+- **Stop it:** dashboard → **Status → Stop Pingwin**, or `scripts\stop_pingwin.cmd`.
+- **Just the shortcut:** `scripts\create_shortcuts.cmd`.
+- **Undo:** `scripts\remove_autostart.cmd`.
+
+If Pingwin can't start because of a settings problem, a window opens to show what's wrong.
 
 To keep Pingwin running, also stop the PC from sleeping: **Settings → System → Power** → set *Sleep* to *Never*.
 

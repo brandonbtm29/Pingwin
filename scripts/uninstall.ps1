@@ -99,11 +99,20 @@ try {
 
     # ------------------------------------------------------------ 2. startup
     Say "[2/5] Removing it from Windows startup" "Cyan"
+    $removed = $false
     $launcher = Join-Path $Startup "Pingwin.cmd"
     if ((Test-Path $launcher) -and (Select-String -Path $launcher -SimpleMatch $InstallDir -Quiet)) {
-        Remove-Item $launcher -Force
-        Ok "Removed."
-    } else { Ok "It wasn't set to start with Windows." }
+        Remove-Item $launcher -Force; $removed = $true
+    }
+    # Shortcuts (startup, desktop, Start menu) that point into this Pingwin folder
+    $wsh = New-Object -ComObject WScript.Shell
+    $links = @((Join-Path $Startup "Pingwin.lnk"),
+        (Join-Path ([Environment]::GetFolderPath("Desktop")) "Pingwin Dashboard.lnk"),
+        (Join-Path ([Environment]::GetFolderPath("Programs")) "Pingwin Dashboard.lnk"))
+    foreach ($l in $links) {
+        if ((Test-Path $l) -and ($wsh.CreateShortcut($l).Arguments -like "*$InstallDir*")) { Remove-Item $l -Force; $removed = $true }
+    }
+    if ($removed) { Ok "Removed Pingwin from startup and removed its shortcuts." } else { Ok "It wasn't set to start with Windows." }
 
     # ------------------------------------------------------------ 3. PC list + SyncThing
     Say "[3/5] Shared settings" "Cyan"

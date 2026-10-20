@@ -153,7 +153,7 @@ def checklist(f: Facts) -> list[Step]:
                 DONE if f.autostart else OPTIONAL,
                 "Pingwin starts when you sign in to this PC."
                 if f.autostart
-                else "Double-click scripts\\install_autostart.cmd so Pingwin comes back after a reboot.",
+                else "Double-click scripts\\install_autostart.cmd so Pingwin starts in the background after a reboot.",
                 required=False,
             )
         )
@@ -199,12 +199,14 @@ def startup_launcher() -> Path | None:
     appdata = os.environ.get("APPDATA")
     if sys.platform != "win32" or not appdata:
         return None
-    return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "Pingwin.cmd"
+    return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "Pingwin.lnk"
 
 
 async def _autostart_installed() -> bool | None:
     launcher = startup_launcher()
-    return None if launcher is None else launcher.exists()
+    if launcher is None:
+        return None
+    return launcher.exists() or launcher.with_name("Pingwin.cmd").exists()  # .cmd: older versions
 
 
 async def _auto_updates() -> bool:

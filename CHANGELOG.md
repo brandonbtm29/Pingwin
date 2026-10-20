@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 (2026-10-20)
+- Pingwin starts **in the background** with no window (`scripts\start_hidden.vbs`, used at sign-in). If a
+  settings problem stops it, a window opens to say what's wrong.
+- **Pingwin Dashboard** shortcut on the desktop and in the Start menu, with Pingwin's icon: opens the
+  dashboard, starting Pingwin first if needed. `scripts\install_autostart.cmd` adds it (or
+  `scripts\create_shortcuts.cmd` on its own). The backup PC installer adds both too.
+- **Stop Pingwin** button on the Status tab (owner only), and `scripts\stop_pingwin.cmd`.
+
 ## 0.8.0 (2026-10-19)
 - **Co-admins can use the dashboard from anywhere:** put it online with Tailscale Funnel (port 10000) from
   **Status → Remote access**, and admins sign in with Discord. Only people with Manage Server (or a role

@@ -27,7 +27,8 @@ The short version, on a Windows PC that stays on:
    `git clone https://github.com/brandonbtm29/Pingwin.git`.
 3. Double-click `scripts\setup.cmd` and paste your token when asked.
 4. Double-click `scripts\run_pingwin.cmd`, then `scripts\open_dashboard.cmd`, and follow the **Setup** tab's checklist.
-5. Optional: `scripts\install_autostart.cmd` starts Pingwin when you sign in.
+5. Optional: `scripts\install_autostart.cmd` starts Pingwin in the background (no window) when you sign
+   in, and adds a **Pingwin Dashboard** shortcut to your desktop. Stop it with **Status → Stop Pingwin**.
 
 ## Commands
 
@@ -69,7 +70,8 @@ picked, how long it runs, and what happens on a tie. Welcome and the mod log nee
 
 ## Dashboard
 
-Double-click **`scripts\open_dashboard.cmd`** while Pingwin is running. It opens a page in your
+Double-click the **Pingwin Dashboard** desktop shortcut (or `scripts\open_dashboard.cmd`; make the shortcut
+with `scripts\create_shortcuts.cmd`). It starts Pingwin in the background if needed, and opens a page in your
 browser with six tabs:
 
 - **Setup:** a checklist of what's done and what's left, a check that Pingwin can reach every channel and
