@@ -185,7 +185,7 @@ def test_zone_names_and_abbreviations():
     from pingwin import zones
 
     assert zones.zone("Mountain").key == "America/Denver"
-    assert zones.zone("ct").key == "America/Chicago"
+    assert str(zones.zone("ct")) == "America/Chicago"
     assert zones.zone("America/New_York").key == "America/New_York"
     assert zones.zone("Nowhere/Land") is None
     assert zones.split_zone("fri 8pm MT") == ("fri 8pm", ZoneInfo("America/Denver"))
