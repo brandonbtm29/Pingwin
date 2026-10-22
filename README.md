@@ -51,7 +51,7 @@ role also sets that person's time zone. A menu can let people pick any number of
 
 ## Features
 
-Seven optional features, all off until you switch them on in the dashboard's **Features** tab.
+Eight optional features, all off until you switch them on in the dashboard's **Features** tab.
 **[How to set them up](docs/FEATURES.md)**
 
 | Feature | Commands | What it does |
@@ -60,6 +60,7 @@ Seven optional features, all off until you switch them on in the dashboard's **F
 | Birthdays | `/birthday set · remove · upcoming` | A shout-out on the day; optional birthday role |
 | Movie night | `/movienight nominate · list · poll · endpoll · watched · remove` | A watchlist per series, turned into a Discord poll that announces the winner |
 | Game day sign-ups | `/gameday create · cancel` | "Who's in?" buttons and a reminder to everyone who's in |
+| Event attendance | `/attendance add · remove · code · history` | Takes attendance at Discord Events (voice or an "I'm here" button) and pays a reward into UnbelievaBoat |
 | Stream alerts | (automatic) | Posts once when a streamer goes live on Twitch or YouTube |
 | Welcome and approval | (buttons) | Welcomes new members; mods click Approve to give them Friend |
 | Mod log | (automatic) | Joins, leaves, bans, role changes, edited and deleted messages, in a private channel |

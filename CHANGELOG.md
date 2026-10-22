@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 (2026-10-22)
+- **Event attendance:** Pingwin notes who's in a Discord Event's voice channel (or taps **I'm here** at
+  in-person events, optionally with a code from the host). When the event ends, everyone who stayed long
+  enough gets a reward added to their **UnbelievaBoat** balance (like Frumples), plus an optional host bonus,
+  and Pingwin posts a recap. `/attendance add | remove | code | history`, and an Event attendance panel on
+  the Features tab to fix attendance and retry payments.
+
 ## 0.8.2 (2026-10-22)
 - If Discord hasn't allowed a privileged intent that a feature needs, Pingwin now starts anyway and pauses
   just that feature (welcome, mod log), instead of staying offline. The Features and Setup tabs say how to fix it.

@@ -270,6 +270,12 @@ pre.diff { max-height: 18rem; overflow: auto; background: var(--surface-2); padd
 .who { display: inline-flex; align-items: center; gap: .45rem; }
 .row-btns { white-space: nowrap; text-align: right; }
 
+/* ---------- attendance ---------- */
+details.event { border-top: 1px solid var(--border); padding: .5rem 0; }
+details.event summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+tr.removed td { opacity: .55; text-decoration: line-through; }
+tr.removed td.row-btns { text-decoration: none; opacity: 1; }
+
 /* ---------- access & remote ---------- */
 .access { list-style: none; padding: 0; margin: 0; display: grid; gap: .6rem; }
 .access li { display: grid; grid-template-columns: 1.6rem 1fr; gap: .6rem; align-items: start; }

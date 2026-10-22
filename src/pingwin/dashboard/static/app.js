@@ -1011,6 +1011,61 @@ $("b-save").addEventListener("click", () => {
   $("b-search").value = "";
 });
 
+// ---------- event attendance -----------------------------------------------
+const STATUS_TEXT = { paid: "paid", failed: "not paid", skipped: "", pending: "pending", "taken back": "taken back" };
+const openEvents = new Set();
+
+async function loadAttendance() {
+  let data;
+  try { data = await api("/api/attendance"); } catch { return; }
+  const panel = $("f-attendance");
+  panel.hidden = !data.events.length && !(featureData?.values?.attendance?.enabled);
+  if (!data.events.length) { put($("a-list"), el("p", { class: "hint" }, "No events yet. Attendance starts when a Discord Event begins.")); return; }
+  put($("a-list"), data.events.map((ev) => {
+    const when = new Date(ev.started_at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const counted = ev.people.filter((p) => !p.removed);
+    const pick = { m: null };
+    const search = el("input", { placeholder: "Add someone…", autocomplete: "off", "aria-label": "Add someone" });
+    const results = el("ul", { class: "results", hidden: true });
+    let t = null;
+    search.addEventListener("input", () => {
+      pick.m = null; clearTimeout(t);
+      const q = search.value.trim();
+      if (!q) { results.hidden = true; return; }
+      t = setTimeout(async () => {
+        let r; try { r = await api("/api/members?q=" + encodeURIComponent(q)); } catch { return; }
+        put(results, r.members.map((m) => el("li", {}, el("button", { type: "button", onclick: () => { pick.m = m; search.value = m.name; results.hidden = true; } }, avatar(m.avatar, m.name), m.name))));
+        results.hidden = !r.members.length;
+      }, 250);
+    });
+    const details = el("details", { class: "event", open: openEvents.has(ev.key) },
+      el("summary", {}, el("strong", {}, ev.name), el("span", { class: "hint" }, ` ${when}`),
+        el("span", { class: "tag" + (ev.finalized ? "" : " live") }, ev.finalized ? `${counted.length} came` : "happening now"),
+        ev.failed ? el("span", { class: "badge warn" }, `${ev.failed} not paid`) : null),
+      ev.code && !ev.finalized ? el("p", { class: "hint" }, "Check-in code: ", el("strong", {}, ev.code)) : null,
+      el("table", { class: "rows-table" }, el("tbody", {}, ev.people.map((p) => el("tr", { class: p.removed ? "removed" : "" },
+        el("td", {}, el("span", { class: "who" }, avatar(p.avatar, p.name), p.name)),
+        el("td", { class: "hint" }, p.checked_in ? "checked in" : p.added ? "added by a mod" : `${p.minutes} min in voice`),
+        el("td", {}, p.removed ? el("span", { class: "hint" }, "removed") : p.award ? `+${p.award}` : "",
+          p.status && STATUS_TEXT[p.status] ? el("span", { class: "badge" + (p.status === "failed" ? " warn" : p.status === "paid" ? " ok" : ""), title: p.error || "" }, ` ${STATUS_TEXT[p.status]}`) : null),
+        el("td", { class: "row-btns" }, p.removed
+          ? el("button", { class: "btn small", onclick: () => attendanceAction({ action: "add", key: ev.key, user_id: p.user_id }) }, "Count them")
+          : el("button", { class: "btn icon", "aria-label": "Remove", title: "Didn't really come", onclick: () => attendanceAction({ action: "remove", key: ev.key, user_id: p.user_id }, `Take ${p.name} off ${ev.name}?${p.status === "paid" ? " Their Frumples will be taken back." : ""}`) }, "✕")))))),
+      el("div", { class: "row-actions" },
+        el("div", { class: "picker" }, search, results),
+        el("button", { class: "btn", onclick: () => { if (!pick.m) return toast("Pick someone from the list first.", true); attendanceAction({ action: "add", key: ev.key, user_id: pick.m.id }); } }, "Add"),
+        ev.failed ? el("button", { class: "btn primary", onclick: () => attendanceAction({ action: "pay", key: ev.key }) }, "Retry paying") : null),
+    );
+    details.addEventListener("toggle", () => { details.open ? openEvents.add(ev.key) : openEvents.delete(ev.key); });
+    return details;
+  }));
+}
+
+async function attendanceAction(body, confirmText) {
+  if (confirmText && !window.confirm(confirmText)) return;
+  try { const r = await api("/api/attendance", body); toast(r.message); await loadAttendance(); } catch (e) { toast(e.message, true); }
+}
+
 // ---------- can Pingwin reach everything ----------------------------------
 const ACCESS_MARK = { ok: "✓", warn: "!", bad: "✕" };
 async function loadAccess() {
@@ -1103,7 +1158,7 @@ function switchTab(name) {
   if (name === "logs") loadLogs();
   if (name === "setup") loadSetup();
   if (name === "pcs") loadShared();
-  if (name === "features") { loadFeatures(); loadBirthdays(); }
+  if (name === "features") { loadFeatures(); loadBirthdays(); loadAttendance(); }
   if (name === "setup") loadAccess();
   if (name === "status") loadRemote();
   pingPresence();

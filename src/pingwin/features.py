@@ -206,6 +206,67 @@ SECTIONS: list[dict[str, Any]] = [
         ],
     },
     {
+        "key": "attendance",
+        "title": "Event attendance and Frumples",
+        "description": "Pingwin takes attendance at Discord Events: everyone who stays in the event's voice channel "
+        'long enough counts, and in-person events get an "I\'m here" button. When the event ends it adds Frumples '
+        "in UnbelievaBoat and posts a recap.",
+        "fields": [
+            F("enabled", "toggle", "Turn on attendance", False),
+            F("channel", "channel", "Post recaps and check-in buttons in", None, "For example #events."),
+            F("currency", "text", "Currency name", "Frumples"),
+            F("amount", "number", "Frumples per event attended", 10, min=0, max=100000),
+            F("host_bonus", "number", "Extra for the host (whoever created the event)", 0, min=0, max=100000),
+            F(
+                "min_minutes",
+                "number",
+                "Minutes in the voice channel to count (shorter events need half their length)",
+                30,
+                min=1,
+                max=600,
+            ),
+            F(
+                "checkin",
+                "select",
+                '"I\'m here" button',
+                "external",
+                options=[
+                    ["external", "Only for in-person events (location set to Somewhere Else)"],
+                    ["all", "For every event"],
+                    ["off", "Never"],
+                ],
+            ),
+            F(
+                "require_code",
+                "toggle",
+                "Check-in needs a code the host announces (they get it with /attendance code)",
+                False,
+            ),
+            F(
+                "payout",
+                "select",
+                "Pay Frumples",
+                "unbelievaboat",
+                options=[["unbelievaboat", "Into UnbelievaBoat balances"], ["off", "Don't pay; just keep attendance"]],
+            ),
+            F(
+                "balance",
+                "select",
+                "UnbelievaBoat balance to add to",
+                "cash",
+                options=[["cash", "Cash"], ["bank", "Bank"]],
+            ),
+            F(
+                "UNBELIEVABOAT_TOKEN",
+                "secret",
+                "UnbelievaBoat API token",
+                None,
+                "unbelievaboat.com/applications → Create Application → copy the token, then use its Authorize link to "
+                "add it to your server (needs the Economy permission).",
+            ),
+        ],
+    },
+    {
         "key": "welcome",
         "title": "Welcome and approval",
         "description": "New members get a welcome message, and mods get a card with Approve and Deny buttons. "

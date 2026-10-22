@@ -51,6 +51,8 @@ def configured_channels(bot: Pingwin) -> list[tuple[str, int, set[str]]]:
         add("Approved announcements", f.welcome.approved_channel)
     if f.modlog.enabled:
         add("Mod log", f.modlog.channel)
+    if f.attendance.enabled:
+        add("Attendance recaps", f.attendance.channel)
     for pm in menus.load_menus():
         menu = bot.config.roles.get_menu(pm.menu)
         add(f"Role menu ({menu.title if menu else pm.menu})", pm.channel_id)

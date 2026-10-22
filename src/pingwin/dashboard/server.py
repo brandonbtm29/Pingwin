@@ -795,6 +795,77 @@ async def get_members(request: web.Request) -> web.Response:
     )
 
 
+async def get_attendance(request: web.Request) -> web.Response:
+    import time as _time
+
+    from ..cogs.attendance import STATE, seconds_present
+
+    bot = request.app[BOT]
+    guild = _guild(bot)
+    sessions = store.load(STATE).get("sessions", {})
+    cutoff = _time.time() - 45 * 86400
+    rows = []
+    for key, s in sorted(sessions.items(), key=lambda kv: -kv[1]["started_at"]):
+        if s["started_at"] < cutoff:
+            continue
+        now = s.get("ended_at") or _time.time()
+        ids = (
+            s.get("attendees")
+            if s.get("finalized")
+            else sorted(set(s["seconds"]) | set(s["open"]) | set(s["checked_in"]) | set(s["added"]))
+        )
+        people = []
+        for uid in ids or []:
+            name, avatar = await _member_name(guild, int(uid))
+            award = s.get("awards", {}).get(uid, {})
+            people.append(
+                {
+                    "user_id": uid,
+                    "name": name,
+                    "avatar": avatar,
+                    "minutes": round(seconds_present(s, uid, now) / 60),
+                    "checked_in": uid in s["checked_in"],
+                    "added": uid in s["added"],
+                    "removed": uid in s["removed"],
+                    "award": award.get("amount"),
+                    "status": award.get("status"),
+                    "error": award.get("error"),
+                }
+            )
+        rows.append(
+            {
+                "key": key,
+                "name": s["name"],
+                "started_at": s["started_at"],
+                "ended_at": s.get("ended_at"),
+                "finalized": s.get("finalized", False),
+                "kind": s.get("kind"),
+                "code": s.get("code"),
+                "people": people,
+                "failed": sum(1 for a in s.get("awards", {}).values() if a.get("status") == "failed"),
+            }
+        )
+    return web.json_response({"events": rows[:20]})
+
+
+async def post_attendance(request: web.Request) -> web.Response:
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    payload = await request.json()
+    action = payload.get("action")
+    if action not in ("add", "remove", "pay"):
+        raise ApiError("Unknown action")
+    cog = bot.get_cog("Attendance") if hasattr(bot, "get_cog") else None
+    if cog is None:
+        raise ApiError("Attendance isn't loaded. Restart Pingwin.", 409)
+    uid = str(payload.get("user_id", ""))
+    if action != "pay" and not uid.isdigit():
+        raise ApiError("Pick someone first.")
+    msg = await cog.change(str(payload.get("key", "")), uid, action)
+    log.info("Attendance %s %s for %s (%s)", action, uid or "", payload.get("key"), viewer.name)
+    return web.json_response({"ok": True, "message": msg})
+
+
 async def get_access(request: web.Request) -> web.Response:
     return web.json_response(access.report(request.app[BOT]))
 
@@ -1036,6 +1107,8 @@ def create_app(
     app.router.add_get("/api/birthdays", get_birthdays)
     app.router.add_post("/api/birthdays", post_birthdays)
     app.router.add_get("/api/members", get_members)
+    app.router.add_get("/api/attendance", get_attendance)
+    app.router.add_post("/api/attendance", post_attendance)
     app.router.add_post("/api/roles", post_roles)
     app.router.add_post("/api/failover", post_failover)
     app.router.add_post("/api/action", post_action)

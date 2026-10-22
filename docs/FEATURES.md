@@ -1,6 +1,6 @@
 # Pingwin's features
 
-Besides the ping menu, Pingwin has seven optional features. They're all **off** until you turn them on.
+Besides the ping menu, Pingwin has eight optional features. They're all **off** until you turn them on.
 
 The easiest way to set them up is the dashboard's **Features** tab (`scripts\open_dashboard.cmd`). Each
 feature is a section you can open, switch on, and fill in. Changes save to the shared `config.toml`, so
@@ -12,6 +12,7 @@ every PC gets them. You can also edit `config.toml` by hand: each feature is its
 | [Birthdays](#birthdays) | Members save their birthday; Pingwin posts a shout-out on the day | Nothing extra |
 | [Movie night](#movie-night) | A watchlist per series, turned into a Discord poll that announces the winner | Nothing extra |
 | [Game day sign-ups](#game-day-sign-ups) | A "Who's in?" card with buttons, plus a reminder to everyone who's in | Nothing extra |
+| [Event attendance](#event-attendance-and-frumples) | Takes attendance at Discord Events and adds a reward (like Frumples) in UnbelievaBoat | A free UnbelievaBoat API token |
 | [Stream alerts](#stream-alerts) | Posts once when a streamer goes live on Twitch or YouTube | Free Twitch and/or YouTube keys |
 | [Welcome and approval](#welcome-and-approval) | Welcomes new members; mods approve them with a button | **Server Members** intent |
 | [Mod log](#mod-log) | Records joins, leaves, role changes, edits and deletes in a private channel | **Server Members** intent (+ **Message Content** for edits and deletes) |
@@ -65,6 +66,37 @@ its name and description and pings every role whose keywords appear in it.
    when it starts, and whether to also ping people who clicked *Interested*.
 
 Each event is announced, reminded and started only once, even when several PCs are running Pingwin.
+
+## Event attendance and Frumples
+
+Pingwin takes attendance at your Discord Events and pays the reward into **UnbelievaBoat**, so balances
+stay where everyone already checks them.
+
+- **Voice events** (location: a voice channel): anyone in the event's voice channel while it runs is
+  noted. Staying 30 minutes (adjustable) counts; events shorter than that need half their length.
+- **In-person events** (location: Somewhere Else): when the event starts, Pingwin posts an **I'm here**
+  button. Optionally it needs a 4-letter code that the host announces; the host gets it with
+  `/attendance code`.
+- **When it ends** (the host ends it, its end time passes, or everyone has left the voice channel for 15
+  minutes), Pingwin adds the reward in UnbelievaBoat (plus an optional host bonus) and posts a recap.
+
+| Command | Who | What |
+|---|---|---|
+| `/attendance add member [event]` | Mods | Count someone (pays them if the event already ended) |
+| `/attendance remove member [event]` | Mods | Take someone off (takes the reward back if it was paid) |
+| `/attendance code` | Host or mods | The check-in code for an event happening now |
+| `/attendance history [member]` | Everyone | Events someone came to recently |
+
+The **Event attendance** panel on the Features tab shows recent events and who came, with buttons to add
+or remove people and to retry payments that didn't go through.
+
+**UnbelievaBoat token**
+
+1. Go to [unbelievaboat.com/applications](https://unbelievaboat.com/applications) and sign in with Discord.
+2. **Create Application** (any name, like Pingwin), then copy its **token** into the Features tab.
+3. Use the application's **Authorize** link to add it to your server, with the **Economy** permission.
+
+Pingwin only adds to (or takes back from) balances for attendance; it doesn't read or change anything else.
 
 ## Birthdays
 

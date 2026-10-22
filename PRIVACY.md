@@ -48,6 +48,7 @@ Everything stays on the operator's computers (and any backup PCs they set up):
 | **Movie watchlists** (if on): each nominated title, who nominated it (user ID) and when, and running polls | Running movie night | Until the movie is removed |
 | **Game day sign-ups** (if on): the title, time, host and who answered In / Maybe / Can't (user IDs) | Reminders | About two days after the game |
 | **Welcome approvals** (if on): the new member's user ID and whether a mod approved or denied them | Keeping the buttons working | Until the operator deletes `state/approvals.json` |
+| **Event attendance** (if on): for each event, the user IDs of people in its voice channel and for how long, who checked in or was added by a mod, and what they were paid | Paying rewards and showing attendance history | About 4 months |
 | **Time zones**: your user ID and the time zone you picked with `/timezone set` | Reading the times you type; birthday timing | Until you run `/timezone remove` |
 | **Dashboard sign-ins** (if the operator puts the dashboard online): the Discord ID, name and picture link of admins who sign in with Discord | Keeping them signed in | 14 days, or until they sign out |
 | **Who's editing**: the names of admins with a dashboard open, and who last saved each settings section | Warning people who edit at the same time | Removed about a minute after they close it; last-saved names until the next save |
@@ -64,6 +65,9 @@ server, and you can remove one at any time by tapping its button again.
   sent.
 - **Twitch and YouTube:** if stream alerts are on, Pingwin asks them whether the listed streamers are live.
   No Discord user data is sent.
+- **UnbelievaBoat:** if attendance rewards are on, Pingwin tells UnbelievaBoat (another Discord bot's
+  service) the user ID of each attendee and how much to add to their balance. See
+  [UnbelievaBoat's privacy policy](https://unbelievaboat.com/privacy).
 - **Tailscale:** only if the operator puts the dashboard online. Visitors' requests pass through
   Tailscale's Funnel relay. See [Tailscale's privacy policy](https://tailscale.com/privacy-policy).
 - **Nobody else.** Unless the operator puts it online, Pingwin's dashboard only answers on their own computer.
