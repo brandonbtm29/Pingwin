@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.2 (2026-10-22)
+- If Discord hasn't allowed a privileged intent that a feature needs, Pingwin now starts anyway and pauses
+  just that feature (welcome, mod log), instead of staying offline. The Features and Setup tabs say how to fix it.
+
 ## 0.8.1 (2026-10-20)
 - Pingwin starts **in the background** with no window (`scripts\start_hidden.vbs`, used at sign-in). If a
   settings problem stops it, a window opens to say what's wrong.

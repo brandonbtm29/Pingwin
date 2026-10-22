@@ -477,6 +477,8 @@ async def get_features(request: web.Request) -> web.Response:
             "values": f.as_json(),
             "intents": {"members": f.needs_members, "message_content": f.needs_message_content},
             "restart_needed": getattr(bot, "restart_needed", False),
+            "missing_intents": getattr(bot, "missing_intents", []),
+            "app_id": str(getattr(bot, "application_id", "") or ""),
             "versions": editing.versions(),
         }
     )

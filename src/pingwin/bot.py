@@ -53,11 +53,18 @@ class PingwinTree(app_commands.CommandTree):
 
 
 class Pingwin(commands.Bot):
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, *, without_privileged: bool = False) -> None:
         intents = discord.Intents.default()
         # Privileged intents only when a feature needs them (they must also be on in the Developer Portal).
-        intents.members = config.features.needs_members
-        intents.message_content = config.features.needs_message_content
+        # without_privileged: Discord refused them, so run without and pause the features that need them.
+        intents.members = config.features.needs_members and not without_privileged
+        intents.message_content = config.features.needs_message_content and not without_privileged
+        self.missing_intents: list[str] = []
+        if without_privileged:
+            if config.features.needs_members:
+                self.missing_intents.append("Server Members Intent")
+            if config.features.needs_message_content:
+                self.missing_intents.append("Message Content Intent")
         super().__init__(
             command_prefix=commands.when_mentioned,
             intents=intents,

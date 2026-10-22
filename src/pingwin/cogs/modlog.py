@@ -88,7 +88,8 @@ class ModLog(commands.Cog):
 
     # ------------------------------------------------------------ messages
     def _skip_message(self, message: discord.Message, ch: discord.TextChannel) -> bool:
-        return message.author.bot or message.channel.id == ch.id
+        # Without the Message Content intent every message looks empty, so there's nothing useful to log.
+        return message.author.bot or message.channel.id == ch.id or not self.bot.intents.message_content
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
@@ -109,6 +110,8 @@ class ModLog(commands.Cog):
             return  # handled above
         guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
         if not ((ch := self._channel(guild)) and self.cfg.messages) or payload.channel_id == ch.id:
+            return
+        if not self.bot.intents.message_content:
             return
         await self._send(
             ch,

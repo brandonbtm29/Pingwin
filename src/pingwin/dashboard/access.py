@@ -68,6 +68,18 @@ def report(bot: Pingwin) -> dict[str, Any]:
     me = guild.me
     items: list[dict[str, str]] = []
 
+    missing = getattr(bot, "missing_intents", [])
+    if missing:
+        items.append(
+            _item(
+                BAD,
+                "Welcome and the mod log are paused",
+                f"Discord hasn't allowed {' and '.join(missing)} for Pingwin.",
+                "Discord Developer Portal → your app → Bot → Privileged Gateway Intents: turn on "
+                f"{' and '.join(missing)}, click Save Changes, then restart Pingwin.",
+            )
+        )
+
     # Roles Pingwin hands out
     if not me.guild_permissions.manage_roles:
         items.append(

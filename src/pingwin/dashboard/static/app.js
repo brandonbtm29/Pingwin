@@ -572,6 +572,14 @@ async function loadFeatures(force = false) {
   if (featureData && !force && Object.values(featureDrafts).some((d) => d.dirty)) return;
   try { featureData = await api("/api/features"); } catch (e) { toast(e.message, true); return; }
   $("f-restart").hidden = !featureData.restart_needed;
+  const missing = featureData.missing_intents || [];
+  $("f-intents").hidden = !missing.length;
+  if (missing.length) {
+    const portal = featureData.app_id ? `https://discord.com/developers/applications/${featureData.app_id}/bot` : "https://discord.com/developers/applications";
+    put($("f-intents"), el("span", {}, `Welcome and the mod log are paused: Discord hasn't allowed ${missing.join(" and ")} for Pingwin. Turn ${missing.length > 1 ? "them" : "it"} on under `,
+      el("a", { href: portal, target: "_blank", rel: "noreferrer" }, "Developer Portal → Bot → Privileged Gateway Intents"), ", click Save Changes, then restart Pingwin."),
+      el("button", { class: "btn", "data-action": "restart", onclick: async () => { try { toast((await api("/api/action", { action: "restart" })).message); } catch (e) { toast(e.message, true); } } }, "Restart Pingwin"));
+  }
   renderFeatures();
   loadWatchlist();
 }

@@ -97,17 +97,19 @@ def main() -> int:
         log.error("Discord rejected the token. Reset it in the Developer Portal and update secrets.env.")
         return EXIT_CONFIG_ERROR
     except discord.PrivilegedIntentsRequired:
-        needed = []
-        if config.features.needs_members:
-            needed.append("Server Members Intent")
-        if config.features.needs_message_content:
-            needed.append("Message Content Intent")
-        log.error(
-            "A feature you turned on needs %s. Turn it on in the Discord Developer Portal "
-            "(your app -> Bot -> Privileged Gateway Intents), then start Pingwin again.",
-            " and ".join(needed) or "a privileged intent",
+        # Don't let one feature keep the whole bot offline: start without those intents and say what's paused.
+        bot = Pingwin(config, without_privileged=True)
+        log.warning(
+            "Discord hasn't allowed %s for Pingwin yet, so the features that need it (welcome, mod log) are paused. "
+            "Turn it on in the Discord Developer Portal (your app -> Bot -> Privileged Gateway Intents), then "
+            "restart Pingwin. Starting without it for now.",
+            " and ".join(bot.missing_intents) or "a privileged intent",
         )
-        return EXIT_CONFIG_ERROR
+        try:
+            bot.run(config.token, log_handler=None)
+        except discord.LoginFailure:
+            log.error("Discord rejected the token. Reset it in the Developer Portal and update secrets.env.")
+            return EXIT_CONFIG_ERROR
     finally:
         lock.close()
     return bot.exit_code
