@@ -230,3 +230,15 @@ def test_birthdays_go_out_in_each_members_morning():
     later = datetime(2026, 10, 20, 11, 5, tzinfo=eastern)  # 9:05 MT
     assert due_now(people, {"1": "2026-10-20"}, saved, eastern, 9, later) == [("2", "2026-10-20")]
     assert due_now(people, {"1": "2026-10-20", "2": "2026-10-20"}, saved, eastern, 9, later) == []
+
+
+def test_discord_go_live_matching_and_text():
+    from types import SimpleNamespace
+
+    from pingwin.cogs.streams import format_alert, matches_member
+
+    m = SimpleNamespace(name="streamer_sam", display_name="Sam Streams", global_name="Sam Streams", id=238)
+    assert matches_member("streamer_sam", m) and matches_member("@Sam Streams", m) and matches_member("238", m)
+    assert not matches_member("", m) and not matches_member("someone", m)
+    live = [{"platform": "Discord", "line": "Watch in <#5>", "title": "", "game": "", "url": "x"}]
+    assert format_alert("🔴 **{name}** is live! {title}\n{links}", "Sam Streams", live).endswith("Watch in <#5>")

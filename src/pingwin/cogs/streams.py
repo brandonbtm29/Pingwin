@@ -1,4 +1,4 @@
-"""Stream alerts: post once when a streamer goes live on Twitch or YouTube."""
+"""Stream alerts: post once when a streamer goes live on Twitch, YouTube, or in a Discord voice channel."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ YT_NS = {"yt": "http://www.youtube.com/xml/schemas/2015", "a": "http://www.w3.or
 def format_alert(template: str, name: str, live: list[dict]) -> str:
     title = next((x["title"] for x in live if x.get("title")), "")
     game = next((x["game"] for x in live if x.get("game")), "")
-    links = "\n".join(f"{x['platform']}: {x['url']}" for x in live)
+    links = "\n".join(x.get("line") or f"{x['platform']}: {x['url']}" for x in live)
     return (
         template.replace("{name}", name)
         .replace("{title}", title)
@@ -32,6 +32,18 @@ def format_alert(template: str, name: str, live: list[dict]) -> str:
         .replace("{links}", links)
         .replace("\\n", "\n")
     )
+
+
+DISCORD_REPEAT_GAP = 20 * 60  # Go Live again within this long (e.g. a dropped stream) doesn't re-alert
+
+
+def matches_member(handle: str, member: discord.abc.User) -> bool:
+    """Does a 'Discord username' cell refer to this member? Username, display name or ID; @ optional."""
+    want = (handle or "").strip().lstrip("@").casefold()
+    if not want:
+        return False
+    names = {member.name, getattr(member, "display_name", ""), getattr(member, "global_name", "") or "", str(member.id)}
+    return want in {n.casefold() for n in names if n}
 
 
 class StreamAlerts(commands.Cog):
@@ -75,8 +87,10 @@ class StreamAlerts(commands.Cog):
         return {"Client-Id": cid, "Authorization": f"Bearer {self._twitch_token[0]}"}
 
     async def twitch_live(self, logins: list[str]) -> dict[str, dict]:
+        if not logins:
+            return {}
         headers = await self._twitch_headers()
-        if not headers or not logins:
+        if not headers:
             return {}
         params = [("user_login", login.lower()) for login in logins]
         async with self.session.get("https://api.twitch.tv/helix/streams", params=params, headers=headers) as r:
@@ -194,6 +208,43 @@ class StreamAlerts(commands.Cog):
     @check.before_loop
     async def _wait(self) -> None:
         await self.bot.wait_until_ready()
+
+    # ------------------------------------------------------------ Discord Go Live
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
+    ) -> None:
+        cfg = self.cfg
+        if not (cfg.enabled and cfg.discord_live and self.bot.is_active) or member.bot:
+            return
+        started = bool(after.self_stream and after.channel) and not (before.self_stream and before.channel)
+        stopped = bool(before.self_stream) and not (after.self_stream and after.channel)
+        if not (started or stopped):
+            return
+        streamer = next((s for s in cfg.streamers if matches_member(getattr(s, "discord", ""), member)), None)
+        if streamer is None:
+            return
+        state = store.load(STATE)
+        rec = state.setdefault(f"discord:{member.id}", {"live": False, "at": 0})
+        now = time.time()
+        if stopped:
+            rec["live"] = False
+        elif not rec["live"]:
+            rec["live"] = True
+            if now - rec.get("at", 0) > DISCORD_REPEAT_GAP:
+                rec["at"] = now
+                game = next((a.name for a in getattr(member, "activities", ()) if isinstance(a, discord.Game)), "")
+                live = [
+                    {
+                        "platform": "Discord",
+                        "line": f"Watch in {after.channel.mention}",
+                        "title": "",
+                        "game": game,
+                        "url": after.channel.jump_url,
+                    }
+                ]
+                await self.announce(streamer.name or member.display_name, live)
+        store.save(STATE, state)
 
     async def announce(self, name: str, live: list[dict]) -> None:
         channel = self.bot.text_channel(self.cfg.channel)

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.2 (2026-10-23)
+- **Stream alerts for Discord Go Live:** when a listed streamer starts streaming (screen share) in a voice
+  channel, Pingwin posts right away with the channel to join. No keys needed; add their Discord username to
+  their row. Twitch and YouTube work as before.
+
 ## 0.9.1 (2026-10-23)
 - Dashboard: every feature on the Features tab links to its setup guide, and the About section links to the
   features and remote access guides. The stream alerts guide explains how to find Twitch and YouTube handles.

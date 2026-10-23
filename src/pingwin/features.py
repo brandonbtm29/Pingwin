@@ -163,9 +163,17 @@ SECTIONS: list[dict[str, Any]] = [
     {
         "key": "streams",
         "title": "Stream alerts",
-        "description": "Pingwin checks Twitch and YouTube and posts once when a streamer goes live.",
+        "description": "Pingwin posts once when a streamer goes live: on Twitch, on YouTube, or with Go Live "
+        "(screen share) in a Discord voice channel.",
         "fields": [
             F("enabled", "toggle", "Turn on stream alerts", False),
+            F(
+                "discord_live",
+                "toggle",
+                "Alert when they Go Live in a Discord voice channel",
+                True,
+                "Needs only their Discord username below; no keys.",
+            ),
             F("channel", "channel", "Post in", None, "For example #stream."),
             F("role", "role", "Ping this role", "", "For example Stream Squad."),
             F("check_minutes", "number", "Check every (minutes)", 3, min=2, max=60),
@@ -181,9 +189,10 @@ SECTIONS: list[dict[str, Any]] = [
                 "rows",
                 "Streamers",
                 [],
-                "Twitch login name and/or YouTube handle (like @name).",
+                "Their Discord username for Go Live alerts, and/or Twitch login and YouTube handle (like @name).",
                 columns=[
                     {"key": "name", "type": "text", "label": "Name"},
+                    {"key": "discord", "type": "text", "label": "Discord username"},
                     {"key": "twitch", "type": "text", "label": "Twitch login"},
                     {"key": "youtube", "type": "text", "label": "YouTube handle"},
                 ],

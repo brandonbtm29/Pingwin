@@ -151,11 +151,17 @@ dashboard) and pings them when it starts. `/gameday cancel` cancels it (the host
 
 ## Stream alerts
 
-Pingwin checks every few minutes and posts once per stream, with a link.
+Pingwin posts once per stream, with a link, when a streamer goes live:
+
+- **In a Discord voice channel** (Go Live / screen share): instantly, no keys needed. The alert says which
+  voice channel to join.
+- **On Twitch or YouTube:** checked every few minutes, using free API keys.
 
 1. Turn on **Stream alerts**, pick the channel and the role to ping (for example *Stream Squad*).
-2. Add each streamer: a name, their Twitch login and/or their YouTube handle (like `@name`).
-3. Add the keys for whichever sites you use. They're free and stored in `secrets.env`, never in `config.toml`.
+2. Add each streamer: a name, plus their **Discord username** (for Go Live alerts), Twitch login and/or
+   YouTube handle (like `@name`). Fill in only what they use.
+3. For Twitch or YouTube, paste the keys into the same section (**Twitch client ID**, **Twitch client secret**,
+   **YouTube API key** at the bottom) and click **Save**. They're stored in `secrets.env`, never in `config.toml`.
 
 **Finding a streamer's handles** (easiest: ask them)
 
