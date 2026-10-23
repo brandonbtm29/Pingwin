@@ -6,10 +6,12 @@ are picked, how long polls run, and what happens on a tie.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import random
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import discord
@@ -18,6 +20,7 @@ from discord.ext import commands, tasks
 
 from .. import store
 from ..features import slug
+from ..timeparse import next_weekly
 
 if TYPE_CHECKING:
     from ..bot import Pingwin
@@ -32,6 +35,25 @@ def pick_options(noms: list[dict], how: str, count: int) -> list[dict]:
     if how == "random":
         return random.sample(unwatched, min(count, len(unwatched)))
     return sorted(unwatched, key=lambda n: n["added"])[:count]
+
+
+SOONEST = timedelta(minutes=5)  # a showtime closer than this means next week's
+
+
+def poll_close(showtime: str, now: datetime, hours: int | None, default_hours: int) -> tuple[datetime, int]:
+    """When a poll should close, and the whole-hour duration to give Discord (it only takes hours).
+
+    Explicit hours win. Otherwise, with a showtime, the poll closes at the next showtime and Pingwin ends
+    it then (Discord's own timer runs up to an hour longer). Otherwise the default length.
+    """
+    if hours is None and showtime:
+        start = next_weekly(showtime, now)
+        if start is not None:
+            if start - now < SOONEST:
+                start += timedelta(days=7)
+            return start, max(1, min(768, math.ceil((start - now).total_seconds() / 3600)))
+    h = hours or default_hours
+    return now + timedelta(hours=h), h
 
 
 def winners(counts: list[tuple[str, int]]) -> list[str]:
@@ -205,7 +227,9 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
 
     @app_commands.command(name="poll", description="Start a poll from the watchlist")
     @app_commands.describe(
-        series="Which movie night", hours="How long the poll runs", question="What the poll asks (optional)"
+        series="Which movie night",
+        hours="How long the poll runs (default: until the series' showtime)",
+        question="What the poll asks (optional)",
     )
     @app_commands.autocomplete(series=series_autocomplete)
     async def poll(
@@ -233,10 +257,12 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
                 "The watchlist needs at least 2 unwatched movies for a poll.", ephemeral=True
             )
             return
-        hours = hours or self.cfg.poll_hours
+        closes, hours = poll_close(
+            getattr(s, "showtime", ""), datetime.now(self.bot.features.tz), hours, self.cfg.poll_hours
+        )
         question = question or f"{s.name}: what should we watch?"
         if self.cfg.pick == "choose" and len(unwatched) > 2:
-            view = ChooseView(self, s, unwatched, hours, question, interaction.user.id)
+            view = ChooseView(self, s, unwatched, hours, question, interaction.user.id, closes)
             await interaction.response.send_message(
                 f"Pick up to {min(self.cfg.poll_options, len(unwatched))} movies for the poll:",
                 view=view,
@@ -247,7 +273,7 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
             data["nominations"], "random" if self.cfg.pick == "random" else "oldest", self.cfg.poll_options
         )
         await interaction.response.defer(ephemeral=True)
-        msg = await self.start_poll(interaction, s, picks, hours, question)
+        msg = await self.start_poll(interaction, s, picks, hours, question, closes)
         if msg:
             await interaction.followup.send(f"Poll posted: {msg.jump_url}", ephemeral=True)
 
@@ -279,17 +305,27 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
 
     # ------------------------------------------------------------ polls
     async def start_poll(
-        self, interaction: discord.Interaction, s, picks: list[dict], hours: int, question: str
+        self,
+        interaction: discord.Interaction,
+        s,
+        picks: list[dict],
+        hours: int,
+        question: str,
+        closes: datetime | None = None,
     ) -> discord.Message | None:
         channel = self.bot.text_channel(s.channel) or interaction.channel
+        closes = closes or discord.utils.utcnow() + timedelta(hours=hours)
+        early = closes < discord.utils.utcnow() + timedelta(hours=hours) - timedelta(minutes=1)
         poll = discord.Poll(question=question[:300], duration=timedelta(hours=hours), multiple=self.cfg.multiple)
         for n in picks:
             t = n["title"]
             poll.add_answer(text=t if len(t) <= ANSWER_LIMIT else t[: ANSWER_LIMIT - 1] + "…")
         role = self.bot.role_named(channel.guild, s.role)
+        ts = int(closes.timestamp())
+        note = f"Voting closes <t:{ts}:F> (<t:{ts}:R>)" + (", right when the movie starts. 🍿" if early else ".")
         try:
             msg = await channel.send(
-                content=role.mention if role else None,
+                content=((role.mention + " ") if role else "") + note,
                 poll=poll,
                 allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
             )
@@ -302,7 +338,8 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
                 "message_id": msg.id,
                 "channel_id": channel.id,
                 "options": [n["id"] for n in picks],
-                "ends": (discord.utils.utcnow() + timedelta(hours=hours)).isoformat(),
+                "ends": closes.astimezone(discord.utils.utcnow().tzinfo).isoformat(),
+                "end_early": early,
                 "status": "open",
                 "by": interaction.user.id,
             }
@@ -311,7 +348,7 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
         log.info("%s poll started with %d movies", s.name, len(picks))
         return msg
 
-    @tasks.loop(minutes=1)
+    @tasks.loop(seconds=20)
     async def check(self) -> None:
         if not (self.cfg.enabled and self.bot.is_active):
             return
@@ -323,7 +360,7 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
                 continue
             data = self._data(state, s)
             for p in data["polls"]:
-                if p["status"] != "open" or now < discord.utils.parse_time(p["ends"]) + timedelta(seconds=15):
+                if p["status"] != "open" or now < discord.utils.parse_time(p["ends"]):
                     continue
                 if await self.finish(s, data, p):
                     changed = True
@@ -348,6 +385,16 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
         if poll is None:
             p["status"] = "gone"
             return True
+        if not poll.is_finalised() and p.get("end_early") and not p.get("end_sent"):
+            # Showtime: close it now instead of waiting for Discord's whole-hour timer.
+            p["end_sent"] = True
+            try:
+                await msg.end_poll()
+                await asyncio.sleep(3)
+                msg = await channel.fetch_message(p["message_id"])
+                poll = msg.poll or poll
+            except discord.HTTPException as e:
+                log.warning("Couldn't end the %s poll at showtime: %s", s.name, e)
         late = discord.utils.utcnow() - discord.utils.parse_time(p["ends"]) > timedelta(minutes=5)
         if not poll.is_finalised() and not late:
             return False  # Discord is still counting
@@ -384,9 +431,12 @@ class MovieNight(commands.GroupCog, group_name="movienight", group_description="
 class ChooseView(discord.ui.View):
     """Lets whoever started the poll pick which watchlist movies go in it."""
 
-    def __init__(self, cog: MovieNight, s, unwatched: list[dict], hours: int, question: str, owner: int) -> None:
+    def __init__(
+        self, cog: MovieNight, s, unwatched: list[dict], hours: int, question: str, owner: int, closes=None
+    ) -> None:
         super().__init__(timeout=600)
         self.cog, self.s, self.hours, self.question, self.owner = cog, s, hours, question, owner
+        self.closes = closes
         self.noms = {n["id"]: n for n in unwatched}
         limit = min(cog.cfg.poll_options, len(unwatched), 25)
         select = discord.ui.Select(
@@ -408,7 +458,7 @@ class ChooseView(discord.ui.View):
         ids = interaction.data.get("values", [])
         picks = [self.noms[i] for i in ids if i in self.noms]
         await interaction.response.edit_message(content="Posting the poll…", view=None)
-        msg = await self.cog.start_poll(interaction, self.s, picks, self.hours, self.question)
+        msg = await self.cog.start_poll(interaction, self.s, picks, self.hours, self.question, self.closes)
         if msg:
             await interaction.edit_original_response(content=f"Poll posted: {msg.jump_url}")
 

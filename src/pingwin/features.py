@@ -18,6 +18,7 @@ Field types:
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -101,11 +102,13 @@ SECTIONS: list[dict[str, Any]] = [
                 "rows",
                 "Series",
                 [],
-                "Each series gets its own watchlist, role and channel.",
+                "Each series gets its own watchlist, role and channel. With a showtime (like Mon 8:30pm, in the time "
+                "zone under General), polls close right when the movie starts.",
                 columns=[
                     {"key": "name", "type": "text", "label": "Name"},
                     {"key": "role", "type": "role", "label": "Role to ping"},
                     {"key": "channel", "type": "channel", "label": "Channel"},
+                    {"key": "showtime", "type": "text", "label": "Showtime (e.g. Mon 8:30pm)"},
                 ],
             ),
             F(
@@ -461,6 +464,11 @@ def parse_features(data: dict[str, Any]) -> Features:
         ZoneInfo(features.bot.timezone)
     except (ZoneInfoNotFoundError, ValueError) as e:
         raise ConfigError(f"General → Time zone: unknown time zone {features.bot.timezone!r}") from e
+    from .timeparse import next_weekly
+
+    for s in features.movienight.series:
+        if getattr(s, "showtime", "") and next_weekly(s.showtime, datetime.now(features.tz)) is None:
+            raise ConfigError(f"Movie night → Series: can't read the showtime {s.showtime!r} (try Mon 8:30pm)")
     keys = [slug(s.name) for s in features.movienight.series if s.name]
     if len(set(keys)) != len(keys):
         raise ConfigError("Movie night → Series: two series have the same name")

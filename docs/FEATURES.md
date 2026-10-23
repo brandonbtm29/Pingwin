@@ -121,6 +121,11 @@ Each **series** (for example *MMM* and *FFF*) has its own watchlist, role and ch
 movies, then a mod (or whoever you allow) turns the watchlist into a native Discord poll. When the poll
 ends, Pingwin replies with the winner.
 
+**Showtimes:** give a series a weekly showtime, like `Mon 8:30pm` (in the time zone under *General*). Then
+`/movienight poll` closes the poll exactly when the movie starts, and the poll message shows the closing time
+in everyone's own time zone. (Discord polls can only run whole hours, so Pingwin ends it early at showtime.)
+Passing `hours` still overrides it.
+
 | Command | What |
 |---|---|
 | `/movienight nominate series title` | Add a movie to the watchlist |

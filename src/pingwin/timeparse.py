@@ -48,6 +48,22 @@ def _parse_time(text: str, default_pm: bool = True) -> time | None:
     return time(h, mi)
 
 
+def next_weekly(text: str, now: datetime) -> datetime | None:
+    """The next time a weekly slot like 'Mon 8:30pm' comes around, after `now` (in now's time zone)."""
+    words = " ".join(text.strip().lower().replace(",", " ").split()).split(" ", 1)
+    if len(words) != 2 or words[0].rstrip("s") not in _DAY_WORDS and words[0] not in _DAY_WORDS:
+        return None
+    day = _DAY_WORDS.get(words[0], _DAY_WORDS.get(words[0].rstrip("s")))
+    t = _parse_time(words[1].replace("at ", ""))
+    if t is None:
+        return None
+    ahead = (day - now.weekday()) % 7
+    when = datetime.combine(now.date() + timedelta(days=ahead), t, now.tzinfo)
+    if when <= now:
+        when += timedelta(days=7)
+    return when
+
+
 def parse_when(text: str, now: datetime) -> datetime | None:
     """Parse a time in now's time zone. Returns None if it can't be understood."""
     tz: tzinfo = now.tzinfo

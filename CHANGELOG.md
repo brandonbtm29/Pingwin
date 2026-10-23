@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.3 (2026-10-23)
+- **Movie night showtimes:** each series can have a weekly showtime (like `Mon 8:30pm`). Polls then close
+  right when the movie starts, and the poll message says when voting closes.
+
 ## 0.9.2 (2026-10-23)
 - **Stream alerts for Discord Go Live:** when a listed streamer starts streaming (screen share) in a voice
   channel, Pingwin posts right away with the channel to join. No keys needed; add their Discord username to

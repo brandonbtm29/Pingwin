@@ -242,3 +242,30 @@ def test_discord_go_live_matching_and_text():
     assert not matches_member("", m) and not matches_member("someone", m)
     live = [{"platform": "Discord", "line": "Watch in <#5>", "title": "", "game": "", "url": "x"}]
     assert format_alert("🔴 **{name}** is live! {title}\n{links}", "Sam Streams", live).endswith("Watch in <#5>")
+
+
+def test_polls_close_at_showtime():
+    from pingwin.cogs.movienight import poll_close
+    from pingwin.timeparse import next_weekly
+
+    et = ZoneInfo("America/New_York")
+    wed = datetime(2026, 10, 21, 12, 0, tzinfo=et)  # a Wednesday
+    assert next_weekly("Mon 8:30pm", wed) == datetime(2026, 10, 26, 20, 30, tzinfo=et)
+    assert next_weekly("fridays 9:30 PM", wed) == datetime(2026, 10, 23, 21, 30, tzinfo=et)
+    assert next_weekly("Wed 8", wed) == datetime(2026, 10, 21, 20, 0, tzinfo=et)  # later today
+    assert next_weekly("Wed 11am", wed) == datetime(2026, 10, 28, 11, 0, tzinfo=et)  # already passed: next week
+    assert next_weekly("someday 8pm", wed) is None and next_weekly("Mon", wed) is None
+
+    closes, hours = poll_close("Fri 9:30pm", wed, None, 24)
+    assert closes == datetime(2026, 10, 23, 21, 30, tzinfo=et) and hours == 58  # 57.5 h, rounded up for Discord
+    closes, hours = poll_close("Fri 9:30pm", wed, 6, 24)  # explicit hours win
+    assert hours == 6 and closes == wed + timedelta(hours=6)
+    closes, hours = poll_close("", wed, None, 24)
+    assert hours == 24
+    almost = datetime(2026, 10, 23, 21, 27, tzinfo=et)  # 3 minutes before showtime: next week's
+    assert poll_close("Fri 9:30pm", almost, None, 24)[0] == datetime(2026, 10, 30, 21, 30, tzinfo=et)
+
+
+def test_bad_showtime_is_explained():
+    with pytest.raises(ConfigError, match="showtime"):
+        parse_features({"movienight": {"series": [{"name": "MMM", "showtime": "whenever"}]}})
