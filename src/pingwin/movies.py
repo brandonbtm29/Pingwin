@@ -414,7 +414,7 @@ def match_name(name: str, members: dict[str, str]) -> str | None:
 def _close(a: str, b: str) -> bool:
     if not a or not b:
         return False
-    if len(min(a, b, key=len)) >= 5 and (a.startswith(b) or b.startswith(a)):
+    if len(min(a, b, key=len)) >= 8 and (a.startswith(b) or b.startswith(a)):
         return True
     return difflib.SequenceMatcher(None, a, b).ratio() >= 0.85
 
