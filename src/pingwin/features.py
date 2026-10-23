@@ -181,6 +181,22 @@ SECTIONS: list[dict[str, Any]] = [
                 "Free at omdbapi.com/apikey.aspx. Pingwin looks each movie up once (year, runtime, IMDb rating, "
                 "director, stars, poster) and keeps it.",
             ),
+            F(
+                "auto_details",
+                "toggle",
+                "Fill in missing movie details in the background",
+                True,
+                "A few at a time, all day, until every movie has its genre, poster, director and so on.",
+            ),
+            F(
+                "omdb_daily",
+                "number",
+                "OMDb requests per day",
+                800,
+                "The free key allows 1,000 a day; one movie takes 1 to 3.",
+                min=30,
+                max=100000,
+            ),
         ],
     },
     {

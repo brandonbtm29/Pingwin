@@ -176,6 +176,13 @@ Pingwin can fill in runtime, director, writers, stars, poster and IMDb rating fr
 don't need a spreadsheet formula like `GETMOVIEINFO`. Without a key everything still works; you just won't
 get the extra details.
 
+With a key, Pingwin **fills in missing details by itself**: every 20 minutes it looks up a few movies (the
+history first, newest first, then the watchlists), staying under *OMDb requests per day* (800 by default;
+one movie takes 1 to 3 requests). If OMDb says the daily limit is reached it waits until the next day, and
+movies it can't find are tried again a week later (three tries). A result from a different year is treated
+as a miss, so a remake or a namesake never replaces your movie. The movie pages' **Admin** tab shows the
+progress, and **Look up missing details** does a bigger batch right away.
+
 ### Movie pages
 
 `/pingwin movie page` links to **/movies** on the dashboard's web address (see
@@ -189,7 +196,9 @@ sees:
   them, or click someone's card for their average, how they compare with the group, and their favorites.
 - **Watchlists:** each series' list as poster cards, with filters for named lists (like *Horror*), and a
   form to suggest a movie.
-- **Stats:** favorites, least favorites, where you disagreed with IMDb, top raters, directors, nights per year.
+- **Stats:** charts of movie nights per year (by series), favorites and least favorites, where you
+  disagreed with IMDb, how everyone scores, the most active critics, genres and directors. Hover or tab to
+  any bar for the details.
 
 On **History**, **Columns** picks what the table shows (year, rating count, us vs IMDb, director, writers,
 stars, genre), and clicking a column heading sorts by it. Your choice is remembered in your browser.
@@ -217,9 +226,11 @@ Running it again only adds what's new. Then **Look up missing details** fills in
 ### People (who's who in the ratings)
 
 Imported ratings keep the name they were written with, so one person can show up as a nickname, a typo
-and their Discord name. On the **Admin** tab, **People** lists every name. Give names the same
-**Counts as** name (like `Mrs. Smith` and `Mrs Smith` → `Sam`) and the Reviews tab, stats and Discord recaps
-treat them as one person. The original names stay as written; clear the box to undo.
+and their Discord name. On the **Admin** tab, **People** lists every name. Pick the **Discord member** each
+name belongs to (likely matches are listed first), and those ratings join that member's own Discord ratings
+under their current server name, on the Reviews tab, in the stats and in Discord recaps. For someone who
+isn't in the server, type a name instead (like `Mrs. Smith` and `Mrs Smith` → `Sam`). The original names
+stay as written; set it back to *not linked* and clear the name to undo.
 
 ### Importing a watchlist from Discord
 

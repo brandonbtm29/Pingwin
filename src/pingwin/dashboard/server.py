@@ -914,7 +914,11 @@ async def get_movies(request: web.Request) -> web.Response:
     viewer = viewer_of(request)
     guild = _guild(bot) if hasattr(bot, "guilds") else None
     lib = movies.load()
-    names = movies.rater_names(lib)
+    members = {}
+    if guild is not None:
+        members = {str(m.id): m.display_name for m in guild.members if not m.bot}
+    names = movies.rater_names(lib, members)
+    links = movies.rater_links(lib)
     history = []
     for e in reversed(lib["history"]):
         m = lib["movies"].get(e["movie_id"], {"title": "?"})
@@ -931,6 +935,7 @@ async def get_movies(request: web.Request) -> web.Response:
                         **{f: r.get(f) for f in ("name", "score", "comment", "answered", "answer", "ask")},
                         "key": k,
                         "who": names.get(k) or r.get("name"),
+                        "who_id": links.get(k),
                         "discord": bool(r.get("user_id")),
                     }
                     for k, r in ratings
@@ -943,10 +948,13 @@ async def get_movies(request: web.Request) -> web.Response:
     watchlists = []
     from ..features import slug
 
+    by_cache: dict[Any, str] = {}
     for name in series:
         items = []
         for n in state.get(slug(name), {}).get("nominations", []):
-            by_name, _ = await _member_name(guild, int(n["by"])) if guild else (str(n["by"]), None)
+            if n["by"] not in by_cache:
+                by_cache[n["by"]] = (await _member_name(guild, int(n["by"])))[0] if guild else str(n["by"])
+            by_name = by_cache[n["by"]]
             m = lib["movies"].get(n.get("movie_id") or "", {})
             items.append(
                 {
@@ -971,7 +979,28 @@ async def get_movies(request: web.Request) -> web.Response:
             "watchlists": watchlists,
             "pending": pending,
             "people": lib.get("people", {}),
+            "members": sorted(
+                (
+                    {"id": str(m.id), "name": m.display_name, "username": m.name, "global": m.global_name or ""}
+                    for m in (guild.members if guild is not None and viewer.is_admin else [])
+                    if not m.bot
+                ),
+                key=lambda x: x["name"].casefold(),
+            ),
             "omdb": bool(os.environ.get(movies.SECRET)),
+            "details": {
+                **movies.details_progress(lib, state),
+                "auto": bool(getattr(getattr(bot, "config", None), "features", None))
+                and bool(getattr(bot.config.features.movienight, "auto_details", True)),
+                "used_today": lib.get("omdb", {}).get("used", 0)
+                if lib.get("omdb", {}).get("day") == time.strftime("%Y-%m-%d", time.gmtime())
+                else 0,
+                "daily": getattr(getattr(getattr(bot, "config", None), "features", None), "movienight", None)
+                and getattr(bot.config.features.movienight, "omdb_daily", 800),
+                "paused": lib.get("omdb", {}).get("status")
+                if lib.get("omdb", {}).get("pause_until", 0) > time.time()
+                else None,
+            },
             "approvals": bool(
                 getattr(getattr(bot, "config", None), "features", None) and bot.config.features.movienight.approvals
             ),
@@ -1118,21 +1147,8 @@ async def post_movie_admin(request: web.Request) -> web.Response:
     if action == "lookup":
         if cog is None or not os.environ.get(movies.SECRET):
             raise ApiError("Add an OMDb API key under Features → Movie night first.")
-        lib = movies.load()
-        todo = [m for m in lib["movies"].values() if not m.get("looked_up")][: int(payload.get("limit", 40))]
-        found = 0
-        for m in todo:
-            before = movies.load()["movies"].get(m["id"], {})
-            got = await cog.details(m["title"], m.get("year"))
-            if got and got.get("looked_up") and not before.get("looked_up"):
-                found += 1
-            await asyncio.sleep(0.2)
-        lib = movies.load()
-        for m in todo:  # don't ask OMDb about the misses again
-            lib["movies"].get(m["id"], {}).setdefault("looked_up", time.time())
-        movies.save(lib)
-        left = sum(1 for m in lib["movies"].values() if not m.get("looked_up"))
-        return web.json_response({"ok": True, "message": f"Looked up {len(todo)} movies ({left} left)."})
+        res = await cog.fill_details(int(payload.get("requests", 120)))
+        return web.json_response({"ok": True, "message": res["message"]})
     if action in ("delete_entry", "delete_rating"):
         lib = movies.load()
         e = next((x for x in lib["history"] if x["id"] == payload.get("hid")), None)

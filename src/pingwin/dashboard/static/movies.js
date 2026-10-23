@@ -81,9 +81,16 @@ async function load() {
   $("m-dashboard").hidden = !admin;
   $("m-admin-tab").hidden = !admin;
   $("o-note").textContent = data.omdb
-    ? "Fills in poster, runtime, IMDb rating, director and stars for movies that don't have them (about 40 at a time)."
+    ? "Pingwin fills in genre, poster, plot, director, writers and stars by itself, a few at a time. This button does a bigger batch now."
     : "Add an OMDb API key in the dashboard (Features → Movie night) to look up details.";
   $("o-go").disabled = !data.omdb;
+  const d = data.details;
+  $("o-progress").hidden = !d || !d.total;
+  if (d && d.total) {
+    $("o-bar").style.setProperty("--pct", `${Math.round((100 * d.done) / d.total)}%`);
+    $("o-status").textContent = `${d.done} of ${d.total} movies have details` + (d.not_found ? ` · ${d.not_found} not found on OMDb` : "") +
+      (!data.omdb ? "." : d.paused ? ` · ${d.paused}` : d.left && d.auto ? ` · filling in ${d.left} more in the background (${d.used_today} of ${d.daily} requests used today)` : ".");
+  }
   $("w-note").textContent = data.approvals && !admin ? "A mod approves suggestions before they join the list." : "";
   fillSeries();
   fillPeople();
@@ -266,36 +273,122 @@ $("w-add").addEventListener("click", async () => {
 });
 
 // ---------- stats ----------
-function topList(id, rows, text) { put($(id), rows.length ? rows.map((r) => el("li", {}, text(r))) : [el("li", { class: "hint" }, "Not enough ratings yet.")]); }
+// Charts are plain HTML bars. Colors come from CSS roles (--c1..--c3, --pos/--neg), so dark mode
+// swaps them in one place; every bar has a visible value label and a hover/focus tooltip.
+function bar(pct, cls, tip) {
+  const b = el("span", { class: `b ${cls}`, tabindex: "0", "data-tip": tip });
+  b.style.setProperty("--w", `${Math.max(0, Math.min(100, pct))}%`);
+  return b;
+}
+function hbars(id, rows, { max, color, label, value, tip, empty = "Not enough ratings yet." }) {
+  if (!rows.length) return put($(id), el("p", { class: "hint" }, empty));
+  const top = max ?? Math.max(...rows.map(value), 1);
+  put($(id), rows.map((r) => el("div", { class: "hrow" },
+    el("div", { class: "hl" }, label(r)),
+    el("div", { class: "ht" }, bar((100 * value(r)) / top, color, tip(r)), el("span", { class: "hv" }, fmt(value(r)))))));
+}
 
 function renderStats() {
   const h = data.history;
-  const rated = h.filter((x) => x.avg !== null && x.ratings.filter((r) => r.score !== null).length >= 3);
-  const bySeries = {};
-  for (const x of h) bySeries[x.series || "Other"] = (bySeries[x.series || "Other"] || 0) + 1;
+  const scored = h.flatMap((x) => x.ratings.filter((r) => typeof r.score === "number"));
+  const rated = h.filter((x) => x.avg !== null && x.ratings.filter((r) => typeof r.score === "number").length >= 3);
   const minutes = h.reduce((t, x) => t + (x.movie.runtime || 0), 0);
+  const groupAvg = scored.length ? scored.reduce((t, r) => t + r.score, 0) / scored.length : null;
+  const tile = (cls, label, val, sub) => el("div", { class: `stat-tile ${cls}` }, el("span", { class: "k" }, label), el("strong", {}, val), sub ? el("span", { class: "s" }, sub) : null);
   put($("s-cards"),
-    el("div", { class: "card" }, el("div", { class: "label" }, "Movie nights"), el("div", { class: "value" }, h.length)),
-    el("div", { class: "card" }, el("div", { class: "label" }, "Hours watched"), el("div", { class: "value" }, Math.round(minutes / 60))),
-    ...Object.entries(bySeries).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([s, n]) => el("div", { class: "card" }, el("div", { class: "label" }, s), el("div", { class: "value" }, n))));
-  const lbl = (x) => [el("button", { class: "linkish", onclick: () => showMovie(x) }, movieLabel(x.movie)), " ", scoreBadge(x.avg)];
-  topList("s-top", [...rated].sort((a, b) => b.avg - a.avg).slice(0, 10), lbl);
-  topList("s-bottom", [...rated].sort((a, b) => a.avg - b.avg).slice(0, 10), lbl);
-  const gaps = h.filter((x) => x.avg !== null && x.movie.imdb_rating).sort((a, b) => Math.abs(b.avg - b.movie.imdb_rating) - Math.abs(a.avg - a.movie.imdb_rating)).slice(0, 10);
-  topList("s-gap", gaps, (x) => [el("strong", {}, movieLabel(x.movie)), ` · us ${fmt(x.avg)} vs IMDb ${fmt(x.movie.imdb_rating)}`]);
-  const raters = {};
-  for (const x of h) for (const r of x.ratings) if (r.score !== null && r.score !== undefined) { raters[r.who] = raters[r.who] || { n: 0, sum: 0 }; raters[r.who].n++; raters[r.who].sum += r.score; }
-  topList("s-raters", Object.entries(raters).sort((a, b) => b[1].n - a[1].n).slice(0, 10), ([name, s]) => [avatar(name), " ", el("strong", {}, name), ` · ${s.n} ratings `, scoreBadge(s.sum / s.n)]);
-  const dirs = {};
-  for (const x of h) for (const dn of (x.movie.director || "").split(",").map((s) => s.trim()).filter(Boolean)) dirs[dn] = (dirs[dn] || 0) + 1;
-  topList("s-directors", Object.entries(dirs).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 10), ([name, n]) => [el("strong", {}, name), ` · ${n} movies`]);
+    tile("t1", "Movie nights", h.length, h.length ? `since ${fmtDate(h.map((x) => x.date).filter(Boolean).sort()[0])}` : ""),
+    tile("t2", "Hours watched", Math.round(minutes / 60).toLocaleString(), `about ${Math.round(minutes / Math.max(1, h.filter((x) => x.movie.runtime).length))} min a movie`),
+    tile("t3", "Reviews written", h.reduce((t, x) => t + x.ratings.length, 0).toLocaleString(), `by ${new Set(h.flatMap((x) => x.ratings.map((r) => r.who_id || r.who))).size} critics`),
+    tile("t4", "Average score", groupAvg === null ? "–" : fmt(groupAvg), "out of 10, every rating"));
+
+  // Per year, stacked by series (the two biggest series, the rest as Other).
+  const seriesCount = {};
+  for (const x of h) seriesCount[x.series || "Other"] = (seriesCount[x.series || "Other"] || 0) + 1;
+  const main = Object.entries(seriesCount).filter(([n]) => n !== "Other").sort((a, b) => b[1] - a[1]).slice(0, 2).map(([n]) => n);
+  const groups = [...main, "Other"];
   const years = {};
-  for (const x of h) if (x.date) years[x.date.slice(0, 4)] = (years[x.date.slice(0, 4)] || 0) + 1;
-  topList("s-years", Object.entries(years).sort(), ([y, n]) => [el("strong", {}, y), ` · ${n}`]);
+  for (const x of h) {
+    if (!x.date) continue;
+    const y = x.date.slice(0, 4);
+    const g = main.includes(x.series) ? x.series : "Other";
+    years[y] = years[y] || {};
+    years[y][g] = (years[y][g] || 0) + 1;
+  }
+  const yearRows = Object.entries(years).sort();
+  const yMax = Math.max(1, ...yearRows.map(([, v]) => Object.values(v).reduce((a, b) => a + b, 0)));
+  put($("s-years-legend"), groups.filter((g) => yearRows.some(([, v]) => v[g])).map((g, i) => el("span", {}, el("i", { class: `sw c${groups.indexOf(g) + 1}` }), g)));
+  put($("s-years"), yearRows.length ? yearRows.map(([y, v]) => {
+    const total = Object.values(v).reduce((a, b) => a + b, 0);
+    const col = el("div", { class: "stack", tabindex: "0", "data-tip": `${y}: ${total} nights · ` + groups.filter((g) => v[g]).map((g) => `${g} ${v[g]}`).join(" · ") });
+    col.style.setProperty("--h", `${(100 * total) / yMax}%`);
+    for (const g of groups) if (v[g]) { const seg = el("span", { class: `seg c${groups.indexOf(g) + 1}` }); seg.style.setProperty("--f", String(v[g])); col.append(seg); }
+    return el("div", { class: "col" }, el("span", { class: "cv" }, total), el("div", { class: "track" }, col), el("span", { class: "cl" }, y));
+  }) : el("p", { class: "hint" }, "No dated movie nights yet."));
+
+  const movieLink = (x) => el("button", { class: "linkish", onclick: () => showMovie(x) }, movieLabel(x.movie));
+  const avgTip = (x) => `${movieLabel(x.movie)}: ${fmt(x.avg)} from ${x.ratings.length} ratings` + (x.movie.imdb_rating ? ` · IMDb ${fmt(x.movie.imdb_rating)}` : "");
+  hbars("s-top", [...rated].sort((a, b) => b.avg - a.avg).slice(0, 10), { max: 10, color: "c1", label: movieLink, value: (x) => x.avg, tip: avgTip });
+  hbars("s-bottom", [...rated].sort((a, b) => a.avg - b.avg).slice(0, 10), { max: 10, color: "c2", label: movieLink, value: (x) => x.avg, tip: avgTip });
+
+  // Diverging: us minus IMDb, centered on zero.
+  const gaps = h.filter((x) => x.avg !== null && x.movie.imdb_rating).map((x) => ({ x, d: x.avg - x.movie.imdb_rating }))
+    .sort((a, b) => Math.abs(b.d) - Math.abs(a.d)).slice(0, 12).sort((a, b) => b.d - a.d);
+  const gMax = Math.max(1, ...gaps.map((g) => Math.abs(g.d)));
+  put($("s-gap"), gaps.length ? gaps.map(({ x, d }) => {
+    const b = bar((50 * Math.abs(d)) / gMax, d >= 0 ? "pos" : "neg", `${movieLabel(x.movie)}: us ${fmt(x.avg)} vs IMDb ${fmt(x.movie.imdb_rating)} (${signed(d)})`);
+    const track = el("div", { class: `dt ${d >= 0 ? "up" : "down"}` }, b, el("span", { class: "hv" }, signed(d)));
+    track.style.setProperty("--w", `${(50 * Math.abs(d)) / gMax}%`);
+    return el("div", { class: "drow" }, el("div", { class: "hl" }, movieLink(x)), track);
+  }) : el("p", { class: "hint" }, "Needs movies with both our ratings and an IMDb rating."));
+
+  // Histogram of every score (whole points; 9.5 counts as 9).
+  const bins = Array.from({ length: 11 }, () => 0);
+  for (const r of scored) bins[Math.max(0, Math.min(10, Math.floor(r.score)))]++;
+  const bMax = Math.max(1, ...bins);
+  const peak = bins.indexOf(bMax);
+  put($("s-hist"), scored.length ? bins.map((n, i) => {
+    const c = el("div", { class: "stack one", tabindex: "0", "data-tip": `${n} rating${n === 1 ? "" : "s"} of ${i}${i < 10 ? "–" + i + ".9" : ""}` });
+    c.style.setProperty("--h", `${(100 * n) / bMax}%`);
+    return el("div", { class: "col" }, el("span", { class: "cv" }, i === peak ? n : ""), el("div", { class: "track" }, c), el("span", { class: "cl" }, i));
+  }) : el("p", { class: "hint" }, "No ratings yet."));
+
+  const raters = {};
+  for (const r of scored) { const k = r.who_id || r.who; raters[k] = raters[k] || { name: r.who, n: 0, sum: 0 }; raters[k].n++; raters[k].sum += r.score; }
+  hbars("s-raters", Object.values(raters).sort((a, b) => b.n - a.n).slice(0, 10), { color: "c3",
+    label: (p) => el("span", { class: "who" }, avatar(p.name), p.name, " ", scoreBadge(p.sum / p.n)), value: (p) => p.n, tip: (p) => `${p.name}: ${p.n} reviews, average ${fmt(p.sum / p.n)}` });
+
+  const genres = {};
+  for (const x of h) for (const g of (x.movie.genre || "").split(",").map((t) => t.trim()).filter(Boolean)) genres[g] = (genres[g] || 0) + 1;
+  hbars("s-genres", Object.entries(genres).sort((a, b) => b[1] - a[1]).slice(0, 10), { color: "c1", label: ([g]) => g, value: ([, n]) => n, tip: ([g, n]) => `${g}: ${n} movie nights`,
+    empty: "Genres show up as Pingwin fills in movie details from OMDb." });
+
+  const dirs = {};
+  for (const x of h) for (const dn of (x.movie.director || "").split(",").map((t) => t.trim()).filter(Boolean)) dirs[dn] = (dirs[dn] || 0) + 1;
+  hbars("s-directors", Object.entries(dirs).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 10), { color: "c2", label: ([d]) => d, value: ([, n]) => n, tip: ([d, n]) => `${d}: ${n} movie nights`,
+    empty: "No director twice yet." });
 }
 
+// One tooltip for every chart mark (hover or keyboard focus).
+(() => {
+  const tip = $("tip");
+  const show = (e) => {
+    const t = e.target.closest && e.target.closest("[data-tip]");
+    if (!t) { tip.hidden = true; return; }
+    tip.textContent = t.dataset.tip;
+    tip.hidden = false;
+    const r = t.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    tip.style.setProperty("left", `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`);
+    tip.style.setProperty("top", `${Math.max(8, r.top - tip.offsetHeight - 8) + window.scrollY}px`);
+  };
+  document.addEventListener("mouseover", show);
+  document.addEventListener("focusin", show);
+  document.addEventListener("mouseout", (e) => { if (e.target.closest && e.target.closest("[data-tip]")) tip.hidden = true; });
+  document.addEventListener("focusout", () => { tip.hidden = true; });
+})();
+
 // ---------- reviews ----------
-const personKey = (name) => (name || "").trim().toLowerCase();
+const personKey = (r) => (r.who_id ? `id:${r.who_id}` : `n:${(r.who || "").trim().toLowerCase()}`);
 let reviewLimit = 60;
 
 function allReviews() {
@@ -307,7 +400,7 @@ function allReviews() {
 function peopleSummary(reviews) {
   const people = new Map();
   for (const r of reviews) {
-    const k = personKey(r.who);
+    const k = personKey(r);
     const p = people.get(k) || { name: r.who, n: 0, scored: 0, sum: 0, vs: 0, vsN: 0 };
     p.n++;
     if (typeof r.score === "number") {
@@ -336,7 +429,7 @@ function renderReviews() {
   const band = $("r-score").value;
   const inBand = (sc) => band === "" || (typeof sc === "number" && (band === "8" ? sc >= 8 : band === "5" ? sc >= 5 && sc < 8 : sc < 5));
   const everyone = allReviews();
-  let rows = everyone.filter((r) => (!who || personKey(r.who) === who) && (!series || r.h.series === series) && inBand(r.score)
+  let rows = everyone.filter((r) => (!who || personKey(r) === who) && (!series || r.h.series === series) && inBand(r.score)
     && (!q || [r.comment, r.answer, r.ask, r.answered, r.who, r.name, r.h.movie.title, r.h.movie.year].join(" ").toLowerCase().includes(q)));
   const sort = $("r-sort").value;
   const sc = (r) => (typeof r.score === "number" ? r.score : null);
@@ -360,7 +453,7 @@ function renderReviews() {
   $("r-summary").hidden = !p;
   if (p) {
     const s = p[1];
-    const mine = everyone.filter((r) => personKey(r.who) === who && typeof r.score === "number");
+    const mine = everyone.filter((r) => personKey(r) === who && typeof r.score === "number");
     const best = sortRows(mine, sc, "desc").slice(0, 3);
     const worst = sortRows(mine.filter((r) => !best.includes(r)), sc, "asc").slice(0, 3);  // never the same as a favorite
     const line = (r) => el("li", {}, el("button", { class: "linkish", onclick: () => showMovie(r.h) }, movieLabel(r.h.movie)), " ", scoreBadge(r.score));
@@ -404,6 +497,15 @@ $("l-go").addEventListener("click", async () => {
 });
 
 // ---------- people (admins) ----------
+function memberLabel(m) { return m.username && m.username !== m.name ? `${m.name} (@${m.username})` : m.name; }
+function likelyMembers(names) {
+  const words = [...names].flatMap((n) => String(n).toLowerCase().split(/[^\p{L}\p{N}]+/u)).filter((w) => w.length >= 3 && !["mrs", "mr", "the", "and"].includes(w));
+  if (!words.length) return [];
+  return data.members.filter((m) => {
+    const mine = [m.name, m.username, m.global].join(" ").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    return words.some((w) => mine.some((x) => x.startsWith(w) || w.startsWith(x) && x.length >= 4));
+  });
+}
 function renderPeopleAdmin() {
   const keys = new Map();
   for (const h of data.history) for (const r of h.ratings) {
@@ -412,16 +514,36 @@ function renderPeopleAdmin() {
     keys.set(r.key, k);
   }
   const rows = [...keys.values()].sort((a, b) => b.n - a.n);
-  const names = [...new Set(rows.map((r) => data.people[r.key] || [...r.names][0]))].sort((a, b) => a.localeCompare(b));
-  put($("p-names"), names.map((n) => el("option", { value: n })));
-  put($("p-rows"), rows.map((r) => el("tr", {},
-    el("td", {}, el("span", { class: "p-written" }, avatar(data.people[r.key] || [...r.names][0]), [...r.names].join(" · "), r.discord ? el("span", { class: "tag" }, "Discord") : null)),
-    el("td", { class: "num" }, r.n),
-    el("td", {}, el("input", { class: "p-as", "data-key": r.key, list: "p-names", maxlength: "40", value: data.people[r.key] || "", placeholder: [...r.names][0], "aria-label": `Counts as, for ${[...r.names][0]}` })))));
+  const typed = rows.map((r) => data.people[r.key]).filter((v) => v && !v.startsWith("@"));
+  put($("p-names"), [...new Set(typed)].sort((a, b) => a.localeCompare(b)).map((n) => el("option", { value: n })));
+  put($("p-rows"), rows.map((r) => {
+    const own = /^\d+$/.test(r.key);  // rated in Discord: already that member
+    const cur = data.people[r.key] || "";
+    const linked = own ? r.key : cur.startsWith("@") ? cur.slice(1) : "";
+    const likely = own ? [] : likelyMembers(r.names);
+    const opt = (m) => el("option", { value: m.id, selected: m.id === linked }, memberLabel(m));
+    const sel = el("select", { class: "p-member", "data-key": r.key, disabled: own, "aria-label": `Discord member for ${[...r.names][0]}` },
+      el("option", { value: "" }, own ? "" : "— not linked —"),
+      likely.length ? el("optgroup", { label: "Likely" }, likely.map(opt)) : null,
+      el("optgroup", { label: "Everyone" }, data.members.filter((m) => !likely.includes(m)).map(opt)),
+      linked && !data.members.some((m) => m.id === linked) ? el("option", { value: linked, selected: true }, "A former member") : null);
+    const name = el("input", { class: "p-as", "data-key": r.key, list: "p-names", maxlength: "40", value: cur.startsWith("@") ? "" : cur,
+      placeholder: [...r.names][0], disabled: own || !!linked, "aria-label": `Name for ${[...r.names][0]}` });
+    sel.addEventListener("change", () => { name.disabled = !!sel.value; if (sel.value) name.value = ""; });
+    return el("tr", {},
+      el("td", {}, el("span", { class: "p-written" }, avatar(r.names.values().next().value), [...r.names].join(" · "), own ? el("span", { class: "tag" }, "Discord") : null)),
+      el("td", { class: "num" }, r.n),
+      el("td", {}, sel, own ? el("div", { class: "hint" }, "Rated in Discord") : null),
+      el("td", {}, name));
+  }));
 }
 $("p-save").addEventListener("click", async () => {
   const people = {};
-  document.querySelectorAll(".p-as").forEach((i) => { people[i.dataset.key] = i.value.trim(); });
+  document.querySelectorAll(".p-member").forEach((sel) => {
+    if (sel.disabled) return;
+    const typed = document.querySelector(`.p-as[data-key="${CSS.escape(sel.dataset.key)}"]`);
+    people[sel.dataset.key] = sel.value ? `@${sel.value}` : (typed ? typed.value.trim() : "");
+  });
   try { $("p-result").textContent = (await api("/api/movies/admin", { action: "people", people })).message; await load(); }
   catch (e) { toast(e.message, true); }
 });

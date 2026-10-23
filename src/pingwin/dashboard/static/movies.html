@@ -113,14 +113,42 @@
     </section>
 
     <section id="tab-stats" class="tab" hidden>
-      <div class="cards" id="s-cards"></div>
-      <div class="grid2 stats-grid">
-        <div class="panel"><h2>Our favorites</h2><p class="hint">At least 3 ratings.</p><ol id="s-top"></ol></div>
-        <div class="panel"><h2>Least favorites</h2><p class="hint">At least 3 ratings.</p><ol id="s-bottom"></ol></div>
-        <div class="panel"><h2>We disagreed with IMDb</h2><ol id="s-gap"></ol></div>
-        <div class="panel"><h2>Most rated by</h2><ol id="s-raters"></ol></div>
-        <div class="panel"><h2>Directors we keep coming back to</h2><ol id="s-directors"></ol></div>
-        <div class="panel"><h2>Movie nights per year</h2><ol id="s-years"></ol></div>
+      <div class="stat-tiles" id="s-cards"></div>
+      <div class="chart-grid">
+        <div class="panel chart wide">
+          <h2>Movie nights per year</h2><p class="hint">By series. Hover a bar for the split.</p>
+          <div class="legend" id="s-years-legend"></div>
+          <div class="columns" id="s-years"></div>
+        </div>
+        <div class="panel chart">
+          <h2>Our favorites</h2><p class="hint">Group average, movies with at least 3 ratings.</p>
+          <div class="hbars" id="s-top"></div>
+        </div>
+        <div class="panel chart">
+          <h2>Least favorites</h2><p class="hint">Group average, movies with at least 3 ratings.</p>
+          <div class="hbars" id="s-bottom"></div>
+        </div>
+        <div class="panel chart wide">
+          <h2>Us vs IMDb</h2><p class="hint">Our average minus IMDb's rating: the biggest disagreements.</p>
+          <div class="legend"><span><i class="sw pos"></i>We liked it more</span><span><i class="sw neg"></i>IMDb liked it more</span></div>
+          <div class="dbars" id="s-gap"></div>
+        </div>
+        <div class="panel chart">
+          <h2>How we score</h2><p class="hint">Every rating anyone has given, by score.</p>
+          <div class="columns hist" id="s-hist"></div>
+        </div>
+        <div class="panel chart">
+          <h2>Most active critics</h2><p class="hint">Number of reviews, with each person's average.</p>
+          <div class="hbars" id="s-raters"></div>
+        </div>
+        <div class="panel chart">
+          <h2>Genres</h2><p class="hint">Across every movie night.</p>
+          <div class="hbars" id="s-genres"></div>
+        </div>
+        <div class="panel chart">
+          <h2>Directors we keep coming back to</h2><p class="hint">Two or more movie nights.</p>
+          <div class="hbars" id="s-directors"></div>
+        </div>
       </div>
     </section>
 
@@ -153,12 +181,13 @@
       </div>
       <div class="panel">
         <h2>People</h2>
-        <p class="hint">Ratings keep the name they were written with. To put someone's ratings together (a nickname,
-          a typo, their Discord name), give those names the same <strong>Counts as</strong> name. Leave it blank to
-          use the name as written.</p>
+        <p class="hint">Ratings keep the name they were written with. Pick the <strong>Discord member</strong> each name
+          belongs to, and all of their ratings (nicknames, typos and their own Discord ratings) count as that person,
+          shown with their server name. For someone who isn't in the server, type a <strong>name</strong> instead;
+          names typed the same way are grouped too. Likely matches are listed first.</p>
         <div class="table-wrap">
           <table class="movie-table people-table">
-            <thead><tr><th>Written as</th><th class="num">Ratings</th><th>Counts as</th></tr></thead>
+            <thead><tr><th>Written as</th><th class="num">Ratings</th><th>Discord member</th><th>Or a name</th></tr></thead>
             <tbody id="p-rows"></tbody>
           </table>
         </div>
@@ -168,6 +197,7 @@
       <div class="panel">
         <h2>Movie details</h2>
         <p class="hint" id="o-note"></p>
+        <div class="progress" id="o-progress" hidden><div class="bar"><span id="o-bar"></span></div><p class="hint" id="o-status"></p></div>
         <div class="row-actions"><button class="btn" id="o-go">Look up missing details</button><span class="hint" id="o-result"></span></div>
       </div>
     </section>
@@ -175,6 +205,7 @@
 
   <dialog id="d-movie" class="movie-dialog"></dialog>
   <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="tip" id="tip" role="tooltip" hidden></div>
   <script src="/static/movies.js"></script>
 </body>
 </html>

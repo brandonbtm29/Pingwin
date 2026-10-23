@@ -19,7 +19,7 @@ import math
 import random
 import secrets
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -242,10 +242,13 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     def __init__(self, bot: Pingwin) -> None:
         self.bot = bot
         self.http: aiohttp.ClientSession | None = None
+        self._filling = asyncio.Lock()
         self.check.start()
+        self.fill_loop.start()
 
     def cog_unload(self) -> None:
         self.check.cancel()
+        self.fill_loop.cancel()
         if self.http and not self.http.closed:
             asyncio.ensure_future(self.http.close())
 
@@ -286,29 +289,157 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             self.http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
         return self.http
 
+    # ------------------------------------------------------------ movie details (OMDb)
+    def _budget(self, lib: dict[str, Any]) -> dict[str, Any]:
+        """Today's OMDb request count (UTC days, like OMDb's own limit)."""
+        b = lib.setdefault("omdb", {})
+        today = datetime.now(UTC).date().isoformat()
+        if b.get("day") != today:
+            b.update(day=today, used=0)
+        return b
+
+    def _omdb_paused(self) -> str | None:
+        b = movies.load().get("omdb", {})
+        return b.get("status") if b.get("pause_until", 0) > time.time() else None
+
+    async def _ask_omdb(self, title: str, year: int | str | None) -> dict[str, Any] | None:
+        """One lookup, counted against today's budget. Pauses itself on limit or key errors."""
+        key = self.bot.features.secret(movies.SECRET)
+        spent = [0]
+        status, pause = "", 0.0
+        try:
+            return await movies.omdb_lookup(self._http(), key, title, year, spent)
+        except movies.OmdbLimit:
+            tomorrow = datetime.now(UTC).replace(hour=0, minute=5, second=0, microsecond=0) + timedelta(days=1)
+            status, pause = "OMDb's daily limit was reached. Pingwin carries on tomorrow.", tomorrow.timestamp()
+            raise
+        except movies.OmdbKeyError:
+            status = "OMDb didn't accept the API key. Check it, and that you clicked the link in OMDb's email."
+            pause = time.time() + 6 * 3600
+            raise
+        finally:
+            lib = movies.load()
+            b = self._budget(lib)
+            b["used"] = b.get("used", 0) + spent[0]
+            if pause:
+                b["pause_until"], b["status"] = pause, status
+                log.warning("Movie details paused: %s", status)
+            movies.save(lib)
+
     async def details(self, title: str, year: int | str | None = None) -> dict[str, Any] | None:
-        """A movie from the library, looked up on OMDb (once) if we don't have it yet."""
+        """A movie from the library, looked up on OMDb (once) if we don't have its details yet."""
         lib = movies.load()
         m = movies.find_movie(lib, title, year)
-        if m and (m.get("looked_up") or not self.bot.features.secret(movies.SECRET)):
-            return m
         key = self.bot.features.secret(movies.SECRET)
-        if not key:
+        if (m and m.get("looked_up")) or not key or self._omdb_paused():
             return m
         try:
-            info = await movies.omdb_lookup(self._http(), key, title, year)
-        except (TimeoutError, aiohttp.ClientError, ValueError) as e:
+            info = await self._ask_omdb(title, year)
+        except (TimeoutError, aiohttp.ClientError, ValueError, movies.OmdbLimit) as e:
             log.warning("Movie lookup failed for %s: %s", title, e)
             return m
-        if info is None:
-            if m:
-                m["looked_up"] = time.time()
-                movies.save(lib)
-            return m
         lib = movies.load()
-        m = movies.upsert_movie(lib, info)
+        if m is not None:
+            m = lib["movies"].get(m["id"])
+            if m is None:
+                return None
+            if info and movies.plausible(m, info):
+                movies.merge_details(m, info)
+            else:
+                movies.note_miss(m, time.time())
+            movies.save(lib)
+            return m
+        if info is None:
+            return None
+        m = movies.find_movie(lib, info["title"], info.get("year")) or movies.upsert_movie(lib, info)
+        movies.merge_details(m, info)
         movies.save(lib)
         return m
+
+    async def fill_details(self, max_requests: int) -> dict[str, Any]:
+        """Look up movies that are missing details, a few at a time, within today's budget."""
+        if not self.bot.features.secret(movies.SECRET):
+            return {"looked": 0, "found": 0, "message": "Add an OMDb API key first."}
+        async with self._filling:
+            paused = self._omdb_paused()
+            if paused:
+                return {"looked": 0, "found": 0, "message": paused}
+            daily = int(getattr(self.cfg, "omdb_daily", 800) or 800)
+            lib = movies.load()
+            used0 = self._budget(lib).get("used", 0)
+            lib.get("omdb", {}).pop("status", None)
+            movies.save(lib)
+            todo = movies.details_todo(lib, store.load(STATE), time.time())
+            looked = found = 0
+            for item in todo:
+                used = self._budget(movies.load()).get("used", 0)
+                if used - used0 + 3 > max_requests or used + 3 > daily:
+                    break
+                title, year = item[-2], item[-1]
+                try:
+                    info = await self._ask_omdb(title, year)
+                except (movies.OmdbLimit, movies.OmdbKeyError):
+                    break
+                except (TimeoutError, aiohttp.ClientError) as e:
+                    log.info("OMDb didn't answer (%s); trying again later", e)
+                    break
+                looked += 1
+                now = time.time()
+                if item[0] == "movie":
+                    lib = movies.load()
+                    m = lib["movies"].get(item[1])
+                    if m is not None:
+                        if info and movies.plausible(m, info):
+                            movies.merge_details(m, info)
+                            found += 1
+                        else:
+                            movies.note_miss(m, now)
+                        movies.save(lib)
+                else:
+                    state = store.load(STATE)
+                    n = next((x for x in state.get(item[1], {}).get("nominations", []) if x["id"] == item[2]), None)
+                    if n is not None:
+                        if info and movies.plausible(n, info):
+                            lib = movies.load()
+                            m = movies.find_movie(lib, info["title"], info.get("year")) or movies.upsert_movie(
+                                lib, info
+                            )
+                            movies.merge_details(m, info)
+                            movies.save(lib)
+                            n["movie_id"] = m["id"]
+                            n["year"] = n.get("year") or m.get("year")
+                            n.pop("omdb_tries", None)
+                            found += 1
+                        else:
+                            movies.note_miss(n, now)
+                        store.save(STATE, state)
+                await asyncio.sleep(0.3)
+            if looked:
+                log.info("Movie details: looked up %d, found %d", looked, found)
+            left = movies.details_progress(movies.load(), store.load(STATE))["left"]
+            return {
+                "looked": looked,
+                "found": found,
+                "message": self._omdb_paused() or f"Looked up {looked} movies, found {found}. {left} left.",
+            }
+
+    @tasks.loop(minutes=20)
+    async def fill_loop(self) -> None:
+        """Fill in movie details in the background, spread over the day (72 runs)."""
+        if not (self.cfg.enabled and self.bot.is_active and getattr(self.cfg, "auto_details", True)):
+            return
+        if not self.bot.features.secret(movies.SECRET):
+            return
+        daily = int(getattr(self.cfg, "omdb_daily", 800) or 800)
+        try:
+            await self.fill_details(max(6, daily // 72))
+        except Exception:
+            log.exception("Filling in movie details failed")
+
+    @fill_loop.before_loop
+    async def _wait_fill(self) -> None:
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(60)  # let startup settle first
 
     def page_url(self) -> str | None:
         links = store.load("dashboards")

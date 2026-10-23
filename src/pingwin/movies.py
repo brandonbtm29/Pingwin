@@ -112,28 +112,123 @@ def from_omdb(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class OmdbLimit(Exception):
+    """OMDb's daily request limit is used up."""
+
+
+class OmdbKeyError(ValueError):
+    """OMDb didn't accept the API key (wrong, or not activated from the email yet)."""
+
+
 async def omdb_lookup(
-    http: aiohttp.ClientSession, key: str, title: str, year: int | str | None = None
+    http: aiohttp.ClientSession,
+    key: str,
+    title: str,
+    year: int | str | None = None,
+    spent: list[int] | None = None,
 ) -> dict[str, Any] | None:
-    """One OMDb request (exact title, then a search for the closest match). None if not found."""
-    params = {"apikey": key, "t": title, "type": "movie"}
-    if year:
-        params["y"] = str(year)
-    async with http.get(OMDB, params=params) as r:
-        d = await r.json(content_type=None)
+    """Look a movie up on OMDb: the exact title, then a search for the closest match. None if not found.
+
+    `spent` counts the requests made (up to three), for the daily budget."""
+    spent = spent if spent is not None else [0]
+
+    async def ask(params: dict[str, str]) -> dict[str, Any]:
+        spent[0] += 1
+        async with http.get(OMDB, params={"apikey": key, **params}) as r:
+            d = await r.json(content_type=None)
+        err = str(d.get("Error", ""))
+        if "limit" in err.lower():
+            raise OmdbLimit(err)
+        if "api key" in err.lower():
+            raise OmdbKeyError(err or "OMDb didn't accept the API key")
+        return d
+
+    y = {"y": str(year)} if year else {}
+    d = await ask({"t": title, "type": "movie", **y})
     if d.get("Response") == "True":
         return from_omdb(d)
-    if "Invalid API key" in str(d.get("Error", "")):
-        raise ValueError("OMDb didn't accept the API key")
-    params = {"apikey": key, "s": title, "type": "movie", **({"y": str(year)} if year else {})}
-    async with http.get(OMDB, params=params) as r:
-        d = await r.json(content_type=None)
-    hits = d.get("Search") or []
+    hits = (await ask({"s": title, "type": "movie", **y})).get("Search") or []
     if not hits:
         return None
-    async with http.get(OMDB, params={"apikey": key, "i": hits[0]["imdbID"]}) as r:
-        d = await r.json(content_type=None)
+    d = await ask({"i": hits[0]["imdbID"]})
     return from_omdb(d) if d.get("Response") == "True" else None
+
+
+RETRY_AFTER = 7 * 86400  # look a missed movie up again after a week, up to MAX_TRIES times
+MAX_TRIES = 3
+
+
+def needs_details(item: dict[str, Any], now: float) -> bool:
+    if item.get("looked_up"):
+        return False
+    tries = item.get("omdb_tries", 0)
+    return tries == 0 or (tries < MAX_TRIES and now - item.get("omdb_at", 0) > RETRY_AFTER)
+
+
+def plausible(m: dict[str, Any], info: dict[str, Any]) -> bool:
+    """Is an OMDb result really this movie? (A different year usually means a remake or a namesake.)"""
+    if m.get("year") and info.get("year"):
+        return abs(int(m["year"]) - int(info["year"])) <= 1
+    return True
+
+
+def merge_details(m: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+    """Fill in what a library movie is missing from an OMDb result. Keeps its own title and id."""
+    for k, v in info.items():
+        if k in ("title", "id") or v in (None, "", "N/A"):
+            continue
+        if k in ("imdb_id", "looked_up") or m.get(k) in (None, ""):
+            m[k] = v
+    if not m.get("year") and info.get("year"):
+        m["year"] = info["year"]
+    m.pop("omdb_tries", None)
+    m.pop("omdb_at", None)
+    return m
+
+
+def note_miss(item: dict[str, Any], now: float) -> None:
+    item["omdb_tries"] = item.get("omdb_tries", 0) + 1
+    item["omdb_at"] = now
+
+
+def details_todo(lib: dict[str, Any], watch: dict[str, Any], now: float) -> list[tuple]:
+    """What still needs OMDb details: watched movies (newest first), other library movies, then
+    watchlist movies that aren't in the library yet. ('movie', id, title, year) or ('nom', key, id, title, year)."""
+    out: list[tuple] = []
+    seen: set[str] = set()
+    for e in reversed(lib["history"]):
+        m = lib["movies"].get(e["movie_id"])
+        if m and m["id"] not in seen and needs_details(m, now):
+            seen.add(m["id"])
+            out.append(("movie", m["id"], m["title"], m.get("year")))
+    for m in lib["movies"].values():
+        if m["id"] not in seen and needs_details(m, now):
+            seen.add(m["id"])
+            out.append(("movie", m["id"], m["title"], m.get("year")))
+    for key, data in watch.items():
+        if not isinstance(data, dict):
+            continue
+        for n in data.get("nominations", []):
+            if n.get("watched") or (n.get("movie_id") and n["movie_id"] in lib["movies"]):
+                continue
+            if needs_details(n, now):
+                out.append(("nom", key, n["id"], n["title"], n.get("year")))
+    return out
+
+
+def details_progress(lib: dict[str, Any], watch: dict[str, Any]) -> dict[str, int]:
+    done = sum(1 for m in lib["movies"].values() if m.get("looked_up"))
+    noms = [
+        n
+        for d in watch.values()
+        if isinstance(d, dict)
+        for n in d.get("nominations", [])
+        if not n.get("watched") and not (n.get("movie_id") and n["movie_id"] in lib["movies"])
+    ]
+    missed = sum(1 for m in lib["movies"].values() if not m.get("looked_up") and m.get("omdb_tries", 0) >= MAX_TRIES)
+    missed += sum(1 for n in noms if n.get("omdb_tries", 0) >= MAX_TRIES)
+    total = len(lib["movies"]) + len(noms)
+    return {"done": done, "total": total, "not_found": missed, "left": total - done - missed}
 
 
 # --------------------------------------------------------------------- history
@@ -217,10 +312,26 @@ def parse_list_message(text: str) -> list[dict[str, Any]]:
     return rows
 
 
-def rater_names(lib: dict[str, Any]) -> dict[str, str]:
-    """Who each rater key is: the name a mod set under People, else the newest name they rated under.
+def rater_links(lib: dict[str, Any]) -> dict[str, str]:
+    """The Discord member (user ID) behind each rater key, where there is one."""
+    links = {}
+    for e in lib["history"]:
+        for k in e.get("ratings", {}):
+            if k.isdigit():
+                links[k] = k
+    for k, v in lib.get("people", {}).items():
+        if isinstance(v, str) and v.startswith("@") and v[1:].isdigit():
+            links[k] = v[1:]
+    return links
 
-    Keys are 'user-id' for Discord ratings and 'name:sam' for ratings imported by name."""
+
+def rater_names(lib: dict[str, Any], members: dict[str, str] | None = None) -> dict[str, str]:
+    """Who each rater key is: the member or name a mod set under People, else their current server
+    name (Discord ratings), else the newest name they rated under.
+
+    Keys are 'user-id' for Discord ratings and 'name:sam' for ratings imported by name.
+    `members` maps user IDs to current display names."""
+    members = members or {}
     latest: dict[str, tuple[float, int, str]] = {}
     n = 0
     for e in lib["history"]:
@@ -230,8 +341,16 @@ def rater_names(lib: dict[str, Any]) -> dict[str, str]:
             if k not in latest or stamp[:2] >= latest[k][:2]:
                 latest[k] = stamp
     names = {k: v[2] for k, v in latest.items()}
+    for k in names:
+        if k.isdigit() and k in members:
+            names[k] = members[k]
     for k, v in lib.get("people", {}).items():
-        if v:
+        if not v:
+            continue
+        if v.startswith("@") and v[1:].isdigit():
+            uid = v[1:]
+            names[k] = members.get(uid) or names.get(uid) or "A former member"
+        else:
             names[k] = v
     return names
 
@@ -246,6 +365,8 @@ def set_people(lib: dict[str, Any], mapping: dict[str, Any]) -> int:
         if key not in known and key not in people:
             continue
         name = re.sub(r"\s+", " ", str(name or "")).strip()[:40]
+        if name.startswith("@") and not name[1:].isdigit():
+            name = name[1:]  # only '@<user id>' links a member; '@sam' is just a name
         if name and people.get(key) != name:
             people[key] = name
             changed += 1

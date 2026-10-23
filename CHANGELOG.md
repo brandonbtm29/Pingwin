@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.0 (2026-10-23)
+- **Movie details fill in by themselves:** with an OMDb key, Pingwin looks up a few movies every 20 minutes
+  (history, then watchlists) within a daily request budget, waits a day when OMDb's limit is reached, and
+  retries misses a week later. Lookups now fill in the existing movie instead of adding a near-match, and a
+  result from a different year counts as a miss. Progress shows on the movie pages' Admin tab.
+- **People:** link each name to a Discord member from a dropdown (likely matches first); their imported and
+  Discord ratings count as one person, shown with their server name.
+- **Stats tab:** colorful charts (nights per year by series, favorites, us vs IMDb, score spread, critics,
+  genres, directors) with hover details.
+
 ## 0.11.0 (2026-10-23)
 - **Movie pages, new look:** a cinema-style header with live counts, pill tabs, color-coded scores,
   initials avatars, and poster cards for the watchlists.

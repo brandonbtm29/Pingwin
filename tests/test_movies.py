@@ -236,3 +236,103 @@ def test_parse_list_message():
     assert rows[4]["note"] == "miniseries, 3 hours"
     plain = movies.parse_list_message("Watchlist:\n- Heat\n2. Ronin\n")
     assert [(r["title"], r["done"]) for r in plain] == [("Heat", False), ("Ronin", False)]
+
+
+class _FakeOmdb:
+    """Stands in for aiohttp: answers OMDb-style JSON from a list of responses."""
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.calls = []
+
+    def get(self, url, params=None):
+        self.calls.append(params)
+        answer = self.answers.pop(0)
+
+        class _R:
+            async def __aenter__(self_inner):
+                return self_inner
+
+            async def __aexit__(self_inner, *a):
+                return False
+
+            async def json(self_inner, content_type=None):
+                return answer
+
+        return _R()
+
+
+def test_omdb_lookup_counts_requests_and_spots_limits():
+    import asyncio
+
+    import pytest
+
+    found = {"Response": "True", "Title": "The Fly", "Year": "1986", "Genre": "Horror, Sci-Fi", "imdbID": "tt1"}
+    spent = [0]
+    got = asyncio.run(movies.omdb_lookup(_FakeOmdb([found]), "k", "The Fly", 1986, spent))
+    assert got["genre"] == "Horror, Sci-Fi" and spent == [1]
+    miss = {"Response": "False", "Error": "Movie not found!"}
+    spent = [0]
+    assert asyncio.run(movies.omdb_lookup(_FakeOmdb([miss, {"Response": "False"}]), "k", "Nope", None, spent)) is None
+    assert spent == [2]
+    spent = [0]
+    via_search = _FakeOmdb([miss, {"Search": [{"imdbID": "tt9"}]}, found])
+    assert asyncio.run(movies.omdb_lookup(via_search, "k", "Fly", None, spent))["imdb_id"] == "tt1"
+    assert spent == [3] and via_search.calls[2]["i"] == "tt9"
+    with pytest.raises(movies.OmdbLimit):
+        asyncio.run(movies.omdb_lookup(_FakeOmdb([{"Response": "False", "Error": "Request limit reached!"}]), "k", "X"))
+    with pytest.raises(movies.OmdbKeyError):
+        asyncio.run(movies.omdb_lookup(_FakeOmdb([{"Response": "False", "Error": "Invalid API key!"}]), "k", "X"))
+
+
+def test_details_fill_existing_movies_safely():
+    m = {"id": "dr-caligari-1989", "title": "Dr. Caligari", "year": 1989, "director": "Sheet Director"}
+    namesake = {"title": "The Cabinet of Dr. Caligari", "year": 1920, "genre": "Horror"}
+    assert not movies.plausible(m, namesake)
+    info = {
+        "title": "Dr Caligari",
+        "year": 1989,
+        "genre": "Comedy",
+        "director": "OMDb Director",
+        "imdb_id": "tt2",
+        "looked_up": 5.0,
+    }
+    movies.note_miss(m, 1.0)
+    movies.merge_details(m, info)
+    assert m["title"] == "Dr. Caligari" and m["id"] == "dr-caligari-1989"  # ours kept
+    assert m["director"] == "Sheet Director" and m["genre"] == "Comedy" and m["looked_up"] == 5.0
+    assert "omdb_tries" not in m
+
+
+def test_details_todo_and_retries():
+    lib = {"movies": {}, "history": [], "pending": {}, "people": {}}
+    old = movies.upsert_movie(lib, {"title": "Old", "year": 2000})
+    new = movies.upsert_movie(lib, {"title": "New", "year": 2020})
+    done = movies.upsert_movie(lib, {"title": "Done", "year": 2010})
+    done["looked_up"] = 1.0
+    lib["history"] += [movies.new_entry(old, "2024-01-01", "MMM"), movies.new_entry(new, "2025-01-01", "MMM")]
+    watch = {"mmm": {"nominations": [{"id": "n1", "title": "Waiting", "year": None, "watched": None}]}}
+    todo = movies.details_todo(lib, watch, now=100.0)
+    assert [t[2] if t[0] == "movie" else t[3] for t in todo] == ["New", "Old", "Waiting"]
+    movies.note_miss(new, now=100.0)
+    assert not movies.needs_details(new, 100.0 + 60)  # missed: wait a week
+    assert movies.needs_details(new, 100.0 + movies.RETRY_AFTER + 1)
+    new["omdb_tries"] = movies.MAX_TRIES
+    assert not movies.needs_details(new, 1e12)  # gave up
+    p = movies.details_progress(lib, watch)
+    assert p == {"done": 1, "total": 4, "not_found": 1, "left": 2}
+
+
+def test_people_can_link_discord_members():
+    lib = {"movies": {}, "history": [], "pending": {}, "people": {}}
+    e = movies.new_entry({"id": "a-2000", "title": "A"}, "2024-01-01", "MMM")
+    movies.add_rating(e, "name:mrs smith", name="Mrs Smith", score=7)
+    movies.add_rating(e, "111", name="old display name", score=8, user_id="111")
+    lib["history"].append(e)
+    members = {"111": "Sam", "222": "Alex"}
+    assert movies.rater_names(lib, members)["111"] == "Sam"  # their current server name
+    assert movies.set_people(lib, {"name:mrs smith": "@222"}) == 1
+    assert movies.rater_names(lib, members)["name:mrs smith"] == "Alex"
+    assert movies.rater_links(lib) == {"111": "111", "name:mrs smith": "222"}
+    movies.set_people(lib, {"name:mrs smith": "@sam"})  # not a user id: just a name
+    assert lib["people"]["name:mrs smith"] == "sam"
