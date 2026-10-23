@@ -331,3 +331,8 @@ input.year { width: 9rem; }
 .pending-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
 .pending-list li { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: space-between; align-items: center; }
 label.file { display: inline-flex; flex-direction: column; gap: .25rem; }
+
+@media (max-width: 560px) {
+  .movie-table th:nth-child(3), .movie-table td:nth-child(3),
+  .movie-table th:nth-child(6), .movie-table td:nth-child(6) { display: none; }
+}

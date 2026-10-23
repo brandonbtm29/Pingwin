@@ -91,6 +91,7 @@ function renderHistory() {
   let rows = data.history.filter((h) => (!series || h.series === series) && matches(h, q));
   const sort = $("h-sort").value;
   const val = (x) => (x === null || x === undefined ? -99 : x);
+  if (sort === "date") rows = [...rows].sort((a, b) => (b.date || "").localeCompare(a.date || ""));  // undated last
   if (sort === "ours") rows = [...rows].sort((a, b) => val(b.avg) - val(a.avg));
   if (sort === "imdb") rows = [...rows].sort((a, b) => val(b.movie.imdb_rating) - val(a.movie.imdb_rating));
   if (sort === "gap") rows = rows.filter((h) => h.avg !== null && h.movie.imdb_rating).sort((a, b) => (b.avg - b.movie.imdb_rating) - (a.avg - a.movie.imdb_rating));
