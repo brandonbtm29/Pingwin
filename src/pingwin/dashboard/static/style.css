@@ -270,6 +270,8 @@ pre.diff { max-height: 18rem; overflow: auto; background: var(--surface-2); padd
 .who { display: inline-flex; align-items: center; gap: .45rem; }
 .row-btns { white-space: nowrap; text-align: right; }
 
+.guide-line { margin: 0 0 1rem; }
+
 /* ---------- attendance ---------- */
 details.event { border-top: 1px solid var(--border); padding: .5rem 0; }
 details.event summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }

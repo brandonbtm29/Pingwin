@@ -157,6 +157,14 @@ Pingwin checks every few minutes and posts once per stream, with a link.
 2. Add each streamer: a name, their Twitch login and/or their YouTube handle (like `@name`).
 3. Add the keys for whichever sites you use. They're free and stored in `secrets.env`, never in `config.toml`.
 
+**Finding a streamer's handles** (easiest: ask them)
+
+- **Twitch login:** open their channel; it's the last part of the address. For `twitch.tv/coolstreamer`, enter
+  `coolstreamer`.
+- **YouTube handle:** open their channel; the handle starts with `@` and is under the channel name (and in the
+  address, like `youtube.com/@coolstreamer`). Enter it with the `@`.
+- On Discord, if they've linked Twitch or YouTube, it shows on their profile under **Connections**.
+
 **Twitch keys**
 
 1. Go to [dev.twitch.tv/console](https://dev.twitch.tv/console) and sign in (turn on two-factor

@@ -642,7 +642,18 @@ function rowsInput(field, rows, onChange) {
   return wrap;
 }
 
+const GUIDE_ANCHORS = {
+  bot: "time-zones", events: "event-reminders", birthdays: "birthdays", movienight: "movie-night",
+  gameday: "game-day-sign-ups", streams: "stream-alerts", welcome: "welcome-and-approval", modlog: "mod-log",
+  attendance: "event-attendance-and-frumples",
+};
+function guideUrl(anchor) {
+  const repo = state?.repo || "https://github.com/brandonbtm29/Pingwin";
+  return `${repo}/blob/main/docs/FEATURES.md${anchor ? "#" + anchor : ""}`;
+}
+
 function renderFeatures() {
+  $("f-guide").href = guideUrl("");
   const box = $("f-sections");
   box.replaceChildren(...featureData.sections.map((section) => {
     const values = JSON.parse(JSON.stringify(featureData.values[section.key]));
@@ -671,7 +682,9 @@ function renderFeatures() {
       el("summary", {}, el("h2", {}, section.title),
         enabled === null ? null : el("span", { class: enabled ? "status-on" : "status-off" }, enabled ? "On" : "Off")),
       el("div", { class: "feature-body" },
-        el("p", { class: "desc" }, section.description), needs, ...fields,
+        el("p", { class: "desc" }, section.description,
+          GUIDE_ANCHORS[section.key] ? [" ", el("a", { href: guideUrl(GUIDE_ANCHORS[section.key]), target: "_blank", rel: "noreferrer" }, "Guide ↗")] : null),
+        needs, ...fields,
         el("div", { class: "row-actions" }, saveBtn, dirtyNote)),
     );
     details.addEventListener("toggle", () => { details.open ? openSections.add(section.key) : openSections.delete(section.key); });
@@ -1144,6 +1157,8 @@ function renderAbout() {
   $("a-changes").href = `${state.repo}/blob/main/CHANGELOG.md`;
   $("a-issues").href = `${state.repo}/issues`;
   $("a-privacy").href = `${state.repo}/blob/main/PRIVACY.md`;
+  $("a-features").href = `${state.repo}/blob/main/docs/FEATURES.md`;
+  $("a-remote").href = `${state.repo}/blob/main/docs/REMOTE-DASHBOARD.md`;
   $("guide-link").href = `${state.repo}/blob/main/docs/SETUP.md`;
   $("a-invite").hidden = !state.invite;
   if (state.invite) $("a-invite").href = state.invite;

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1 (2026-10-23)
+- Dashboard: every feature on the Features tab links to its setup guide, and the About section links to the
+  features and remote access guides. The stream alerts guide explains how to find Twitch and YouTube handles.
+
 ## 0.9.0 (2026-10-22)
 - **Event attendance:** Pingwin notes who's in a Discord Event's voice channel (or taps **I'm here** at
   in-person events, optionally with a code from the host). When the event ends, everyone who stayed long
