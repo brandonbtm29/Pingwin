@@ -199,3 +199,40 @@ def test_close_titles_match_by_year():
     )
     assert not movies._close(movies.norm("Alien"), movies.norm("Aliens vs Predator"))
     assert not movies._close(movies.norm("The Fog"), movies.norm("The Fly"))
+
+
+def test_people_merge_names():
+    lib = {"movies": {}, "history": [], "pending": {}, "people": {}}
+    e1 = movies.new_entry({"id": "a-2000", "title": "A"}, "2024-01-01", "MMM", source="import")
+    e2 = movies.new_entry({"id": "b-2001", "title": "B"}, "2024-01-08", "MMM", source="import")
+    movies.add_rating(e1, "name:mrs smith", name="Mrs Smith", score=7)
+    movies.add_rating(e2, "name:mrs. smith", name="Mrs. Smith", score=9)
+    movies.add_rating(e2, "111", name="sam_discord", score=8, user_id="111")
+    lib["history"] += [e1, e2]
+    assert movies.rater_names(lib)["111"] == "sam_discord"
+    changed = movies.set_people(lib, {"name:mrs smith": "Sam", "name:mrs. smith": " Sam ", "111": "Sam", "nope": "X"})
+    assert changed == 3 and "nope" not in lib["people"]
+    assert set(movies.rater_names(lib).values()) == {"Sam"}
+    assert movies.set_people(lib, {"111": ""}) == 1
+    assert movies.rater_names(lib)["111"] == "sam_discord"
+
+
+def test_parse_list_message():
+    rows = movies.parse_list_message(
+        "Movies list part 2\n✅ The Fly\n✅Alien (1979)\n🇽 Halloween\n🇽The Pagemaster (1994)\n"
+        "🇽Merlin (1998 miniseries, 3 hours)\n🇽 Challengers 2024\n🇽 Zorro (The Mask of)\n🇽1917\n"
+    )
+    got = [(r["title"], r["year"], r["done"]) for r in rows]
+    assert got == [
+        ("The Fly", None, True),
+        ("Alien", 1979, True),
+        ("Halloween", None, False),
+        ("The Pagemaster", 1994, False),
+        ("Merlin", 1998, False),
+        ("Challengers", 2024, False),
+        ("Zorro (The Mask of)", None, False),
+        ("1917", None, False),
+    ]
+    assert rows[4]["note"] == "miniseries, 3 hours"
+    plain = movies.parse_list_message("Watchlist:\n- Heat\n2. Ronin\n")
+    assert [(r["title"], r["done"]) for r in plain] == [("Heat", False), ("Ronin", False)]

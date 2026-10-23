@@ -38,6 +38,7 @@ def load() -> dict[str, Any]:
     lib.setdefault("movies", {})
     lib.setdefault("history", [])
     lib.setdefault("pending", {})
+    lib.setdefault("people", {})  # rater key -> the name they count as (set by a mod on the movie pages)
     return lib
 
 
@@ -177,6 +178,81 @@ def add_rating(
         "ask": ask.strip(),  # the question they pass on to the next rater
         "at": time.time(),
     }
+
+
+DONE_MARKS = ("✅", "✔️", "✔", "☑️", "☑")
+TODO_MARKS = ("🇽", "❌", "✖️", "✖", "⬜", "☐", "🔲", "▫️", "◻️")
+LIST_PREFIX = re.compile(r"^(?:[-*•·]|\d{1,3}[.)])\s*")
+
+
+def parse_list_message(text: str) -> list[dict[str, Any]]:
+    """Movies from a list message like a pinned watchlist.
+
+    Lines marked ✅ are watched and 🇽 (or ❌, ⬜) are still waiting. If no line has a mark, every
+    line counts as waiting, except a title line at the top ending in ':'."""
+    rows = []
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    marked = any(ln.startswith(DONE_MARKS + TODO_MARKS) for ln in lines)
+    for ln in lines:
+        done = ln.startswith(DONE_MARKS)
+        if marked and not (done or ln.startswith(TODO_MARKS)):
+            continue  # a heading like 'Movies list part 2'
+        for m in DONE_MARKS + TODO_MARKS:
+            if ln.startswith(m):
+                ln = ln[len(m) :].strip()
+                break
+        ln = LIST_PREFIX.sub("", ln).strip(" *_~")
+        if not ln or (not marked and ln.endswith(":")):
+            continue
+        year, note = None, ""
+        m = re.search(r"\((\d{4})\b([^)]*)\)\s*$", ln)
+        if m:
+            year, note, ln = int(m[1]), m[2].strip(" ,;-"), ln[: m.start()].strip()
+        else:
+            m = re.search(r"\s((?:18|19|20)\d\d)$", ln)
+            if m and len(ln) > 5:
+                year, ln = int(m[1]), ln[: m.start()].strip()
+        if ln:
+            rows.append({"title": ln[:100], "year": year, "note": note[:80], "done": done})
+    return rows
+
+
+def rater_names(lib: dict[str, Any]) -> dict[str, str]:
+    """Who each rater key is: the name a mod set under People, else the newest name they rated under.
+
+    Keys are 'user-id' for Discord ratings and 'name:sam' for ratings imported by name."""
+    latest: dict[str, tuple[float, int, str]] = {}
+    n = 0
+    for e in lib["history"]:
+        for k, r in e.get("ratings", {}).items():
+            n += 1
+            stamp = (r.get("at") or 0, n, r.get("name") or "?")
+            if k not in latest or stamp[:2] >= latest[k][:2]:
+                latest[k] = stamp
+    names = {k: v[2] for k, v in latest.items()}
+    for k, v in lib.get("people", {}).items():
+        if v:
+            names[k] = v
+    return names
+
+
+def set_people(lib: dict[str, Any], mapping: dict[str, Any]) -> int:
+    """Save 'counts as' names for rater keys. A blank name goes back to the name as written."""
+    people = lib.setdefault("people", {})
+    known = {k for e in lib["history"] for k in e.get("ratings", {})}
+    changed = 0
+    for key, name in mapping.items():
+        key = str(key)[:80]
+        if key not in known and key not in people:
+            continue
+        name = re.sub(r"\s+", " ", str(name or "")).strip()[:40]
+        if name and people.get(key) != name:
+            people[key] = name
+            changed += 1
+        elif not name and key in people:
+            people.pop(key)
+            changed += 1
+    return changed
 
 
 def open_question(entry: dict[str, Any]) -> str:

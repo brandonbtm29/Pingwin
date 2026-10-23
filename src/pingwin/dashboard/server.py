@@ -914,10 +914,11 @@ async def get_movies(request: web.Request) -> web.Response:
     viewer = viewer_of(request)
     guild = _guild(bot) if hasattr(bot, "guilds") else None
     lib = movies.load()
+    names = movies.rater_names(lib)
     history = []
     for e in reversed(lib["history"]):
         m = lib["movies"].get(e["movie_id"], {"title": "?"})
-        ratings = sorted(e.get("ratings", {}).values(), key=lambda r: r.get("at", 0))
+        ratings = sorted(e.get("ratings", {}).items(), key=lambda kv: kv[1].get("at", 0))
         history.append(
             {
                 "id": e["id"],
@@ -926,8 +927,13 @@ async def get_movies(request: web.Request) -> web.Response:
                 "movie": m,
                 "avg": movies.ratings_avg(e),
                 "ratings": [
-                    {k: r.get(k) for k in ("name", "score", "comment", "answered", "answer", "ask", "user_id")}
-                    for r in ratings
+                    {
+                        **{f: r.get(f) for f in ("name", "score", "comment", "answered", "answer", "ask")},
+                        "key": k,
+                        "who": names.get(k) or r.get("name"),
+                        "discord": bool(r.get("user_id")),
+                    }
+                    for k, r in ratings
                 ],
                 "open": bool((e.get("prompt") or {}).get("message")) and not (e.get("prompt") or {}).get("closed"),
             }
@@ -944,7 +950,7 @@ async def get_movies(request: web.Request) -> web.Response:
             m = lib["movies"].get(n.get("movie_id") or "", {})
             items.append(
                 {
-                    **{k: n.get(k) for k in ("id", "title", "year", "added", "watched")},
+                    **{k: n.get(k) for k in ("id", "title", "year", "added", "watched", "list", "note")},
                     "by": by_name,
                     "runtime": m.get("runtime"),
                     "imdb_rating": m.get("imdb_rating"),
@@ -964,6 +970,7 @@ async def get_movies(request: web.Request) -> web.Response:
             "history": history,
             "watchlists": watchlists,
             "pending": pending,
+            "people": lib.get("people", {}),
             "omdb": bool(os.environ.get(movies.SECRET)),
             "approvals": bool(
                 getattr(getattr(bot, "config", None), "features", None) and bot.config.features.movienight.approvals
@@ -1135,13 +1142,59 @@ async def post_movie_admin(request: web.Request) -> web.Response:
             lib["history"].remove(e)
             msg = "Removed from the history."
         else:
-            gone = [k for k, r in e.get("ratings", {}).items() if r.get("name") == payload.get("name")]
+            gone = [
+                k
+                for k, r in e.get("ratings", {}).items()
+                if (payload.get("key") and k == payload.get("key"))
+                or (not payload.get("key") and r.get("name") == payload.get("name"))
+            ]
             for k in gone:
                 e["ratings"].pop(k)
             msg = f"Removed {len(gone)} rating(s)."
         movies.save(lib)
         log.info("Movie history %s (%s)", action, viewer.name)
         return web.json_response({"ok": True, "message": msg})
+    if action == "import_list":
+        if cog is None:
+            raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+        text, by = str(payload.get("text") or ""), 0
+        link = str(payload.get("link") or "").strip()
+        if link:
+            m = re.search(r"channels/(\d+)/(\d+)/(\d+)", link)
+            if not m:
+                raise ApiError(
+                    "That doesn't look like a Discord message link (right-click the message → Copy Message Link)."
+                )
+            try:
+                channel = bot.get_channel(int(m[2])) or await bot.fetch_channel(int(m[2]))
+                msg = await channel.fetch_message(int(m[3]))
+            except (discord.HTTPException, AttributeError) as e:
+                raise ApiError(f"Pingwin couldn't read that message ({e}). Can it see that channel?") from e
+            text, by = msg.content, msg.author.id
+        rows = movies.parse_list_message(text)
+        if not rows:
+            raise ApiError("No movies found in that message.")
+        try:
+            st = cog.import_list(_str(payload, "series", 50), rows, by, _str(payload, "label", 40))
+        except ValueError as e:
+            raise ApiError(str(e)) from e
+        log.info("Watchlist imported from a list (%s): %s", viewer.name, st)
+        return web.json_response(
+            {
+                "ok": True,
+                "message": f"Added {st['added']} movies. Skipped {st['watched']} already watched and "
+                f"{st['already']} already on the list.",
+            }
+        )
+    if action == "people":
+        mapping = payload.get("people")
+        if not isinstance(mapping, dict) or len(mapping) > 500:
+            raise ApiError("Nothing to save.")
+        lib = movies.load()
+        changed = movies.set_people(lib, mapping)
+        movies.save(lib)
+        log.info("Movie raters renamed or merged (%s): %s change(s)", viewer.name, changed)
+        return web.json_response({"ok": True, "message": f"Saved {changed} change(s)." if changed else "No changes."})
     if action == "decide":
         if cog is None:
             raise ApiError("Movie night isn't loaded.", 409)

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.0 (2026-10-23)
+- **Movie pages, new look:** a cinema-style header with live counts, pill tabs, color-coded scores,
+  initials avatars, and poster cards for the watchlists.
+- **Reviews tab:** every rating and comment, filterable by person, series and score, with a card per person
+  (their average, how they compare with the group, favorites).
+- **History columns:** choose which columns show (year, ratings, us vs IMDb, director, writers, stars,
+  genre) and sort by clicking a heading.
+- **People:** admins set who each rater name counts as, merging nicknames, typos and Discord names.
+- **Import a watchlist from Discord:** paste a pinned list's message link; ✅ lines are skipped, the rest join
+  the watchlist under a list name like *Horror*.
+
 ## 0.10.0 (2026-10-23)
 - **All commands under /pingwin:** `/pingwin movie ...`, `/pingwin birthday ...`, `/pingwin timezone ...` and
   so on, so Pingwin's commands stay together next to other bots. Press Ctrl+R in Discord if the old ones linger.

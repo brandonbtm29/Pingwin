@@ -386,6 +386,46 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 pass
         return msg
 
+    def import_list(self, series: str, rows: list[dict[str, Any]], by: int, label: str = "") -> dict[str, int]:
+        """Add a list's waiting movies to a watchlist at once (no channel posts). Skips watched ones."""
+        s = self.series(series)
+        if s is None:
+            raise ValueError(f"There's no {series} series.")
+        state = store.load(STATE)
+        noms = self._data(state, s)["nominations"]
+        lib = movies.load()
+        seen = {movies.norm(n["title"]) for n in noms if not n.get("watched")}
+        watched = {
+            movies.norm(lib["movies"][e["movie_id"]]["title"]) for e in lib["history"] if e["movie_id"] in lib["movies"]
+        }
+        stats = {"added": 0, "watched": 0, "already": 0}
+        for r in rows:
+            key = movies.norm(r["title"])
+            if r.get("done") or key in watched:
+                stats["watched"] += 1
+                continue
+            if key in seen:
+                stats["already"] += 1
+                continue
+            seen.add(key)
+            found = movies.find_movie(lib, r["title"], r.get("year"))
+            noms.append(
+                {
+                    "id": secrets.token_hex(4),
+                    "title": r["title"],
+                    "year": r.get("year"),
+                    "movie_id": found["id"] if found else None,
+                    "by": by,
+                    "added": discord.utils.utcnow().isoformat(),
+                    "watched": None,
+                    "list": label[:40],
+                    "note": r.get("note", ""),
+                }
+            )
+            stats["added"] += 1
+        store.save(STATE, state)
+        return stats
+
     async def apply(self, kind: str, series: str, data: dict[str, Any], by: int) -> str:
         s = self.series(series)
         if kind == "edit":
@@ -492,9 +532,14 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     def _prompt_embed(
         self, entry: dict[str, Any], movie: dict[str, Any], closes: float, closed: bool = False
     ) -> discord.Embed:
-        rs = sorted(entry.get("ratings", {}).values(), key=lambda r: r.get("at", 0))
+        people = movies.load().get("people", {})
+        rs = sorted(entry.get("ratings", {}).items(), key=lambda kv: kv[1].get("at", 0))
         avg = movies.ratings_avg(entry)
-        lines = [f"**{r['name']}**: {r['score']:g}/10" for r in rs if isinstance(r.get("score"), (int, float))]
+        lines = [
+            f"**{people.get(k) or r['name']}**: {r['score']:g}/10"
+            for k, r in rs
+            if isinstance(r.get("score"), (int, float))
+        ]
         desc = (
             "Ratings are closed."
             if closed

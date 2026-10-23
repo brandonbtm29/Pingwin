@@ -185,8 +185,14 @@ sees:
 - **History:** every movie night with date, series, our average and IMDb's, searchable and sortable. Open
   one for the poster, details, everyone's ratings and the question chain. **Suggest a fix** sends a
   correction to the mods.
-- **Watchlists:** each series' list, and a form to suggest a movie.
+- **Reviews:** everyone's ratings and comments in one place. Filter by person, series or score, search
+  them, or click someone's card for their average, how they compare with the group, and their favorites.
+- **Watchlists:** each series' list as poster cards, with filters for named lists (like *Horror*), and a
+  form to suggest a movie.
 - **Stats:** favorites, least favorites, where you disagreed with IMDb, top raters, directors, nights per year.
+
+On **History**, **Columns** picks what the table shows (year, rating count, us vs IMDb, director, writers,
+stars, genre), and clicking a column heading sorts by it. Your choice is remembered in your browser.
 
 Members only see the movie pages; the rest of the dashboard stays admin-only.
 
@@ -207,6 +213,20 @@ Alex (7/10): 3/10. Loved the ending.
 Paste Google Sheets and Docs links (shared as *Anyone with the link can view*), or download them (File →
 Download → CSV / Plain text) and upload the files. Names are matched to server members where possible.
 Running it again only adds what's new. Then **Look up missing details** fills in OMDb info.
+
+### People (who's who in the ratings)
+
+Imported ratings keep the name they were written with, so one person can show up as a nickname, a typo
+and their Discord name. On the **Admin** tab, **People** lists every name. Give names the same
+**Counts as** name (like `Mrs. Smith` and `Mrs Smith` → `Sam`) and the Reviews tab, stats and Discord recaps
+treat them as one person. The original names stay as written; clear the box to undo.
+
+### Importing a watchlist from Discord
+
+If your club keeps a list in a pinned message (✅ for watched, 🇽 or ❌ for not yet), the **Admin** tab's
+**Import a watchlist from Discord** adds it in one go: right-click the message → **Copy Message Link**, paste
+it, pick the series and an optional list name (like *Horror*). Watched lines, movies already in the history
+and ones already on the list are skipped. You can paste the list's text instead of a link.
 
 ### Typed commands
 

@@ -109,3 +109,24 @@ def test_typed_commands():
     assert title_and_year(["The", "Thing", "1982"]) == ("The Thing", 1982)
     assert title_and_year(["1917"]) == ("1917", None)
     assert title_and_year(["Alien", "(1979)"]) == ("Alien", 1979)
+
+
+def test_admins_set_who_ratings_count_as(tmp_path, data):  # noqa: F811
+    async def scenario(client, app):
+        hdr = headers(app, "admin")
+        await client.post(
+            "/api/movies/admin", json={"action": "import", "sheet_csv": SHEET, "doc_text": DOC}, headers=hdr
+        )
+        body = await (await client.get("/api/movies", headers=hdr)).json()
+        keys = {r["name"]: r["key"] for r in body["history"][0]["ratings"]}
+        people = {keys["Sam"]: "Samantha", keys["Alex"]: "Samantha"}
+        r = await client.post("/api/movies/admin", json={"action": "people", "people": people}, headers=hdr)
+        assert r.status == 200, await r.text()
+        body = await (await client.get("/api/movies", headers=hdr)).json()
+        assert {x["who"] for x in body["history"][0]["ratings"]} == {"Samantha"}
+        assert {x["name"] for x in body["history"][0]["ratings"]} == {"Sam", "Alex"}  # as written, kept
+        member = headers(app, "member")
+        r = await client.post("/api/movies/admin", json={"action": "people", "people": people}, headers=member)
+        assert r.status == 403
+
+    run(scenario, tmp_path)

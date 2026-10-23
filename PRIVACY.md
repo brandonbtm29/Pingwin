@@ -51,6 +51,7 @@ Everything stays on the operator's computers (and any backup PCs they set up):
 | **Birthdays** (if on): your Discord user ID with the month and day you entered. Never the year | Posting the shout-out | Until you run `/pingwin birthday remove` or a mod removes it |
 | **Movie watchlists** (if on): each nominated title, who nominated it (user ID) and when, and running polls | Running movie night | Until the movie is removed |
 | **Movie history and ratings** (if on): which movie was watched when, and each rating: your user ID (or the name from an imported ratings document), score, comment and any question or answer you wrote | Showing the history, averages and stats on the movie pages | Until a mod deletes the rating or the movie night |
+| **Movie rater names** (if a mod sets them): which name each rater's ratings count as | Grouping someone's ratings on the movie pages | Until a mod clears it |
 | **Movie change requests** (if approvals are on): who asked for a nomination, removal or history fix, and whether a mod approved it | The approval cards | Until the operator deletes `state/movielib.json` |
 | **Game day sign-ups** (if on): the title, time, host and who answered In / Maybe / Can't (user IDs) | Reminders | About two days after the game |
 | **Welcome approvals** (if on): the new member's user ID and whether a mod approved or denied them | Keeping the buttons working | Until the operator deletes `state/approvals.json` |

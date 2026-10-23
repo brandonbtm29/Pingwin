@@ -8,22 +8,27 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="movies-page">
-  <header class="top">
-    <div class="brand">
-      <img class="logo" src="/static/icon.svg" alt="" width="44" height="44">
-      <div>
-        <h1>Movie nights</h1>
-        <p class="sub" id="m-sub">Loading…</p>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="brand">
+        <img class="logo" src="/static/icon.svg" alt="" width="48" height="48">
+        <div>
+          <p class="eyebrow">Pingwin presents</p>
+          <h1>Movie nights</h1>
+          <p class="sub" id="m-sub">Loading…</p>
+        </div>
+      </div>
+      <div class="top-right">
+        <a class="btn small" id="m-dashboard" href="/" hidden>Dashboard</a>
+        <div class="viewer" id="m-viewer" hidden></div>
       </div>
     </div>
-    <div class="top-right">
-      <a class="btn small" id="m-dashboard" href="/" hidden>Dashboard</a>
-      <div class="viewer" id="m-viewer" hidden></div>
-    </div>
+    <div class="hero-stats" id="m-stats"></div>
   </header>
 
-  <nav class="tabs" role="tablist">
+  <nav class="tabs pills" role="tablist">
     <button role="tab" data-tab="history" aria-selected="true">History</button>
+    <button role="tab" data-tab="reviews">Reviews</button>
     <button role="tab" data-tab="watchlists">Watchlists</button>
     <button role="tab" data-tab="stats">Stats</button>
     <button role="tab" data-tab="admin" id="m-admin-tab" hidden>Admin</button>
@@ -41,20 +46,56 @@
           <input id="h-search" type="search" placeholder="Search titles, directors, stars, years…" aria-label="Search">
           <select id="h-series" aria-label="Series"></select>
           <select id="h-sort" aria-label="Sort">
-            <option value="date">Newest first</option>
-            <option value="ours">Our rating</option>
-            <option value="imdb">IMDb rating</option>
-            <option value="gap">We liked it more than IMDb</option>
+            <option value="date:desc">Newest first</option>
+            <option value="date:asc">Oldest first</option>
+            <option value="ours:desc">Our rating</option>
+            <option value="imdb:desc">IMDb rating</option>
+            <option value="gap:desc">We liked it more than IMDb</option>
+            <option value="gap:asc">We liked it less than IMDb</option>
+            <option value="count:desc">Most ratings</option>
+            <option value="custom" hidden>Sorted by a column</option>
           </select>
+          <details class="col-picker">
+            <summary class="btn">Columns</summary>
+            <div class="col-menu" id="h-cols"></div>
+          </details>
         </div>
         <p class="hint" id="h-count"></p>
         <div class="table-wrap">
           <table class="movie-table">
-            <thead><tr><th>Date</th><th>Movie</th><th>Series</th><th class="num">Ours</th><th class="num">IMDb</th><th class="num">Min</th></tr></thead>
+            <thead><tr id="h-head"></tr></thead>
             <tbody id="h-rows"></tbody>
           </table>
         </div>
       </div>
+    </section>
+
+    <section id="tab-reviews" class="tab" hidden>
+      <div class="panel">
+        <div class="row-actions filters">
+          <input id="r-search" type="search" placeholder="Search reviews and movies…" aria-label="Search reviews">
+          <select id="r-person" aria-label="Person"></select>
+          <select id="r-series" aria-label="Series"></select>
+          <select id="r-score" aria-label="Score">
+            <option value="">Any score</option>
+            <option value="8">8 and up</option>
+            <option value="5">5 to 7.9</option>
+            <option value="0">Under 5</option>
+          </select>
+          <select id="r-sort" aria-label="Sort">
+            <option value="new">Newest first</option>
+            <option value="old">Oldest first</option>
+            <option value="high">Highest score</option>
+            <option value="low">Lowest score</option>
+            <option value="long">Longest reviews</option>
+          </select>
+        </div>
+        <p class="hint" id="r-count"></p>
+      </div>
+      <div class="people-cards" id="r-people"></div>
+      <div class="panel" id="r-summary" hidden></div>
+      <ul class="review-list" id="r-list"></ul>
+      <div class="row-actions center"><button class="btn" id="r-more" hidden>Show more</button></div>
     </section>
 
     <section id="tab-watchlists" class="tab" hidden>
@@ -96,6 +137,33 @@
           <label class="file">Ratings (.txt)<input type="file" id="i-doc-file" accept=".txt,text/plain"></label>
         </div>
         <div class="row-actions"><button class="btn primary" id="i-go">Import</button><span class="hint" id="i-result"></span></div>
+      </div>
+      <div class="panel">
+        <h2>Import a watchlist from Discord</h2>
+        <p class="hint">Paste the link to a list message (right-click it → <strong>Copy Message Link</strong>). Lines
+          marked ✅ count as watched and are skipped; 🇽, ❌ or unmarked lines join the watchlist. Movies already on the
+          list or in the history are skipped too.</p>
+        <label>Message link<input id="l-link" placeholder="https://discord.com/channels/…"></label>
+        <div class="row-actions">
+          <label class="inline">Series<select id="l-series"></select></label>
+          <label class="inline">List name (optional)<input id="l-label" maxlength="40" placeholder="Horror"></label>
+        </div>
+        <details><summary class="hint">Or paste the list instead</summary><textarea id="l-text" rows="6" placeholder="🇽 Movie title (1999)"></textarea></details>
+        <div class="row-actions"><button class="btn primary" id="l-go">Add to watchlist</button><span class="hint" id="l-result"></span></div>
+      </div>
+      <div class="panel">
+        <h2>People</h2>
+        <p class="hint">Ratings keep the name they were written with. To put someone's ratings together (a nickname,
+          a typo, their Discord name), give those names the same <strong>Counts as</strong> name. Leave it blank to
+          use the name as written.</p>
+        <div class="table-wrap">
+          <table class="movie-table people-table">
+            <thead><tr><th>Written as</th><th class="num">Ratings</th><th>Counts as</th></tr></thead>
+            <tbody id="p-rows"></tbody>
+          </table>
+        </div>
+        <datalist id="p-names"></datalist>
+        <div class="row-actions"><button class="btn primary" id="p-save">Save people</button><span class="hint" id="p-result"></span></div>
       </div>
       <div class="panel">
         <h2>Movie details</h2>
