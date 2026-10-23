@@ -13,6 +13,7 @@ from a spreadsheet (CSV) and a ratings document (plain text) like the ones many 
 from __future__ import annotations
 
 import csv
+import difflib
 import io
 import logging
 import re
@@ -295,32 +296,79 @@ def _title_key(line: str) -> str:
     return norm(re.sub(r"\(\d{4}\)|\d+(\.\d+)?\s*$|:\s*remake", "", line, flags=re.I))
 
 
+BULLET = re.compile(r"^[*•\-–]\s*")
+HOW_MANY = re.compile(r"^how many\b|\bout of\b", re.I)
+SEPARATOR = re.compile(r"^[_\-=*]{6,}$")
+TOC_LINE = re.compile(r"^(?P<title>\S.*?)(?:\t+|\s{2,})(?P<page>\d{1,4})$")
+
+
 def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[str, Any]]:
     """Sections of a ratings document: a movie title line, 'Date watched: ...', then lines like
     'Name (7/10): comment' and 'To Name: how many X out of Y?' passed to the next person.
 
-    `titles` (normalized movie titles) helps spot sections that have no 'Date watched' line."""
+    Sections are found by a separator line (________) before them, or by a title followed by
+    'Date watched' or a rating. `titles` (normalized movie titles) helps spot the second kind.
+    A table of contents at the top ('Title    12') names sections that start without a title."""
     titles = titles or set()
     lines = [ln.strip().replace("\u200b", "") for ln in text.splitlines()]
     sections: list[dict[str, Any]] = []
     cur: dict[str, Any] | None = None
     last_rating: dict[str, Any] | None = None
+    toc: list[str] = []
+    toc_at = -1  # where the latest section sits in the table of contents
+    after_sep = False
+    seen_sep = False
+
+    def start(title: str | None) -> dict[str, Any]:
+        nonlocal toc_at
+        if title is None and 0 <= toc_at + 1 < len(toc):
+            title = toc[toc_at + 1]  # an untitled section: the next one in the contents
+        if title:
+            key = _title_key(title)
+            keys = [_title_key(t) for t in toc]
+            later = [n for n in range(toc_at + 1, len(toc)) if keys[n] == key]
+            if later:
+                toc_at = later[0]
+            elif title in toc:
+                toc_at = toc.index(title)
+        sec = {"title": title or "", "date": None, "ratings": []}
+        sections.append(sec)
+        return sec
+
     for i, ln in enumerate(lines):
         if not ln:
             continue
+        if SEPARATOR.match(ln):
+            after_sep = seen_sep = True
+            cur, last_rating = None, None
+            continue
+        is_rating = RATING.match(ln) or RATING_ALT.match(ln)
+        if not seen_sep and not sections:
+            m = TOC_LINE.match(ln)
+            if m and not is_rating and len(ln) < 120:
+                toc.append(m["title"].strip())
+                continue
+        if after_sep:
+            after_sep = False
+            if is_rating:
+                cur = start(None)
+                last_rating = None
+            elif not DATE_LINE.match(ln) and not QUESTION.match(ln) and len(ln) < 100:
+                cur = start(ln)
+                last_rating = None
+                continue
         nxt = next((x for x in lines[i + 1 : i + 4] if x), "")
-        is_rating = RATING.match(ln) or RATING_ALT.match(ln) or QUESTION.match(ln)
         key = _title_key(ln)
         titled = (
             len(ln) < 80 and bool(key) and (key in titles or any(len(k) >= 5 and key.startswith(k) for k in titles))
         )
         if (
             not is_rating
+            and not QUESTION.match(ln)
             and not DATE_LINE.match(ln)
             and (DATE_LINE.match(nxt) or (titled and (RATING.match(nxt) or RATING_ALT.match(nxt))))
         ):
-            cur = {"title": ln, "date": None, "ratings": []}
-            sections.append(cur)
+            cur = start(ln)
             last_rating = None
             continue
         if cur is None:
@@ -329,15 +377,18 @@ def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[st
         if m:
             cur["date"] = _date(m["date"])
             continue
-        m = RATING.match(ln) or RATING_ALT.match(ln)
+        m = is_rating
         if m:
             score = None if m["score"] in ("", "NA", "N/A", "U") else _num(m["score"])
             last_rating = {"name": m["name"].strip(), "score": score, "comment": m["comment"].strip(), "ask": ""}
             cur["ratings"].append(last_rating)
             continue
-        m = QUESTION.match(ln)
-        if m and last_rating is not None:
-            last_rating["ask"] = m["q"].strip()
+        bare = BULLET.sub("", ln)
+        m = QUESTION.match(bare)
+        if last_rating is not None and (m or (bare != ln and HOW_MANY.search(bare))):
+            q = (m["q"] if m else bare).strip()
+            if q:
+                last_rating["ask"] = q
             continue
         if (
             last_rating is not None
@@ -345,7 +396,7 @@ def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[st
             and not ln.lower().startswith(("transcript", "to "))
         ):
             last_rating["comment"] = (last_rating["comment"] + " " + ln).strip()
-    return [s for s in sections if s["ratings"]]
+    return [s for s in sections if s["ratings"] and s["title"] and s["title"].casefold() != "template"]
 
 
 def match_name(name: str, members: dict[str, str]) -> str | None:
@@ -358,6 +409,14 @@ def match_name(name: str, members: dict[str, str]) -> str | None:
         if key in words or any(w.startswith(key) for w in words if len(key) >= 4):
             return uid
     return None
+
+
+def _close(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    if len(min(a, b, key=len)) >= 5 and (a.startswith(b) or b.startswith(a)):
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= 0.85
 
 
 def import_history(
@@ -412,6 +471,13 @@ def import_history(
             cands = [e for e in lib["history"] if norm(lib["movies"][e["movie_id"]]["title"]) == norm(t)]
             if year:
                 cands = [e for e in cands if str(lib["movies"][e["movie_id"]].get("year")) == year[1]] or cands
+                if not cands:  # same year, nearly the same title ('Birdemic' / 'Birdemic: Shock and Terror')
+                    cands = [
+                        e
+                        for e in lib["history"]
+                        if str(lib["movies"][e["movie_id"]].get("year")) == year[1]
+                        and _close(norm(lib["movies"][e["movie_id"]]["title"]), norm(t))
+                    ]
             entry = cands[0] if len(cands) == 1 else None
         if entry is None:
             stats["skipped"] += 1

@@ -101,7 +101,7 @@ def test_import_is_merged_and_repeatable():
     assert series["The Descent Part 2"] == "Bonus B-Movie"
     mandy = next(e for e in lib["history"] if lib["movies"][e["movie_id"]]["title"] == "Mandy")
     assert mandy["ratings"]["111"]["score"] == 5.0 and mandy["ratings"]["111"]["user_id"] == "111"
-    assert mandy["ratings"]["222"]["answered"] == ""  # first in the chain
+    assert mandy["ratings"]["222"]["answered"] == "How many heads out of mayo jars"  # Sam asked Alex
     assert movies.ratings_avg(mandy) == 4.5
     cube = next(e for e in lib["history"] if lib["movies"][e["movie_id"]]["title"] == "Cube")
     assert "name:jordan" in cube["ratings"]  # no member matched: kept by name
@@ -147,3 +147,55 @@ def test_omdb_fields():
         }
     )
     assert (info["year"], info["runtime"], info["imdb_rating"], info["poster"]) == (1979, 117, 8.5, None)
+
+
+TOC_DOC = """Movie ratings
+Mandy        2
+The Fly (1986)        3
+Signs        4
+Alien (1979)        5
+________________
+Template
+Date watched:
+Name (/10):
+* To :
+________________
+Mandy
+Date watched: Monday, January 29, 2024
+Sam (5/10): Wild.
+-How many goblins out of wasps?
+Alex (4/10): Too loud.
+________________
+The Fly (1986)
+Sam (8/10): Gross.
+* To Alex: How many teleporters out of baboons?
+Alex (7/10): 3/10. Loved it.
+* Second thought: the ending.
+________________
+Sam (9/10): No title on this one.
+Alex (8/10): Corn.
+________________
+Alien (1979) 8.5
+Jordan (10/10): Perfect.
+"""
+
+
+def test_ratings_doc_with_separators_and_contents():
+    secs = movies.parse_ratings_doc(TOC_DOC)
+    assert [s["title"] for s in secs] == ["Mandy", "The Fly (1986)", "Signs", "Alien (1979) 8.5"]
+    mandy, fly, signs, alien = secs
+    assert mandy["ratings"][0]["ask"] == "How many goblins out of wasps?"
+    assert fly["date"] is None and len(fly["ratings"]) == 2
+    assert fly["ratings"][0]["ask"] == "How many teleporters out of baboons?"
+    assert "the ending" in fly["ratings"][1]["comment"]
+    assert [r["name"] for r in signs["ratings"]] == ["Sam", "Alex"]
+    assert alien["ratings"][0]["score"] == 10.0
+
+
+def test_close_titles_match_by_year():
+    assert movies._close(movies.norm("Birdemic"), movies.norm("Birdemic: Shock and Terror"))
+    assert movies._close(
+        movies.norm("Baba Yaga Terror of the Forest"), movies.norm("Baba Yaga: Terror of the Dark Forest")
+    )
+    assert not movies._close(movies.norm("Alien"), movies.norm("Aliens vs Predator"))
+    assert not movies._close(movies.norm("The Fog"), movies.norm("The Fly"))
