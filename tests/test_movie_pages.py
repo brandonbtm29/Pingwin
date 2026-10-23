@@ -130,3 +130,36 @@ def test_admins_set_who_ratings_count_as(tmp_path, data):  # noqa: F811
         assert r.status == 403
 
     run(scenario, tmp_path)
+
+
+def test_members_add_and_change_their_own_review(tmp_path, data):  # noqa: F811
+    async def scenario(client, app):
+        admin = headers(app, "admin")
+        await client.post(
+            "/api/movies/admin", json={"action": "import", "sheet_csv": SHEET, "doc_text": DOC}, headers=admin
+        )
+        hid = (await (await client.get("/api/movies", headers=admin)).json())["history"][0]["id"]
+        me = headers(app, "member")  # signed in with Discord as user 42, "Riley"
+        r = await client.post("/api/movies/review", json={"hid": hid, "score": "11", "comment": "x"}, headers=me)
+        assert r.status == 400
+        body = {"hid": hid, "score": "8.5", "comment": "Loved the fly.", "ask": "How many teleporters?"}
+        r = await client.post("/api/movies/review", json=body, headers=me)
+        assert r.status == 200, await r.text()
+        r = await client.post("/api/movies/review", json={**body, "score": "9"}, headers=me)
+        assert "updated" in (await r.json())["message"]
+        got = (await (await client.get("/api/movies", headers=me)).json())["history"][0]["ratings"]
+        mine = [x for x in got if x["key"] == "42"]
+        assert len(mine) == 1 and mine[0]["score"] == 9.0 and mine[0]["who"] == "Riley"
+        assert mine[0]["ask"] == "How many teleporters?"
+        r = await client.post("/api/movies/review", json={**body, "as_user": "99"}, headers=me)
+        assert r.status == 403  # members can't review for someone else
+
+    run(scenario, tmp_path)
+
+
+def test_general_watchlist_is_always_there(tmp_path, data):  # noqa: F811
+    async def scenario(client, app):
+        body = await (await client.get("/api/movies", headers=headers(app, "member"))).json()
+        assert body["series"][-1] == "General" and body["series_full"]["General"] == "General"
+
+    run(scenario, tmp_path)

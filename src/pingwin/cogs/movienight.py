@@ -20,6 +20,7 @@ import random
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -237,6 +238,11 @@ class RateModal(discord.ui.Modal):
             await cog.refresh_prompt(entry, lib)
 
 
+# A watchlist for anything that isn't for a particular series. No role, channel or showtime of its own:
+# its polls go to the channel they're started in.
+GENERAL = SimpleNamespace(name="General", full_name="General", role="", channel=None, showtime="")
+
+
 # --------------------------------------------------------------------- the cog
 class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie nights: watchlists, polls, history"):
     def __init__(self, bot: Pingwin) -> None:
@@ -257,9 +263,24 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         return self.bot.features.movienight
 
     # ------------------------------------------------------------ helpers
+    @property
+    def all_series(self) -> tuple:
+        """The configured series, plus the built-in General watchlist (unless a series is called that)."""
+        mine = tuple(s for s in self.cfg.series if s.name)
+        if any(slug(s.name) == slug(GENERAL.name) for s in mine):
+            return mine
+        return (*mine, GENERAL)
+
     def series(self, name: str):
         key = slug(name or "")
-        return next((s for s in self.cfg.series if s.name and slug(s.name) == key), None)
+        return next(
+            (
+                s
+                for s in self.all_series
+                if slug(s.name) == key or (getattr(s, "full_name", "") and slug(s.full_name) == key)
+            ),
+            None,
+        )
 
     def _allowed(self, member: discord.abc.User, mode: str, role: str) -> bool:
         if mode == "everyone":
@@ -276,7 +297,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             return None
         s = self.series(series_name)
         if s is None:
-            names = ", ".join(x.name for x in self.cfg.series if x.name) or "none set up yet"
+            names = ", ".join(x.name for x in self.all_series)
             await interaction.response.send_message(f"Pick a series: {names}.", ephemeral=True)
         return s
 
@@ -635,6 +656,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                     lib, {"title": ch.get("title", old.get("title")), "year": ch.get("year", old.get("year"))}
                 )
             e["movie_id"] = m["id"]
+        if "poster" in ch and e["movie_id"] in lib["movies"]:
+            lib["movies"][e["movie_id"]]["poster"] = ch["poster"] or None
         movies.save(lib)
         return "History updated."
 
@@ -749,7 +772,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     async def series_autocomplete(self, interaction: discord.Interaction, current: str):
         return [
             app_commands.Choice(name=s.name, value=s.name)
-            for s in self.cfg.series
+            for s in self.all_series
             if s.name and current.casefold() in s.name.casefold()
         ][:25]
 
@@ -1074,9 +1097,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         state = store.load(STATE)
         now = discord.utils.utcnow()
         changed = False
-        for s in self.cfg.series:
-            if not s.name:
-                continue
+        for s in self.all_series:
             data = self._data(state, s)
             for p in data["polls"]:
                 if p["status"] != "open" or now < discord.utils.parse_time(p["ends"]):

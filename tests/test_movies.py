@@ -5,7 +5,7 @@ from pingwin import movies
 SHEET = """Date,Movie,Year,Duration (min),Session,IMDB Avg. Rating,Our Avg. Rating,Director(s),Writer(s),Star(s)
 "Monday, January 29, 2024",Mandy,2018,121,Movie Monday,6.5,4.3,Panos Cosmatos,Panos Cosmatos,Nicolas Cage
 "Monday, February 5, 2024",Cube,1997,90,Movie Monday,7.1,8.2,Vincenzo Natali,,Nicole de Boer
-"Friday, January 3, 2025",The Fast and the Furious,2001,106,Film Franchise Fridays,6.8,,Rob Cohen,,Vin Diesel
+"Friday, January 3, 2025",The Fast and the Furious,2001,106,Franchise Fridays,6.8,,Rob Cohen,,Vin Diesel
 "Monday, September 14, 2026",La La Land,128,2016,Movie Monday,Not Found,,,,
 "Monday, April 15, 2024",The Descent Part 2,2009,94,Bonus B-Movie,5.7,2.3,Jon Harris,,
 ,The Thing,1982,109,Movie Monday,8.2,,John Carpenter,,Kurt Russell
@@ -94,7 +94,8 @@ def test_import_is_merged_and_repeatable():
     sheet = movies.parse_sheet(SHEET)
     doc = movies.parse_ratings_doc(DOC, {movies.norm(r["title"]) for r in sheet})
     members = {"111": "Sammy (Sam) sam_the_great", "222": "Alex G alexg"}
-    stats = movies.import_history(lib, sheet, doc, ["MMM", "FFF"], members)
+    full = {"MMM": "Movie Mondays", "FFF": "Franchise Friday"}
+    stats = movies.import_history(lib, sheet, doc, ["MMM", "FFF"], members, full)
     assert stats["entries"] == 8 and stats["ratings"] == 6  # the undated, ambiguous section is skipped
     series = {lib["movies"][e["movie_id"]]["title"]: e["series"] for e in lib["history"]}
     assert series["Mandy"] == "MMM" and series["The Fast and the Furious"] == "FFF"
@@ -105,7 +106,7 @@ def test_import_is_merged_and_repeatable():
     assert movies.ratings_avg(mandy) == 4.5
     cube = next(e for e in lib["history"] if lib["movies"][e["movie_id"]]["title"] == "Cube")
     assert "name:jordan" in cube["ratings"]  # no member matched: kept by name
-    again = movies.import_history(lib, sheet, doc, ["MMM", "FFF"], members)
+    again = movies.import_history(lib, sheet, doc, ["MMM", "FFF"], members, full)
     assert again["entries"] == 0 and again["ratings"] == 0 and len(lib["history"]) == 8
 
 
@@ -336,3 +337,12 @@ def test_people_can_link_discord_members():
     assert movies.rater_links(lib) == {"111": "111", "name:mrs smith": "222"}
     movies.set_people(lib, {"name:mrs smith": "@sam"})  # not a user id: just a name
     assert lib["people"]["name:mrs smith"] == "sam"
+
+
+def test_series_names_from_full_names():
+    full = {"MM": "Movie Mondays", "FF": "Franchise Friday"}
+    assert movies.series_name("movie monday", ["MM", "FF"], full) == "MM"
+    assert movies.series_name("FRANCHISE FRIDAYS", ["MM", "FF"], full) == "FF"
+    assert movies.series_name("mm", ["MM", "FF"], full) == "MM"
+    assert movies.series_name("Bonus Night", ["MM", "FF"], full) == "Bonus Night"
+    assert movies.series_name("", ["MM"], full) == "Other"

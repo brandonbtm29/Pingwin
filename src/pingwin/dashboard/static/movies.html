@@ -71,6 +71,25 @@
     </section>
 
     <section id="tab-reviews" class="tab" hidden>
+      <details class="panel write-review" id="rv-box">
+        <summary><span class="wr-title">✍️ Write a review</span><span class="hint" id="rv-as-note"></span></summary>
+        <div class="rv-form">
+          <label id="rv-who-wrap" hidden>Review from<select id="rv-who"></select></label>
+          <label>Movie<select id="rv-movie"></select></label>
+          <div class="rv-score">
+            <label for="rv-score">Score</label>
+            <input type="range" id="rv-score" min="0" max="10" step="0.5" value="7">
+            <span id="rv-score-badge"></span>
+          </div>
+          <label>What did you think?<textarea id="rv-comment" rows="3" maxlength="1500" placeholder="Optional"></textarea></label>
+          <div class="rv-q" id="rv-q-wrap" hidden>
+            <p class="qa"><span id="rv-q-from"></span> asked: <em id="rv-q"></em></p>
+            <label>Your answer<input id="rv-answer" maxlength="500" placeholder="Optional"></label>
+          </div>
+          <label>Ask the next person a question<input id="rv-ask" maxlength="300" placeholder="How many … out of …? (optional)"></label>
+          <div class="row-actions"><button class="btn primary" id="rv-go">Post review</button><span class="hint" id="rv-result"></span></div>
+        </div>
+      </details>
       <div class="panel">
         <div class="row-actions filters">
           <input id="r-search" type="search" placeholder="Search reviews and movies…" aria-label="Search reviews">

@@ -117,7 +117,10 @@ the next day). Feb 29 birthdays are celebrated on Feb 28 in other years.
 
 ## Movie night
 
-Each **series** (for example *MMM* and *FFF*) has its own watchlist, role and channel. Members nominate
+Each **series** (for example *Movie Mondays* and *Franchise Fridays*) has a short name for commands (like
+`MM`), a **full name** shown on the movie pages and used to recognise it when importing, and its own
+watchlist, role and channel. There's always a **General** watchlist too, for movies that aren't for a
+particular series (its polls go to the channel they're started in). Members nominate
 movies, then a mod (or whoever you allow) turns the watchlist into a native Discord poll. When the poll
 ends, Pingwin replies with the winner.
 
@@ -191,8 +194,10 @@ sees:
 
 - **History:** every movie night with date, series, our average and IMDb's, searchable and sortable. Open
   one for the poster, details, everyone's ratings and the question chain. **Suggest a fix** sends a
-  correction to the mods.
-- **Reviews:** everyone's ratings and comments in one place. Filter by person, series or score, search
+  correction to the mods (including a poster image link, if a movie has no picture).
+- **Reviews:** **Write a review** for any movie night: a score, what you thought, an answer to the last
+  person's question and one for the next. Reviewing the same movie again updates yours. Admins can also
+  enter a review for a member. Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
   them, or click someone's card for their average, how they compare with the group, and their favorites.
 - **Watchlists:** each series' list as poster cards, with filters for named lists (like *Horror*), and a
   form to suggest a movie.

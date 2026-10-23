@@ -44,6 +44,7 @@ async function api(path, body) {
 const fmt = (n) => (n === null || n === undefined ? "–" : Number(n).toFixed(1).replace(/\.0$/, ""));
 const fmtDate = (d) => (d ? new Date(d + "T12:00:00").toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "–");
 const movieLabel = (m) => (m.year ? `${m.title} (${m.year})` : m.title);
+const evName = (x) => (x && data && data.series_full && data.series_full[x]) || x || "";
 
 // Small visual helpers: a steady color per name, initials avatars, and score badges.
 function hueOf(text) { let h = 0; for (const ch of String(text || "")) h = (h * 31 + ch.codePointAt(0)) % 360; return h; }
@@ -94,6 +95,7 @@ async function load() {
   $("w-note").textContent = data.approvals && !admin ? "A mod approves suggestions before they join the list." : "";
   fillSeries();
   fillPeople();
+  fillReviewForm();
   renderHistory();
   renderReviews();
   if (admin) renderPeopleAdmin();
@@ -104,11 +106,11 @@ async function load() {
 
 function fillSeries() {
   const keep = $("h-series").value;
-  put($("h-series"), el("option", { value: "" }, "All series"), [...new Set(data.history.map((h) => h.series).filter(Boolean))].map((s) => el("option", { value: s }, s)));
+  put($("h-series"), el("option", { value: "" }, "All events"), [...new Set(data.history.map((h) => h.series).filter(Boolean))].map((x) => el("option", { value: x }, evName(x))));
   $("h-series").value = keep;
   for (const id of ["w-series", "l-series"]) {
     const w = $(id).value;
-    put($(id), data.series.map((x) => el("option", { value: x }, x)));
+    put($(id), data.series.map((x) => el("option", { value: x }, evName(x))));
     if (w) $(id).value = w;
   }
 }
@@ -127,7 +129,7 @@ const COLS = [
     cell: (h) => el("div", { class: "movie-cell" }, h.movie.poster ? el("img", { class: "thumb", src: h.movie.poster, alt: "", loading: "lazy" }) : null,
       el("div", {}, el("strong", {}, h.movie.title), h.movie.year ? el("span", { class: "hint" }, ` ${h.movie.year}`) : null, h.open ? el("span", { class: "tag live" }, "rating now") : null)) },
   { key: "year", label: "Year", num: true, cell: (h) => h.movie.year || "–", sort: (h) => nul(h.movie.year) },
-  { key: "series", label: "Series", on: true, cell: (h) => h.series || "", sort: (h) => nul(h.series) },
+  { key: "series", label: "Event", on: true, cell: (h) => evName(h.series), sort: (h) => nul(evName(h.series)) },
   { key: "ours", label: "Ours", on: true, num: true, cell: (h) => scoreBadge(h.avg), sort: (h) => h.avg },
   { key: "imdb", label: "IMDb", on: true, num: true, cell: (h) => fmt(h.movie.imdb_rating), sort: (h) => nul(h.movie.imdb_rating) },
   { key: "gap", label: "Us vs IMDb", num: true, cell: (h) => signed(gapOf(h)), sort: gapOf },
@@ -193,13 +195,15 @@ function showMovie(h) {
   const fix = el("details", { class: "fix-form" }, el("summary", {}, admin ? "Edit" : "Suggest a fix"),
     el("div", { class: "grid2" },
       el("label", {}, "Date", el("input", { id: "f-date", type: "date", value: h.date || "" })),
-      el("label", {}, "Series", el("input", { id: "f-series", value: h.series || "" })),
+      el("label", {}, "Event", el("select", { id: "f-series" },
+        [...new Set([...data.series, h.series].filter(Boolean))].map((x) => el("option", { value: x, selected: x === h.series }, evName(x))))),
       el("label", {}, "Title", el("input", { id: "f-title", value: m.title })),
-      el("label", {}, "Year", el("input", { id: "f-year", value: m.year || "", inputmode: "numeric" }))),
+      el("label", {}, "Year", el("input", { id: "f-year", value: m.year || "", inputmode: "numeric" })),
+      el("label", { class: "span2" }, "Poster image link", el("input", { id: "f-poster", value: m.poster || "", placeholder: "https://… (right-click a poster online → Copy image address)" }))),
     el("div", { class: "row-actions" },
       el("button", { class: "btn primary", onclick: async () => {
         const body = { kind: "edit", hid: h.id };
-        const pairs = [["date", h.date || ""], ["series", h.series || ""], ["title", m.title], ["year", String(m.year || "")]];
+        const pairs = [["date", h.date || ""], ["series", h.series || ""], ["title", m.title], ["year", String(m.year || "")], ["poster", m.poster || ""]];
         for (const [k, old] of pairs) { const v = $(`f-${k}`).value.trim(); if (v !== old) body[k] = v; }
         if (Object.keys(body).length === 2) return toast("Nothing changed.", true);
         try { toast((await api("/api/movies/suggest", body)).message); d.close(); await load(); } catch (e) { toast(e.message, true); }
@@ -213,7 +217,8 @@ function showMovie(h) {
     el("div", { class: "movie-detail" },
       posterArt(m, "poster"),
       el("dl", { class: "kv" },
-        el("dt", {}, "Watched"), el("dd", {}, `${fmtDate(h.date)} · ${h.series || ""}`),
+        el("dt", {}, "Watched"), el("dd", {}, fmtDate(h.date)),
+        el("dt", {}, "Event"), el("dd", {}, evName(h.series) || "–"),
         el("dt", {}, "Our rating"), el("dd", {}, scoreBadge(h.avg, " / 10")),
         el("dt", {}, "IMDb"), el("dd", {}, fmt(m.imdb_rating)),
         m.runtime ? [el("dt", {}, "Runtime"), el("dd", {}, `${m.runtime} min`)] : null,
@@ -222,7 +227,8 @@ function showMovie(h) {
         m.stars ? [el("dt", {}, "Stars"), el("dd", {}, m.stars)] : null,
         m.genre ? [el("dt", {}, "Genre"), el("dd", {}, m.genre)] : null),
       m.plot ? el("p", { class: "plot" }, m.plot) : null),
-    el("h3", {}, h.ratings.length ? `Ratings (${h.ratings.length})` : "No ratings yet"),
+    el("div", { class: "dialog-sub" }, el("h3", {}, h.ratings.length ? `Ratings (${h.ratings.length})` : "No ratings yet"),
+      el("button", { class: "btn small primary", onclick: () => { d.close(); openReview(h.id); } }, "✍️ Write a review")),
     el("ul", { class: "ratings" }, h.ratings.map((r) => el("li", {},
       el("div", { class: "r-head" }, avatar(r.who), el("strong", {}, r.who), r.who !== r.name ? el("span", { class: "hint" }, `as ${r.name}`) : null, el("span", { class: "score" }, scoreBadge(r.score)),
         admin ? el("button", { class: "btn icon", title: "Remove this rating", "aria-label": "Remove rating", onclick: async () => {
@@ -246,7 +252,7 @@ function renderWatchlists() {
     const shown = waiting.filter((i) => !pick || (i.list || "") === pick);
     return el("div", { class: "panel" },
       el("div", { class: "w-head" },
-        el("h2", {}, `${w.series} watchlist`, el("span", { class: "hint" }, ` ${waiting.length} waiting`)),
+        el("h2", {}, `${evName(w.series)} watchlist`, el("span", { class: "hint" }, ` ${waiting.length} waiting`)),
         lists.length ? el("div", { class: "chips", role: "group", "aria-label": "Lists" },
           ["", ...lists].map((l) => el("button", { class: "chip", "aria-pressed": String(pick === l), onclick: () => { listFilter[w.series] = l; renderWatchlists(); } },
             l || "All", el("span", { class: "n" }, l ? waiting.filter((i) => i.list === l).length : waiting.length)))) : null),
@@ -316,10 +322,10 @@ function renderStats() {
   }
   const yearRows = Object.entries(years).sort();
   const yMax = Math.max(1, ...yearRows.map(([, v]) => Object.values(v).reduce((a, b) => a + b, 0)));
-  put($("s-years-legend"), groups.filter((g) => yearRows.some(([, v]) => v[g])).map((g, i) => el("span", {}, el("i", { class: `sw c${groups.indexOf(g) + 1}` }), g)));
+  put($("s-years-legend"), groups.filter((g) => yearRows.some(([, v]) => v[g])).map((g, i) => el("span", {}, el("i", { class: `sw c${groups.indexOf(g) + 1}` }), g === "Other" ? g : evName(g))));
   put($("s-years"), yearRows.length ? yearRows.map(([y, v]) => {
     const total = Object.values(v).reduce((a, b) => a + b, 0);
-    const col = el("div", { class: "stack", tabindex: "0", "data-tip": `${y}: ${total} nights · ` + groups.filter((g) => v[g]).map((g) => `${g} ${v[g]}`).join(" · ") });
+    const col = el("div", { class: "stack", tabindex: "0", "data-tip": `${y}: ${total} nights · ` + groups.filter((g) => v[g]).map((g) => `${g === "Other" ? g : evName(g)} ${v[g]}`).join(" · ") });
     col.style.setProperty("--h", `${(100 * total) / yMax}%`);
     for (const g of groups) if (v[g]) { const seg = el("span", { class: `seg c${groups.indexOf(g) + 1}` }); seg.style.setProperty("--f", String(v[g])); col.append(seg); }
     return el("div", { class: "col" }, el("span", { class: "cv" }, total), el("div", { class: "track" }, col), el("span", { class: "cl" }, y));
@@ -418,7 +424,7 @@ function fillPeople() {
   put($("r-person"), el("option", { value: "" }, "Everyone"), people.map(([k, p]) => el("option", { value: k }, `${p.name} (${p.n})`)));
   $("r-person").value = people.some(([k]) => k === keep) ? keep : "";
   const sk = $("r-series").value;
-  put($("r-series"), el("option", { value: "" }, "All series"), [...new Set(data.history.map((h) => h.series).filter(Boolean))].map((x) => el("option", { value: x }, x)));
+  put($("r-series"), el("option", { value: "" }, "All events"), [...new Set(data.history.map((h) => h.series).filter(Boolean))].map((x) => el("option", { value: x }, evName(x))));
   $("r-series").value = sk;
 }
 
@@ -481,6 +487,69 @@ function renderReviews() {
 }
 $("r-more").addEventListener("click", () => { reviewLimit += 60; renderReviews(); });
 for (const id of ["r-search", "r-person", "r-series", "r-score", "r-sort"]) $(id).addEventListener("input", () => { reviewLimit = 60; renderReviews(); });
+
+// ---------- write a review ----------
+const me = () => data.viewer && data.viewer.user_id;
+function reviewer() { return $("rv-who-wrap").hidden ? me() : $("rv-who").value; }
+function fillReviewForm() {
+  const admin = data.viewer.level === "admin";
+  const keepMovie = $("rv-movie").value;
+  put($("rv-movie"), data.history.map((h) => el("option", { value: h.id }, `${movieLabel(h.movie)} · ${fmtDate(h.date)}${h.series ? " · " + evName(h.series) : ""}`)));
+  if (keepMovie) $("rv-movie").value = keepMovie;
+  // Admins can enter a review for any member; members review as themselves.
+  $("rv-who-wrap").hidden = !admin;
+  if (admin) {
+    const keep = $("rv-who").value || store.get("pingwin-review-as", "") || me() || "";
+    put($("rv-who"), el("option", { value: "" }, "Pick a person…"), data.members.map((m) => el("option", { value: m.id }, memberLabel(m) + (m.id === me() ? " (you)" : ""))));
+    $("rv-who").value = data.members.some((m) => m.id === keep) ? keep : "";
+  }
+  $("rv-as-note").textContent = !admin && data.viewer.name ? ` as ${data.viewer.name}` : "";
+  syncReview();
+}
+function syncReview() {
+  const h = data.history.find((x) => x.id === $("rv-movie").value);
+  const who = reviewer();
+  const mine = h && who ? h.ratings.find((r) => r.key === who) : null;
+  $("rv-go").textContent = mine ? "Update review" : "Post review";
+  if (mine) {
+    $("rv-score").value = typeof mine.score === "number" ? mine.score : 7;
+    $("rv-comment").value = mine.comment || "";
+    $("rv-answer").value = mine.answer || "";
+    $("rv-ask").value = mine.ask || "";
+  } else {
+    $("rv-comment").value = ""; $("rv-answer").value = ""; $("rv-ask").value = "";
+  }
+  // The question the last reviewer passed on (or the one this person already answered).
+  const others = h ? h.ratings.filter((r) => r.key !== who) : [];
+  const last = [...others].reverse().find((r) => r.ask);
+  const q = mine && mine.answered ? { q: mine.answered, from: "Someone" } : last ? { q: last.ask, from: last.who } : null;
+  $("rv-q-wrap").hidden = !q;
+  if (q) { $("rv-q").textContent = q.q; $("rv-q-from").textContent = q.from; }
+  put($("rv-score-badge"), scoreBadge(Number($("rv-score").value), " / 10"));
+}
+function openReview(hid) {
+  switchTab("reviews");
+  $("rv-box").open = true;
+  if (hid) $("rv-movie").value = hid;
+  syncReview();
+  $("rv-box").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("rv-score").addEventListener("input", () => put($("rv-score-badge"), scoreBadge(Number($("rv-score").value), " / 10")));
+$("rv-movie").addEventListener("change", syncReview);
+$("rv-who").addEventListener("change", () => { store.set("pingwin-review-as", $("rv-who").value); syncReview(); });
+$("rv-go").addEventListener("click", async () => {
+  const who = reviewer();
+  if (!who) return toast("Pick who the review is from.", true);
+  const btn = $("rv-go");
+  btn.disabled = true;
+  try {
+    const res = await api("/api/movies/review", { hid: $("rv-movie").value, as_user: who, score: $("rv-score").value,
+      comment: $("rv-comment").value, answer: $("rv-q-wrap").hidden ? "" : $("rv-answer").value, ask: $("rv-ask").value });
+    $("rv-result").textContent = res.message;
+    await load();
+  } catch (e) { toast(e.message, true); }
+  finally { btn.disabled = false; }
+});
 
 // ---------- watchlist import (admins) ----------
 $("l-go").addEventListener("click", async () => {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0 (2026-10-23)
+- **Write a review on the movie pages:** score, comment, the question chain; again to update. Admins can
+  enter one for a member. Reviews show up in the open Rate it message in Discord too.
+- **Series full names** (new column under Movie night → Series) are shown on the movie pages and used to
+  recognise series when importing, replacing names that were built in. History calls the column **Event**.
+- **General watchlist** for movies that aren't for a particular series.
+- **Poster links:** admins (or members, via Suggest a fix) can set a movie's picture by link.
+
 ## 0.12.0 (2026-10-23)
 - **Movie details fill in by themselves:** with an OMDb key, Pingwin looks up a few movies every 20 minutes
   (history, then watchlists) within a daily request budget, waits a day when OMDb's limit is reached, and

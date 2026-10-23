@@ -77,7 +77,7 @@ REMOTE: web.AppKey[Any] = web.AppKey("remote", object)
 SESSIONS: web.AppKey[Any] = web.AppKey("sessions", object)
 PRESENCE: web.AppKey[Any] = web.AppKey("presence", object)
 OPEN_PATHS = {"/login", "/auth/login", "/auth/callback"}
-MEMBER_PATHS = {"/movies", "/api/movies", "/api/movies/suggest", "/api/signout", "/api/presence"}
+MEMBER_PATHS = {"/movies", "/api/movies", "/api/movies/suggest", "/api/movies/review", "/api/signout", "/api/presence"}
 DASHBOARDS = "dashboards"  # shared: each PC's public dashboard link, for /pingwin dashboard
 PUBLIC: web.RequestKey[bool] = web.RequestKey("public", bool)
 VIEWER: web.RequestKey[Any] = web.RequestKey("viewer", object)
@@ -944,7 +944,16 @@ async def get_movies(request: web.Request) -> web.Response:
             }
         )
     state = store.load(WATCH)
-    series = [s.name for s in bot.config.features.movienight.series if s.name] if hasattr(bot, "config") else []
+    cog = _movie_cog(bot)
+    if cog is not None:
+        all_series = list(cog.all_series)
+    else:
+        from ..cogs.movienight import GENERAL
+
+        mine = [s for s in bot.config.features.movienight.series if s.name] if hasattr(bot, "config") else []
+        all_series = [*mine, GENERAL]
+    series = [s.name for s in all_series]
+    series_full = {s.name: (getattr(s, "full_name", "") or s.name) for s in all_series}
     watchlists = []
     from ..features import slug
 
@@ -975,6 +984,7 @@ async def get_movies(request: web.Request) -> web.Response:
         {
             "viewer": viewer.as_json(),
             "series": series,
+            "series_full": series_full,
             "history": history,
             "watchlists": watchlists,
             "pending": pending,
@@ -1067,6 +1077,11 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
         if "year" in payload:
             y = str(payload["year"]).strip()
             changes["year"] = int(y) if y.isdigit() else None
+        if "poster" in payload:
+            poster = str(payload["poster"] or "").strip()
+            if poster and not re.fullmatch(r"https://\S{8,500}", poster):
+                raise ApiError("A poster has to be an https:// image link.")
+            changes["poster"] = poster
         if changes.get("date") and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", changes["date"]):
             raise ApiError("Dates look like 2026-10-23.")
         if not changes:
@@ -1081,6 +1096,63 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
             raise ApiError("Couldn't find you in the server.", 403)
         return web.json_response({"ok": True, "message": await cog.submit("edit", e.get("series") or "", data, who)})
     raise ApiError("Unknown suggestion.")
+
+
+async def post_movie_review(request: web.Request) -> web.Response:
+    """Add or change a review from the movie pages. Members review as themselves; admins can also
+    enter one for a member (for someone who told them their score)."""
+    from .. import movies
+
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    payload = await request.json()
+    guild = _guild(bot)
+    uid = str(viewer.user_id) if viewer.user_id else ""
+    as_user = str(payload.get("as_user") or "").strip()
+    if as_user and as_user != uid:
+        if not viewer.is_admin:
+            raise ApiError("You can only review as yourself.", 403)
+        if not as_user.isdigit():
+            raise ApiError("Pick who the review is from.")
+        uid = as_user
+    if not uid:
+        raise ApiError("Pick who the review is from (or sign in with Discord to review as yourself).")
+    member = guild.get_member(int(uid)) if guild is not None else None
+    name = member.display_name if member else (viewer.name if uid == str(viewer.user_id) else "")
+    if not name:
+        raise ApiError("That person isn't in the server.", 404)
+    score = movies.parse_score(str(payload.get("score", "")))
+    if score is None:
+        raise ApiError("The score needs to be a number from 0 to 10.")
+    lib = movies.load()
+    e = next((x for x in lib["history"] if x["id"] == payload.get("hid")), None)
+    if e is None:
+        raise ApiError("That movie night isn't in the history anymore.", 404)
+    old = e.get("ratings", {}).get(uid)
+    question = old.get("answered", "") if old else movies.open_question(e)
+    answer = _str(payload, "answer", 500)
+    movies.add_rating(
+        e,
+        uid,
+        name=name,
+        user_id=uid,
+        score=score,
+        comment=_str(payload, "comment", 1500),
+        answered=question if answer else "",
+        answer=answer,
+        ask=_str(payload, "ask", 300),
+    )
+    if old:
+        e["ratings"][uid]["at"] = old.get("at", time.time())  # keep its place in the question chain
+    movies.save(lib)
+    log.info("Movie review %s on the movie pages (%s for %s)", "changed" if old else "added", viewer.name, name)
+    cog = _movie_cog(bot)
+    if cog is not None and (e.get("prompt") or {}).get("message"):
+        try:
+            await cog.refresh_prompt(e, lib)
+        except discord.HTTPException:
+            pass
+    return web.json_response({"ok": True, "message": "Review updated." if old else "Thanks! Review added. ⭐"})
 
 
 def _export_url(url: str, kind: str) -> str:
@@ -1132,8 +1204,10 @@ async def post_movie_admin(request: web.Request) -> web.Response:
         members = {
             str(m.id): f"{m.display_name} {m.name} {m.global_name or ''}" for m in (guild.members if guild else [])
         }
-        series = [s.name for s in bot.config.features.movienight.series if s.name]
-        stats = movies.import_history(lib, sheet, doc, series, members)
+        mine = [s for s in bot.config.features.movienight.series if s.name]
+        stats = movies.import_history(
+            lib, sheet, doc, [s.name for s in mine], members, {s.name: getattr(s, "full_name", "") for s in mine}
+        )
         movies.save(lib)
         log.info("Movie history imported (%s): %s", viewer.name, stats)
         return web.json_response(
@@ -1453,6 +1527,7 @@ def create_app(
     app.router.add_get("/movies", movies_page)
     app.router.add_get("/api/movies", get_movies)
     app.router.add_post("/api/movies/suggest", post_movie_suggest)
+    app.router.add_post("/api/movies/review", post_movie_review)
     app.router.add_post("/api/movies/admin", post_movie_admin)
     app.router.add_get("/login", login)
     app.router.add_get("/auth/login", auth_login)

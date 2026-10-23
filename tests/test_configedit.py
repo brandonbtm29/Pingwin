@@ -43,14 +43,14 @@ def test_save_failover(cfg_file):
     save_failover(
         enabled=True,
         status_channel_id=1234567890123456789,
-        pcs=["BTM-NOVA", "BACKUP-PC"],
+        pcs=["MAIN-PC", "BACKUP-PC"],
         heartbeat_seconds=30,
         takeover_after_seconds=120,
         path=cfg_file,
     )
     data = tomllib.loads(cfg_file.read_text(encoding="utf-8"))
     assert data["failover"]["status_channel_id"] == 1234567890123456789
-    assert load_config(cfg_file, require_token=False).failover.pcs == ("BTM-NOVA", "BACKUP-PC")
+    assert load_config(cfg_file, require_token=False).failover.pcs == ("MAIN-PC", "BACKUP-PC")
     with pytest.raises(ConfigError):
         save_failover(
             enabled=True, status_channel_id=1, pcs=[], heartbeat_seconds=60, takeover_after_seconds=60, path=cfg_file

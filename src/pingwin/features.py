@@ -101,7 +101,8 @@ SECTIONS: list[dict[str, Any]] = [
         "key": "movienight",
         "title": "Movie night",
         "description": "Members nominate movies to a watchlist; a mod turns them into a Discord poll that pings "
-        "the series' role and announces the winner. Each series (like MMM or FFF) has its own watchlist.",
+        "the series' role and announces the winner. Each series (like Movie Mondays) has its own watchlist, "
+        "and there's always a General one too.",
         "fields": [
             F("enabled", "toggle", "Turn on movie night", False),
             F(
@@ -112,7 +113,8 @@ SECTIONS: list[dict[str, Any]] = [
                 "Each series gets its own watchlist, role and channel. With a showtime (like Mon 8:30pm, in the time "
                 "zone under General), polls close right when the movie starts.",
                 columns=[
-                    {"key": "name", "type": "text", "label": "Name"},
+                    {"key": "name", "type": "text", "label": "Short name (e.g. MM)"},
+                    {"key": "full_name", "type": "text", "label": "Full name (e.g. Movie Mondays)"},
                     {"key": "role", "type": "role", "label": "Role to ping"},
                     {"key": "channel", "type": "channel", "label": "Channel"},
                     {"key": "showtime", "type": "text", "label": "Showtime (e.g. Mon 8:30pm)"},

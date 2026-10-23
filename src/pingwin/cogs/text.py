@@ -92,13 +92,13 @@ class TextCommands(commands.Cog):
         if sub in ("nominate", "suggest", "add") and len(args) >= 3:
             s = cog.series(args[1])
             if s is None:
-                return "Pick a series: " + ", ".join(x.name for x in cog.cfg.series if x.name) + "."
+                return "Pick a series: " + ", ".join(x.name for x in cog.all_series) + "."
             title, year = title_and_year(args[2:])
             return await cog.nominate_text(member, s, title, year)
         if sub == "list" and len(args) >= 2:
             s = cog.series(args[1])
             if s is None:
-                return "Pick a series: " + ", ".join(x.name for x in cog.cfg.series if x.name) + "."
+                return "Pick a series: " + ", ".join(x.name for x in cog.all_series) + "."
             await message.reply(
                 embed=cog.list_embed(s), mention_author=False, allowed_mentions=discord.AllowedMentions.none()
             )

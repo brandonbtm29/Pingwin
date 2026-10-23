@@ -391,20 +391,18 @@ def parse_score(text: str) -> float | None:
 
 
 # --------------------------------------------------------------------- importing
-SERIES_ALIASES = {
-    "moviemonday": "MMM",
-    "moviemondays": "MMM",
-    "filmfranchisefriday": "FFF",
-    "filmfranchisefridays": "FFF",
-}
+def _series_key(text: str) -> str:
+    """'Movie Mondays', 'movie monday' and 'MOVIE-MONDAY' all give 'moviemonday'."""
+    key = re.sub(r"[^a-z0-9]", "", (text or "").casefold())
+    return key[:-1] if key.endswith("s") and len(key) > 3 else key
 
 
-def series_name(session: str, known: list[str]) -> str:
-    key = re.sub(r"[^a-z]", "", session.casefold())
-    if key in SERIES_ALIASES and SERIES_ALIASES[key] in known:
-        return SERIES_ALIASES[key]
+def series_name(session: str, known: list[str], full_names: dict[str, str] | None = None) -> str:
+    """Which series a spreadsheet's session column means: its short name ('MMM') or its full name
+    ('Movie Mondays', from the series settings). Anything else is kept as written."""
+    key = _series_key(session)
     for k in known:
-        if k.casefold() == session.strip().casefold():
+        if key and key in (_series_key(k), _series_key((full_names or {}).get(k, ""))):
             return k
     return session.strip() or "Other"
 
@@ -622,8 +620,11 @@ def import_history(
     doc: list[dict[str, Any]],
     known_series: list[str],
     members: dict[str, str] | None = None,
+    full_names: dict[str, str] | None = None,
 ) -> dict[str, int]:
-    """Merge a spreadsheet log and a ratings document into the library. Safe to run again."""
+    """Merge a spreadsheet log and a ratings document into the library. Safe to run again.
+
+    `full_names` maps each series' short name to its full name, to recognise either in the sheet."""
     members = members or {}
     stats = {"movies": 0, "entries": 0, "ratings": 0, "skipped": 0}
     existing = {(e.get("date"), e["movie_id"]) for e in lib["history"]}
@@ -640,7 +641,7 @@ def import_history(
         if key in existing:
             stats["skipped"] += 1
             continue
-        e = new_entry(m, row["date"], series_name(row["session"], known_series), source="import")
+        e = new_entry(m, row["date"], series_name(row["session"], known_series, full_names), source="import")
         if row.get("group_avg") is not None:
             e["group_avg"] = row["group_avg"]
         lib["history"].append(e)

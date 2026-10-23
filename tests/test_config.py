@@ -78,8 +78,8 @@ def test_data_dir_from_env(monkeypatch, tmp_path):
 
 
 def test_pc_list(tmp_path):
-    cfg = load_config(write(tmp_path, '[failover]\npcs = ["BTM-NOVA", "BACKUP-PC"]\n'), require_token=False)
-    assert cfg.failover.pcs == ("BTM-NOVA", "BACKUP-PC")
+    cfg = load_config(write(tmp_path, '[failover]\npcs = ["MAIN-PC", "BACKUP-PC"]\n'), require_token=False)
+    assert cfg.failover.pcs == ("MAIN-PC", "BACKUP-PC")
     with pytest.raises(ConfigError, match="twice"):
         load_config(write(tmp_path, '[failover]\npcs = ["A", "a"]\n'), require_token=False)
     with pytest.raises(ConfigError, match="list of PC names"):
