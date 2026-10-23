@@ -32,13 +32,16 @@ The short version, on a Windows PC that stays on:
 
 ## Commands
 
+Every command lives under **/pingwin**, so it doesn't get mixed up with other bots' commands. Pingwin can also
+answer typed `-pingwin` commands (like `-pingwin movie history`; see [typed commands](docs/FEATURES.md#typed-commands)).
+
 | Command | Who | What |
 |---|---|---|
-| `/rolemenu setup` | Manage Roles | Creates missing menu roles (pingable, no permissions) and checks the rest |
-| `/rolemenu check` | Manage Roles | Same report, changes nothing |
-| `/rolemenu post [channel] [menu]` | Manage Roles | Posts a button menu (the ping menu, or another one like time zones) |
-| `/rolemenu refresh` | Manage Roles | Updates posted menus in place after you change the roles |
-| `/timezone set · show · remove` | Everyone | Pick your time zone, so times you type mean your time |
+| `/pingwin rolemenu setup` | Manage Roles | Creates missing menu roles (pingable, no permissions) and checks the rest |
+| `/pingwin rolemenu check` | Manage Roles | Same report, changes nothing |
+| `/pingwin rolemenu post [channel] [menu]` | Manage Roles | Posts a button menu (the ping menu, or another one like time zones) |
+| `/pingwin rolemenu refresh` | Manage Roles | Updates posted menus in place after you change the roles |
+| `/pingwin timezone set · show · remove` | Everyone | Pick your time zone, so times you type mean your time |
 | `/pingwin about` | Everyone | Says hi |
 | `/pingwin status` | Everyone | Which PC is answering, version, uptime |
 | `/pingwin dashboard` | Manage Server | Links to the dashboard (when it's online) |
@@ -57,10 +60,10 @@ Eight optional features, all off until you switch them on in the dashboard's **F
 | Feature | Commands | What it does |
 |---|---|---|
 | Event reminders | (automatic) | Pings the roles whose keywords match a new Discord Event, reminds before it starts |
-| Birthdays | `/birthday set · remove · upcoming` | A shout-out on the day; optional birthday role |
-| Movie night | `/movienight nominate · list · poll · endpoll · watched · remove` | A watchlist per series, turned into a Discord poll that announces the winner |
-| Game day sign-ups | `/gameday create · cancel` | "Who's in?" buttons and a reminder to everyone who's in |
-| Event attendance | `/attendance add · remove · code · history` | Takes attendance at Discord Events (voice or an "I'm here" button) and pays a reward into UnbelievaBoat |
+| Birthdays | `/pingwin birthday set · remove · upcoming` | A shout-out on the day; optional birthday role |
+| Movie night | `/pingwin movie nominate · list · poll · endpoll · watched · remove · tonight · history · rate · page` | Watchlists and polls, mod approvals, a Rate it button after each movie, and movie pages (history, ratings, stats) members open with Discord sign-in |
+| Game day sign-ups | `/pingwin gameday create · cancel` | "Who's in?" buttons and a reminder to everyone who's in |
+| Event attendance | `/pingwin attendance add · remove · code · history` | Takes attendance at Discord Events (voice or an "I'm here" button) and pays a reward into UnbelievaBoat |
 | Stream alerts | (automatic) | Posts once when a streamer goes live on Twitch or YouTube |
 | Welcome and approval | (buttons) | Welcomes new members; mods click Approve to give them Friend |
 | Mod log | (automatic) | Joins, leaves, bans, role changes, edited and deleted messages, in a private channel |
@@ -133,7 +136,7 @@ Anyone running a backup has the bot token, so only use PCs you trust.
   pulls, and reinstalls. For an immediate update on the active PC, run `/pingwin restart`.
   PCs with uncommitted code changes skip auto-updates.
 - **Settings:** edit `config.toml` or a persona on one PC. SyncThing copies it, and every Pingwin
-  reloads it within a minute. After changing the menu, click *Update posted menus* (or `/rolemenu refresh`).
+  reloads it within a minute. After changing the menu, click *Update posted menus* (or `/pingwin rolemenu refresh`).
 - **Personality:** copy `personas\pingwin.toml` into the settings folder's `personas\`, rename it
   (e.g. `pirate.toml`), rewrite the lines, and set `persona = "pirate"`.
 

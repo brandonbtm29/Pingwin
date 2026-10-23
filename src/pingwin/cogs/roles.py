@@ -103,7 +103,7 @@ async def toggle(member: discord.Member, role: discord.Role, menu: MenuConfig, e
     if entry.zone:
         zones.set_for(member.id, entry.zone)
         tz = zones.zone(entry.zone)
-        msg += f" Times you type (like `/gameday create when:fri 8pm`) now mean {zones.label(tz)} time."
+        msg += f" Times you type (like `/pingwin gameday create when:fri 8pm`) now mean {zones.label(tz)} time."
     return msg
 
 
@@ -113,7 +113,7 @@ def menu_has_role(menu: MenuConfig, name: str) -> bool:
 
 
 async def sync_zone_roles(bot: Pingwin, member: discord.Member, zone_key: str | None) -> None:
-    """After /timezone set or remove, give the matching time zone menu role (and drop the others)."""
+    """After /pingwin timezone set or remove, give the matching time zone menu role (and drop the others)."""
     guild = member.guild
     for menu in bot.config.roles.menus:
         if not menu.is_timezone:
@@ -305,8 +305,6 @@ async def refresh_menus(bot: Pingwin) -> list[str]:
     return lines
 
 
-@app_commands.guild_only()
-@app_commands.default_permissions(manage_roles=True)
 class RoleMenu(commands.GroupCog, group_name="rolemenu", group_description="Set up the opt-in role menus"):
     def __init__(self, bot: Pingwin) -> None:
         self.bot = bot
@@ -327,14 +325,17 @@ class RoleMenu(commands.GroupCog, group_name="rolemenu", group_description="Set 
             if cur in m.title.casefold() or cur in m.key
         ][:25]
 
+    @app_commands.checks.has_permissions(manage_roles=True)
     @app_commands.command(name="check", description="Check the menu roles without changing anything")
     async def check(self, interaction: discord.Interaction) -> None:
         await self._report(interaction, create_missing=False)
 
+    @app_commands.checks.has_permissions(manage_roles=True)
     @app_commands.command(name="setup", description="Create any missing menu roles (no permissions)")
     async def setup_roles(self, interaction: discord.Interaction) -> None:
         await self._report(interaction, create_missing=True)
 
+    @app_commands.checks.has_permissions(manage_roles=True)
     @app_commands.command(name="post", description="Post a role menu")
     @app_commands.describe(channel="Where to post it (defaults to this channel)", menu="Which menu (defaults to pings)")
     @app_commands.autocomplete(menu=menu_autocomplete)
@@ -352,9 +353,11 @@ class RoleMenu(commands.GroupCog, group_name="rolemenu", group_description="Set 
             await interaction.followup.send(str(e), ephemeral=True)
             return
         await interaction.followup.send(
-            f"Menu posted in {target.mention}. Use `/rolemenu refresh` after changing the roles.", ephemeral=True
+            f"Menu posted in {target.mention}. Use `/pingwin rolemenu refresh` after changing the roles.",
+            ephemeral=True,
         )
 
+    @app_commands.checks.has_permissions(manage_roles=True)
     @app_commands.command(name="refresh", description="Update posted menus with the current roles and wording")
     async def refresh(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)

@@ -2,7 +2,7 @@
 
 Discord shows <t:...> timestamps in each reader's own time, so posts already read correctly for
 everyone. Zones matter when someone *types* a time ("fri 8pm") and for things that happen at a
-local hour (birthday shout-outs). Members pick theirs with /timezone set; anyone who hasn't uses
+local hour (birthday shout-outs). Members pick theirs with /pingwin timezone set; anyone who hasn't uses
 the server's time zone from the Features tab.
 """
 
@@ -15,7 +15,7 @@ from . import store
 
 STATE = "timezones"
 
-# Friendly names shown first in /timezone set.
+# Friendly names shown first in /pingwin timezone set.
 COMMON: list[tuple[str, str]] = [
     ("Eastern", "America/New_York"),
     ("Central", "America/Chicago"),

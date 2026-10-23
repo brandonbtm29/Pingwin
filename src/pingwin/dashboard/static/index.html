@@ -17,6 +17,7 @@
       </div>
     </div>
     <div class="top-right">
+      <a class="btn small" href="/movies">Movie pages</a>
       <div class="viewer" id="viewer" hidden></div>
       <div class="pill" id="state-pill"><span class="dot"></span><span id="state-text">Loading</span></div>
     </div>
@@ -158,7 +159,7 @@
           </label>
         </div>
         <label>Description<textarea id="r-desc" rows="2" maxlength="2000"></textarea></label>
-        <label class="switch" id="r-tz-wrap"><input type="checkbox" id="r-tz"><span>Time zone menu: each role also sets the member's time zone (same as <code>/timezone set</code>)</span></label>
+        <label class="switch" id="r-tz-wrap"><input type="checkbox" id="r-tz"><span>Time zone menu: each role also sets the member's time zone (same as <code>/pingwin timezone set</code>)</span></label>
 
         <div class="table-wrap">
           <table class="roles">
@@ -206,7 +207,7 @@
       </div>
       <div class="panel" id="f-birthdays">
         <h2>Birthday list</h2>
-        <p class="hint">Members add their own with <code>/birthday set</code>. Add or fix anyone's here (month and day only).</p>
+        <p class="hint">Members add their own with <code>/pingwin birthday set</code>. Add or fix anyone's here (month and day only).</p>
         <div class="row-actions bday-add">
           <div class="picker">
             <input id="b-search" placeholder="Find a member…" autocomplete="off" aria-label="Member">

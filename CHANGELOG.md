@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.0 (2026-10-23)
+- **All commands under /pingwin:** `/pingwin movie ...`, `/pingwin birthday ...`, `/pingwin timezone ...` and
+  so on, so Pingwin's commands stay together next to other bots. Press Ctrl+R in Discord if the old ones linger.
+- **Typed commands:** optionally answer `-pingwin movie nominate MMM The Thing 1982`, `-pingwin movie
+  history`, `-pingwin birthday set 9 3` and more (General → *Also answer typed -pingwin commands*; needs the
+  Message Content intent).
+- **Movie approvals:** members' nominations, removals, watched marks and history fixes go to the mods as
+  Approve/Deny cards. Mods' own changes go straight through.
+- **Rate it:** after each movie night, Pingwin posts a Rate it button (score, comment, and a question
+  passed to the next person), with a live average next to IMDb's. New `/pingwin movie tonight`, `history`,
+  `rate` and `page`.
+- **Movie details from OMDb:** runtime, director, writers, stars, poster and IMDb rating, looked up once per
+  movie and saved (add a free OMDb key under Features → Movie night).
+- **Movie pages:** members with the Friend role sign in with Discord at `/movies` on the dashboard's link
+  to browse the history, ratings, watchlists and stats, and suggest movies or fixes. The rest of the
+  dashboard stays admin-only.
+- **Import movie history** from a spreadsheet log and a ratings document (Google links or uploaded files),
+  safe to run more than once.
+
 ## 0.9.3 (2026-10-23)
 - **Movie night showtimes:** each series can have a weekly showtime (like `Mon 8:30pm`). Polls then close
   right when the movie starts, and the poll message says when voting closes.

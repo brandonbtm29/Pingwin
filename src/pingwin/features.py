@@ -41,7 +41,14 @@ SECTIONS: list[dict[str, Any]] = [
                 "text",
                 "Time zone",
                 "America/New_York",
-                "For members who haven't picked their own with /timezone set. A name like America/New_York.",
+                "For members who haven't picked their own with /pingwin timezone set. A name like America/New_York.",
+            ),
+            F(
+                "text_commands",
+                "toggle",
+                "Also answer typed -pingwin commands (like -pingwin movie list MMM)",
+                False,
+                "Needs the Message Content intent in the Discord Developer Portal.",
             ),
         ],
     },
@@ -73,7 +80,7 @@ SECTIONS: list[dict[str, Any]] = [
     {
         "key": "birthdays",
         "title": "Birthdays",
-        "description": "Members add theirs with /birthday set (month and day only). Pingwin posts a shout-out "
+        "description": "Members add theirs with /pingwin birthday set (month and day only). Pingwin posts a shout-out "
         "that morning.",
         "fields": [
             F("enabled", "toggle", "Turn on birthdays", False),
@@ -150,15 +157,46 @@ SECTIONS: list[dict[str, Any]] = [
                 "mods",
                 options=[["mods", "Announce the tie; a mod decides"], ["random", "Pick one of the tied at random"]],
             ),
+            F(
+                "approvals",
+                "toggle",
+                "Members' changes need a mod's OK (nominations, removals, watched marks, history fixes)",
+                True,
+                "Mods' own changes go straight through.",
+            ),
+            F(
+                "approval_channel",
+                "channel",
+                "Send them to",
+                None,
+                "A mod-only channel. Blank = the approval channel under Welcome and approval.",
+            ),
+            F("rate", "toggle", "After each movie, post a Rate it button", True),
+            F("rate_hours", "number", "Ratings stay open for (hours)", 48, min=1, max=336),
+            F(
+                "OMDB_API_KEY",
+                "secret",
+                "OMDb API key (movie details)",
+                None,
+                "Free at omdbapi.com/apikey.aspx. Pingwin looks each movie up once (year, runtime, IMDb rating, "
+                "director, stars, poster) and keeps it.",
+            ),
         ],
     },
     {
         "key": "gameday",
         "title": "Game day sign-ups",
-        "description": "/gameday create posts a 'Who's in?' card with buttons, then reminds everyone who said yes.",
+        "description": "/pingwin gameday create posts a 'Who's in?' card with buttons, then reminds everyone "
+        "who said yes.",
         "fields": [
             F("enabled", "toggle", "Turn on game day sign-ups", False),
-            F("channel", "channel", "Default channel", None, "Used when /gameday is run outside a text channel."),
+            F(
+                "channel",
+                "channel",
+                "Default channel",
+                None,
+                "Used when /pingwin gameday is run outside a text channel.",
+            ),
             F("role", "role", "Ping this role for new game days", "", "For example Gamer."),
             F("remind_minutes", "number", "Remind sign-ups this many minutes before (0 = don't)", 60, min=0, max=1440),
         ],
@@ -251,7 +289,7 @@ SECTIONS: list[dict[str, Any]] = [
             F(
                 "require_code",
                 "toggle",
-                "Check-in needs a code the host announces (they get it with /attendance code)",
+                "Check-in needs a code the host announces (they get it with /pingwin attendance code)",
                 False,
             ),
             F(
@@ -408,7 +446,7 @@ class Features:
 
     @property
     def needs_message_content(self) -> bool:
-        return bool(self.modlog.enabled and self.modlog.messages)
+        return bool((self.modlog.enabled and self.modlog.messages) or self.bot.text_commands)
 
     @property
     def tz(self) -> ZoneInfo:

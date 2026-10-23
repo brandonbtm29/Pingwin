@@ -37,6 +37,7 @@ EXTENSIONS = (
     "pingwin.cogs.welcome",
     "pingwin.cogs.modlog",
     "pingwin.cogs.attendance",
+    "pingwin.cogs.text",
 )
 
 SYNC_STATE = PROJECT_ROOT / ".synced-commands.json"  # per PC; remembers what Discord already has
@@ -97,6 +98,7 @@ class Pingwin(commands.Bot):
         self.tree.on_error = self.on_app_command_error
         for ext in EXTENSIONS:
             await self.load_extension(ext)
+        self._nest_commands()
 
         await self._sync_commands()
         failover = self.config.failover
@@ -109,6 +111,20 @@ class Pingwin(commands.Bot):
             )
 
         await self.dashboard.start()
+
+    def _nest_commands(self) -> None:
+        """Put every command group under /pingwin (/pingwin movie ..., /pingwin birthday ...).
+
+        Lots of bots share a server, so one /pingwin entry keeps Pingwin's commands together.
+        """
+        root = self.tree.get_command("pingwin")
+        if not isinstance(root, app_commands.Group):
+            return
+        for cmd in list(self.tree.get_commands()):
+            if cmd is root or not isinstance(cmd, app_commands.Group):
+                continue
+            self.tree.remove_command(cmd.name)
+            root.add_command(cmd)
 
     async def _sync_commands(self) -> None:
         """Register slash commands with Discord, but only when they've changed.

@@ -10,7 +10,7 @@ every PC gets them. You can also edit `config.toml` by hand: each feature is its
 |---|---|---|
 | [Event reminders](#event-reminders) | Pings the right roles when a Discord Event is created, and before it starts | Nothing extra |
 | [Birthdays](#birthdays) | Members save their birthday; Pingwin posts a shout-out on the day | Nothing extra |
-| [Movie night](#movie-night) | A watchlist per series, turned into a Discord poll that announces the winner | Nothing extra |
+| [Movie night](#movie-night) | Watchlists, polls, a Rate it button after each movie, and movie pages with your history | Optional free OMDb key |
 | [Game day sign-ups](#game-day-sign-ups) | A "Who's in?" card with buttons, plus a reminder to everyone who's in | Nothing extra |
 | [Event attendance](#event-attendance-and-frumples) | Takes attendance at Discord Events and adds a reward (like Frumples) in UnbelievaBoat | A free UnbelievaBoat API token |
 | [Stream alerts](#stream-alerts) | Posts once when a streamer goes live on Twitch or YouTube | Free Twitch and/or YouTube keys |
@@ -23,7 +23,7 @@ Before you start:
 - **Pingwin has to be able to see and post in** every channel you pick. If a channel is private, add
   Pingwin (or its role) to it with *View Channel*, *Send Messages* and *Embed Links*.
 - **Time zones:** under *General*, set the server's time zone (like `America/New_York`). Members in other
-  zones can pick their own with `/timezone set`. See [Time zones](#time-zones).
+  zones can pick their own with `/pingwin timezone set`. See [Time zones](#time-zones).
 - "Mods" below means anyone with *Manage Roles*, *Manage Server* or *Administrator*.
 
 ## Time zones
@@ -34,16 +34,16 @@ the hour birthday shout-outs go out.
 
 | Command | What |
 |---|---|
-| `/timezone set zone` | Pick yours (Eastern, Central, Mountain, Pacific, ... or any zone like `America/Boise`) |
-| `/timezone show` | See which one Pingwin uses for you |
-| `/timezone remove` | Go back to the server's |
+| `/pingwin timezone set zone` | Pick yours (Eastern, Central, Mountain, Pacific, ... or any zone like `America/Boise`) |
+| `/pingwin timezone show` | See which one Pingwin uses for you |
+| `/pingwin timezone remove` | Go back to the server's |
 
 **Time zone menu.** On the dashboard's **Role menu** tab, click **+ Time zone menu**. It makes a second
 button menu (Eastern, Central, Mountain, Pacific; change them as you like) where picking a role also sets
-that person's time zone, and picking another swaps it. `/timezone set` gives the matching role too, so the
+that person's time zone, and picking another swaps it. `/pingwin timezone set` gives the matching role too, so the
 two always agree. Click **Create missing roles**, then post it with **Post it**.
 
-- `/gameday create when:fri 8pm` means 8 pm in the creator's zone. Anyone can also add a zone to the
+- `/pingwin gameday create when:fri 8pm` means 8 pm in the creator's zone. Anyone can also add a zone to the
   time: `sat 7pm CT`, `8:30pm MT`, `tomorrow 6pm eastern`. Pingwin replies with how it read the time.
 - Birthday shout-outs go out at the chosen hour in the birthday person's own zone.
 - Members who haven't picked one use the server's time zone from the Features tab.
@@ -76,16 +76,16 @@ stay where everyone already checks them.
   noted. Staying 30 minutes (adjustable) counts; events shorter than that need half their length.
 - **In-person events** (location: Somewhere Else): when the event starts, Pingwin posts an **I'm here**
   button. Optionally it needs a 4-letter code that the host announces; the host gets it with
-  `/attendance code`.
+  `/pingwin attendance code`.
 - **When it ends** (the host ends it, its end time passes, or everyone has left the voice channel for 15
   minutes), Pingwin adds the reward in UnbelievaBoat (plus an optional host bonus) and posts a recap.
 
 | Command | Who | What |
 |---|---|---|
-| `/attendance add member [event]` | Mods | Count someone (pays them if the event already ended) |
-| `/attendance remove member [event]` | Mods | Take someone off (takes the reward back if it was paid) |
-| `/attendance code` | Host or mods | The check-in code for an event happening now |
-| `/attendance history [member]` | Everyone | Events someone came to recently |
+| `/pingwin attendance add member [event]` | Mods | Count someone (pays them if the event already ended) |
+| `/pingwin attendance remove member [event]` | Mods | Take someone off (takes the reward back if it was paid) |
+| `/pingwin attendance code` | Host or mods | The check-in code for an event happening now |
+| `/pingwin attendance history [member]` | Everyone | Events someone came to recently |
 
 The **Event attendance** panel on the Features tab shows recent events and who came, with buttons to add
 or remove people and to retry payments that didn't go through.
@@ -102,11 +102,11 @@ Pingwin only adds to (or takes back from) balances for attendance; it doesn't re
 
 | Command | Who | What |
 |---|---|---|
-| `/birthday set month day` | Everyone | Save your birthday (month and day, never the year) |
-| `/birthday remove` | Everyone | Remove yours |
-| `/birthday upcoming` | Everyone | The next birthdays |
-| `/birthday set_for member month day` | Mods | Set someone else's |
-| `/birthday remove_for member` | Mods | Remove someone else's |
+| `/pingwin birthday set month day` | Everyone | Save your birthday (month and day, never the year) |
+| `/pingwin birthday remove` | Everyone | Remove yours |
+| `/pingwin birthday upcoming` | Everyone | The next birthdays |
+| `/pingwin birthday set_for member month day` | Mods | Set someone else's |
+| `/pingwin birthday remove_for member` | Mods | Remove someone else's |
 
 You can also add, change or remove anyone's birthday in the **Birthday list** on the Features tab: type
 the start of their name, pick them, choose the date, and click **Save birthday**.
@@ -122,18 +122,22 @@ movies, then a mod (or whoever you allow) turns the watchlist into a native Disc
 ends, Pingwin replies with the winner.
 
 **Showtimes:** give a series a weekly showtime, like `Mon 8:30pm` (in the time zone under *General*). Then
-`/movienight poll` closes the poll exactly when the movie starts, and the poll message shows the closing time
+`/pingwin movie poll` closes the poll exactly when the movie starts, and the poll message shows the closing time
 in everyone's own time zone. (Discord polls can only run whole hours, so Pingwin ends it early at showtime.)
 Passing `hours` still overrides it.
 
 | Command | What |
 |---|---|
-| `/movienight nominate series title` | Add a movie to the watchlist |
-| `/movienight list series` | Show the watchlist |
-| `/movienight remove series movie` | Take one off (your own, or any for mods) |
-| `/movienight watched series movie` | Mark watched, or not (mods) |
-| `/movienight poll series [hours] [question]` | Start a poll and ping the series' role |
-| `/movienight endpoll series` | End the running poll now |
+| `/pingwin movie nominate series title [year]` | Add a movie to the watchlist (goes to the mods first, if approvals are on) |
+| `/pingwin movie list series` | Show the watchlist |
+| `/pingwin movie remove series movie` | Take one off |
+| `/pingwin movie watched series movie` | Mark watched, or not |
+| `/pingwin movie tonight series title [year]` | Set tonight's movie on a night without a poll |
+| `/pingwin movie history [search]` | What you've watched and how you rated it |
+| `/pingwin movie rate` | Rate the latest movie (if you missed the button) |
+| `/pingwin movie page` | Link to the movie pages |
+| `/pingwin movie poll series [hours] [question]` | Start a poll and ping the series' role |
+| `/pingwin movie endpoll series` | End the running poll now |
 
 What you control (all on the dashboard):
 
@@ -142,17 +146,81 @@ What you control (all on the dashboard):
 - **Who can start polls:** mods only, a role, or everyone.
 - **Poll options come from:** whoever starts the poll ticks the movies from a list, or the oldest
   nominations, or random ones. Plus how many movies go in a poll (2 to 10).
+- **Approvals, Rate it, and how long ratings stay open.**
 - **Poll length, single or multiple votes,** whether the winner is marked watched, and **what happens on a
   tie** (announce it so a mod decides, or pick one at random).
 
 The **watchlist** panel on the Features tab lets you mark movies watched, unwatch them, or delete them.
 
+### Approvals
+
+With **Members' changes need a mod's OK** on (the default), anything a member does that changes the lists (a
+nomination, removing a movie, marking one watched, a fix to the history) becomes a card in the mod
+channel (*Send them to*, or the approval channel under Welcome and approval). A mod clicks **Approve** or **Deny**,
+Pingwin applies it and tells the member. Mods' own changes apply straight away. Pending cards also show on
+the movie pages, where mods can approve them too.
+
+### Rate it
+
+When a movie night ends (the poll winner, or `/pingwin movie tonight`), Pingwin logs it in the history.
+About when the movie finishes (showtime + its runtime), it posts a **Rate it** button in the series'
+channel. Each person gives a score out of 10 and a comment, and can answer the question the previous person
+asked and leave one for the next (like "How many jump scares out of 10?"). The message keeps a live
+average next to IMDb's, and closes after *Ratings stay open for* hours (48 by default).
+
+### Movie details (OMDb)
+
+Pingwin can fill in runtime, director, writers, stars, poster and IMDb rating from
+[OMDb](https://www.omdbapi.com/apikey.aspx) (the free key allows 1,000 lookups a day). Paste the key under
+**Features → Movie night**. Each movie is looked up **once** and saved, so nothing is fetched again, and you
+don't need a spreadsheet formula like `GETMOVIEINFO`. Without a key everything still works; you just won't
+get the extra details.
+
+### Movie pages
+
+`/pingwin movie page` links to **/movies** on the dashboard's web address (see
+[remote access](REMOTE-DASHBOARD.md)). Anyone with the member role (**Friend**) signs in with Discord and
+sees:
+
+- **History:** every movie night with date, series, our average and IMDb's, searchable and sortable. Open
+  one for the poster, details, everyone's ratings and the question chain. **Suggest a fix** sends a
+  correction to the mods.
+- **Watchlists:** each series' list, and a form to suggest a movie.
+- **Stats:** favorites, least favorites, where you disagreed with IMDb, top raters, directors, nights per year.
+
+Members only see the movie pages; the rest of the dashboard stays admin-only.
+
+### Importing your old history
+
+On the movie pages, the **Admin** tab imports from a spreadsheet log (columns like Date, Movie, Year,
+Duration, Session, IMDb rating, our rating, Director, Writer, Stars) and a ratings document with sections
+like:
+
+```
+The Fly
+Date watched: 1/5/2026
+Sam (8/10): Gross in the best way.
+To Alex: How many times did you look away out of 10?
+Alex (7/10): 3/10. Loved the ending.
+```
+
+Paste Google Sheets and Docs links (shared as *Anyone with the link can view*), or download them (File →
+Download → CSV / Plain text) and upload the files. Names are matched to server members where possible.
+Running it again only adds what's new. Then **Look up missing details** fills in OMDb info.
+
+### Typed commands
+
+Several bots share most servers, so every Pingwin command starts with `/pingwin`. Pingwin can also answer
+typed commands that start with `-pingwin`, like `-pingwin movie nominate MMM The Thing 1982`, `-pingwin
+movie history`, `-pingwin birthday set 9 3` or `-pingwin timezone set Mountain` (`-pingwin help` lists
+them). Turn on **General → Also answer typed -pingwin commands**; it needs the **Message Content** intent.
+
 ## Game day sign-ups
 
-`/gameday create title when [note]` posts a card with **I'm in**, **Maybe** and **Can't** buttons and
+`/pingwin gameday create title when [note]` posts a card with **I'm in**, **Maybe** and **Can't** buttons and
 pings the game role. *when* can be things like `fri 8pm`, `tomorrow 7:30pm`, `10/31 9pm` or `in 2 hours`
-(a bare `8` means 8 pm). The time is in your own zone (`/timezone set`), or add one like `sat 7pm CT`. Pingwin reminds everyone who's in before it starts (set the minutes on the
-dashboard) and pings them when it starts. `/gameday cancel` cancels it (the host or a mod).
+(a bare `8` means 8 pm). The time is in your own zone (`/pingwin timezone set`), or add one like `sat 7pm CT`. Pingwin reminds everyone who's in before it starts (set the minutes on the
+dashboard) and pings them when it starts. `/pingwin gameday cancel` cancels it (the host or a mod).
 
 ## Stream alerts
 

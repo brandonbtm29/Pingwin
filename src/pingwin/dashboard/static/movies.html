@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Movie Nights · Pingwin</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="movies-page">
+  <header class="top">
+    <div class="brand">
+      <img class="logo" src="/static/icon.svg" alt="" width="44" height="44">
+      <div>
+        <h1>Movie nights</h1>
+        <p class="sub" id="m-sub">Loading…</p>
+      </div>
+    </div>
+    <div class="top-right">
+      <a class="btn small" id="m-dashboard" href="/" hidden>Dashboard</a>
+      <div class="viewer" id="m-viewer" hidden></div>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="history" aria-selected="true">History</button>
+    <button role="tab" data-tab="watchlists">Watchlists</button>
+    <button role="tab" data-tab="stats">Stats</button>
+    <button role="tab" data-tab="admin" id="m-admin-tab" hidden>Admin</button>
+  </nav>
+
+  <main>
+    <div class="panel" id="m-pending" hidden>
+      <h2>Waiting for a mod</h2>
+      <ul class="pending-list" id="m-pending-list"></ul>
+    </div>
+
+    <section id="tab-history" class="tab">
+      <div class="panel">
+        <div class="row-actions filters">
+          <input id="h-search" type="search" placeholder="Search titles, directors, stars, years…" aria-label="Search">
+          <select id="h-series" aria-label="Series"></select>
+          <select id="h-sort" aria-label="Sort">
+            <option value="date">Newest first</option>
+            <option value="ours">Our rating</option>
+            <option value="imdb">IMDb rating</option>
+            <option value="gap">We liked it more than IMDb</option>
+          </select>
+        </div>
+        <p class="hint" id="h-count"></p>
+        <div class="table-wrap">
+          <table class="movie-table">
+            <thead><tr><th>Date</th><th>Movie</th><th>Series</th><th class="num">Ours</th><th class="num">IMDb</th><th class="num">Min</th></tr></thead>
+            <tbody id="h-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-watchlists" class="tab" hidden>
+      <div class="panel">
+        <h2>Suggest a movie</h2>
+        <p class="hint" id="w-note"></p>
+        <div class="row-actions">
+          <select id="w-series" aria-label="Series"></select>
+          <input id="w-title" placeholder="Title" maxlength="100" aria-label="Title">
+          <input id="w-year" placeholder="Year (optional)" maxlength="4" inputmode="numeric" aria-label="Year" class="year">
+          <button class="btn primary" id="w-add">Suggest</button>
+        </div>
+      </div>
+      <div id="w-lists"></div>
+    </section>
+
+    <section id="tab-stats" class="tab" hidden>
+      <div class="cards" id="s-cards"></div>
+      <div class="grid2 stats-grid">
+        <div class="panel"><h2>Our favorites</h2><p class="hint">At least 3 ratings.</p><ol id="s-top"></ol></div>
+        <div class="panel"><h2>Least favorites</h2><p class="hint">At least 3 ratings.</p><ol id="s-bottom"></ol></div>
+        <div class="panel"><h2>We disagreed with IMDb</h2><ol id="s-gap"></ol></div>
+        <div class="panel"><h2>Most rated by</h2><ol id="s-raters"></ol></div>
+        <div class="panel"><h2>Directors we keep coming back to</h2><ol id="s-directors"></ol></div>
+        <div class="panel"><h2>Movie nights per year</h2><ol id="s-years"></ol></div>
+      </div>
+    </section>
+
+    <section id="tab-admin" class="tab" hidden>
+      <div class="panel">
+        <h2>Import history</h2>
+        <p class="hint">From a movie log spreadsheet (date, movie, year, duration, session, ratings, …) and a ratings
+          document ("Name (7/10): comment"). Running it again only adds what's new.</p>
+        <label>Google Sheets link<input id="i-sheet" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+        <label>Google Docs link (ratings)<input id="i-doc" placeholder="https://docs.google.com/document/d/…"></label>
+        <p class="hint">Or upload files you downloaded (File → Download → CSV, and → Plain text):</p>
+        <div class="row-actions">
+          <label class="file">Spreadsheet (.csv)<input type="file" id="i-sheet-file" accept=".csv,text/csv"></label>
+          <label class="file">Ratings (.txt)<input type="file" id="i-doc-file" accept=".txt,text/plain"></label>
+        </div>
+        <div class="row-actions"><button class="btn primary" id="i-go">Import</button><span class="hint" id="i-result"></span></div>
+      </div>
+      <div class="panel">
+        <h2>Movie details</h2>
+        <p class="hint" id="o-note"></p>
+        <div class="row-actions"><button class="btn" id="o-go">Look up missing details</button><span class="hint" id="o-result"></span></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="d-movie" class="movie-dialog"></dialog>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/movies.js"></script>
+</body>
+</html>

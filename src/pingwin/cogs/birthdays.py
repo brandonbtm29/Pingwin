@@ -1,6 +1,6 @@
 """Birthdays: members save theirs (month and day), and Pingwin posts a shout-out that day.
 
-The shout-out goes out at the chosen hour in each member's own time zone (/timezone set), or the
+The shout-out goes out at the chosen hour in each member's own time zone (/pingwin timezone set), or the
 server's if they haven't picked one.
 """
 
@@ -129,7 +129,7 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
         rows = upcoming(people, today)
         if not rows:
             await interaction.response.send_message(
-                "No birthdays saved yet. Add yours with `/birthday set`.", ephemeral=True
+                "No birthdays saved yet. Add yours with `/pingwin birthday set`.", ephemeral=True
             )
             return
         lines = [

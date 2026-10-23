@@ -9,7 +9,7 @@ I'll reply within a week.
 Things that count as security issues here:
 
 - Any way for a member to get a role that isn't in the menu, or to use the menu without the gate role
-- Any way for a non-mod to run `/rolemenu` or `/pingwin reload|restart`
+- Any way for a non-mod to run `/pingwin rolemenu` or `/pingwin reload|restart`
 - Any way to reach or change the dashboard from another device or website without signing in, or to sign in
   without Manage Server (or the dashboard admin role)
 - Any way for a signed-in co-admin to manage backup PCs or remote access when full access is off
@@ -18,7 +18,7 @@ Things that count as security issues here:
 ## Hardening already in place
 
 - Pingwin only hands out roles listed in `config.toml`, matched by name, even if an old menu points elsewhere
-- Ping roles are created with no permissions; `/rolemenu check` warns about roles that have any
+- Ping roles are created with no permissions; `/pingwin rolemenu check` warns about roles that have any
 - Mod commands use Discord's own permission checks (`Manage Roles`, `Manage Server`)
 - No privileged gateway intents: Pingwin can't read message content or the member list
 - The dashboard listens on 127.0.0.1 only, checks the Host header, needs a key cookie (HttpOnly,

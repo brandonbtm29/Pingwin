@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 log = logging.getLogger("pingwin.core")
 
 
-class Core(commands.GroupCog, group_name="pingwin", group_description="About Pingwin"):
+@app_commands.guild_only()
+class Core(commands.GroupCog, group_name="pingwin", group_description="Pingwin: movies, birthdays, game days and more"):
     def __init__(self, bot: Pingwin) -> None:
         self.bot = bot
 

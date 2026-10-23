@@ -20,6 +20,8 @@ import hmac
 import html
 import logging
 import math
+import os
+import re
 import secrets
 import time
 from collections import deque
@@ -27,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+import aiohttp
 import discord
 from aiohttp import web
 
@@ -56,7 +59,12 @@ if TYPE_CHECKING:
 log = logging.getLogger("pingwin.dashboard")
 
 STATIC = Path(__file__).with_name("static")
-STATIC_FILES = {"app.js": "text/javascript", "style.css": "text/css", "icon.svg": "image/svg+xml"}
+STATIC_FILES = {
+    "app.js": "text/javascript",
+    "movies.js": "text/javascript",
+    "style.css": "text/css",
+    "icon.svg": "image/svg+xml",
+}
 KEY_FILE = PROJECT_ROOT / ".dashboard-key"
 URL_FILE = PROJECT_ROOT / ".dashboard-url"
 COOKIE = "pingwin_dashboard"
@@ -69,6 +77,7 @@ REMOTE: web.AppKey[Any] = web.AppKey("remote", object)
 SESSIONS: web.AppKey[Any] = web.AppKey("sessions", object)
 PRESENCE: web.AppKey[Any] = web.AppKey("presence", object)
 OPEN_PATHS = {"/login", "/auth/login", "/auth/callback"}
+MEMBER_PATHS = {"/movies", "/api/movies", "/api/movies/suggest", "/api/signout", "/api/presence"}
 DASHBOARDS = "dashboards"  # shared: each PC's public dashboard link, for /pingwin dashboard
 PUBLIC: web.RequestKey[bool] = web.RequestKey("public", bool)
 VIEWER: web.RequestKey[Any] = web.RequestKey("viewer", object)
@@ -79,7 +88,7 @@ LOCKED_PAGE = """<!doctype html><meta charset="utf-8"><title>Pingwin</title>
 in the Pingwin folder. It signs you in on this PC.</p></body>"""
 
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://cdn.discordapp.com; "
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 )
 
@@ -155,12 +164,13 @@ async def identify(request: web.Request) -> Viewer | None:
     if item is None:
         return None
     if time.time() - item["checked"] > 300:
-        ok, reason, member = await check_member(bot, int(item["user_id"]))
-        if not ok:
+        level, reason, member = await check_member(bot, int(item["user_id"]))
+        if level is None:
             log.info("Signed %s out of the dashboard: %s", item["name"], reason)
             app[SESSIONS].end(token)
             return None
         item["checked"] = time.time()
+        item["level"] = level
         if member is not None:
             item["name"] = member.display_name
     app[SESSIONS].touch(item)
@@ -171,7 +181,8 @@ async def identify(request: web.Request) -> Viewer | None:
         user_id=item["user_id"],
         avatar=item.get("avatar"),
         sid=item["sid"],
-        full_access=bool(cfg and cfg.remote_full_access),
+        level=item.get("level", "admin"),
+        full_access=bool(cfg and cfg.remote_full_access) and item.get("level", "admin") == "admin",
     )
 
 
@@ -197,9 +208,13 @@ async def guard(request: web.Request, handler):
                 )
                 return web.json_response({"error": msg}, status=401)
             if public:
-                return _secure(request, signin_page(request))
+                return _secure(request, signin_page(request, next_path=request.path))
             return web.Response(text=LOCKED_PAGE, content_type="text/html", status=401)
         request[VIEWER] = viewer
+        if not viewer.is_admin and request.path not in MEMBER_PATHS:
+            if request.path.startswith("/api/"):
+                return _secure(request, web.json_response({"error": "That's for admins."}, status=403))
+            raise web.HTTPFound("/movies")
         if request.method not in ("GET", "HEAD"):
             origin = request.headers.get("Origin")
             allowed = {remote.host} if public else LOCAL_HOSTS
@@ -263,21 +278,30 @@ def _page(body: str, status: int = 200) -> web.Response:
     return web.Response(text=doc, content_type="text/html", status=status)
 
 
-def signin_page(request: web.Request, error: str = "", status: int = 401) -> web.Response:
+def signin_page(request: web.Request, error: str = "", status: int = 401, next_path: str = "/") -> web.Response:
     bot = request.app[BOT]
     guild = getattr(bot, "home_guild", None)
     server = html.escape(guild.name) if guild else "your server"
     err = f'<p class="signin-error">{html.escape(error)}</p>' if error else ""
     ready = bool(client_secret())
+    movies_page = next_path.startswith("/movies")
+    target = "/auth/login" + ("?next=/movies" if movies_page else "")
     button = (
-        '<a class="btn primary big" href="/auth/login">Sign in with Discord</a>'
+        f'<a class="btn primary big" href="{target}">Sign in with Discord</a>'
         if ready
         else "<p class=\"hint\">Discord sign-in isn't set up yet. The PC's owner can finish it on the Status tab.</p>"
     )
+    gate = getattr(getattr(getattr(bot, "config", None), "roles", None), "required_role", None)
+    if movies_page:
+        who = f"For members of {server}" + (f" with the {html.escape(gate)} role" if gate else "") + "."
+        intro = "See our movie nights, ratings and watchlists."
+    else:
+        who = f"The dashboard is for members with Manage Server in {server}; everyone else gets the movie pages."
+        intro = f"Manage Pingwin for <strong>{server}</strong>."
     return _page(
-        f"<h1>Pingwin</h1><p>Manage Pingwin for <strong>{server}</strong>.</p>{err}{button}"
-        f'<p class="hint">For members with Manage Server in {server}. Pingwin only sees your Discord name and '
-        "picture, and can't read your messages or servers.</p>",
+        f"<h1>Pingwin</h1><p>{intro}</p>{err}{button}"
+        f'<p class="hint">{who} Pingwin only sees your Discord name and picture, and can\'t read your messages '
+        "or servers.</p>",
         status,
     )
 
@@ -290,8 +314,11 @@ async def auth_login(request: web.Request) -> web.StreamResponse:
     if not client_secret() or not getattr(bot, "application_id", None):
         return _secure(request, signin_page(request, "Discord sign-in isn't set up yet."))
     state = secrets.token_urlsafe(24)
+    nxt = "/movies" if request.query.get("next") == "/movies" else "/"
     response = web.HTTPFound(authorize_url(str(bot.application_id), f"{remote.url}/auth/callback", state))
-    response.set_cookie(STATE_COOKIE, state, httponly=True, secure=True, samesite="Lax", path="/auth", max_age=600)
+    response.set_cookie(
+        STATE_COOKIE, f"{state}|{nxt}", httponly=True, secure=True, samesite="Lax", path="/auth", max_age=600
+    )
     return response
 
 
@@ -303,7 +330,8 @@ async def auth_callback(request: web.Request) -> web.StreamResponse:
     q = request.query
     if q.get("error"):
         return signin_page(request, "Sign-in was cancelled." if q["error"] == "access_denied" else "Discord said no.")
-    expected = request.cookies.get(STATE_COOKIE, "")
+    expected, _, nxt = request.cookies.get(STATE_COOKIE, "").partition("|")
+    nxt = "/movies" if nxt == "/movies" else "/"
     if not expected or not hmac.compare_digest(expected, q.get("state", "")) or not q.get("code"):
         return signin_page(request, "That sign-in link expired. Try again.")
     try:
@@ -313,16 +341,19 @@ async def auth_callback(request: web.Request) -> web.StreamResponse:
     except Exception:  # network trouble etc.
         log.exception("Discord sign-in failed")
         return signin_page(request, "Couldn't reach Discord. Try again in a minute.")
-    ok, reason, member = await check_member(bot, int(user["id"]))
-    if not ok:
+    level, reason, member = await check_member(bot, int(user["id"]))
+    if level is None:
         log.warning("Dashboard sign-in refused for %s (%s): %s", user["name"], user["id"], reason)
-        return signin_page(request, reason, 403)
+        return signin_page(request, reason, 403, next_path=nxt)
     if member is not None:
         user["name"] = member.display_name
+    user["level"] = level
     token = request.app[SESSIONS].create(user)
-    log.info("%s (%s) signed in to the dashboard from outside this PC", user["name"], user["id"])
-    # A same-site hop to "/" so the browser treats the new cookie as first-party.
-    response = _page('<p>Signed in. Opening the dashboard…</p><meta http-equiv="refresh" content="0;url=/">')
+    log.info("%s (%s) signed in from outside this PC (%s)", user["name"], user["id"], level)
+    if level != "admin":
+        nxt = "/movies"
+    # A same-site hop so the browser treats the new cookie as first-party.
+    response = _page(f'<p>Signed in. Opening…</p><meta http-equiv="refresh" content="0;url={nxt}">')
     response.set_cookie(
         SESSION_COOKIE, token, httponly=True, secure=True, samesite="Lax", path="/", max_age=SESSION_SECONDS
     )
@@ -866,6 +897,264 @@ async def post_attendance(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "message": msg})
 
 
+# --------------------------------------------------------------------- movie pages
+async def movies_page(request: web.Request) -> web.StreamResponse:
+    return web.FileResponse(STATIC / "movies.html", headers={"Content-Type": "text/html; charset=utf-8"})
+
+
+def _movie_cog(bot: Any):
+    return bot.get_cog("MovieNight") if hasattr(bot, "get_cog") else None
+
+
+async def get_movies(request: web.Request) -> web.Response:
+    from .. import movies
+    from ..cogs.movienight import STATE as WATCH
+
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    guild = _guild(bot) if hasattr(bot, "guilds") else None
+    lib = movies.load()
+    history = []
+    for e in reversed(lib["history"]):
+        m = lib["movies"].get(e["movie_id"], {"title": "?"})
+        ratings = sorted(e.get("ratings", {}).values(), key=lambda r: r.get("at", 0))
+        history.append(
+            {
+                "id": e["id"],
+                "date": e.get("date"),
+                "series": e.get("series"),
+                "movie": m,
+                "avg": movies.ratings_avg(e),
+                "ratings": [
+                    {k: r.get(k) for k in ("name", "score", "comment", "answered", "answer", "ask", "user_id")}
+                    for r in ratings
+                ],
+                "open": bool((e.get("prompt") or {}).get("message")) and not (e.get("prompt") or {}).get("closed"),
+            }
+        )
+    state = store.load(WATCH)
+    series = [s.name for s in bot.config.features.movienight.series if s.name] if hasattr(bot, "config") else []
+    watchlists = []
+    from ..features import slug
+
+    for name in series:
+        items = []
+        for n in state.get(slug(name), {}).get("nominations", []):
+            by_name, _ = await _member_name(guild, int(n["by"])) if guild else (str(n["by"]), None)
+            m = lib["movies"].get(n.get("movie_id") or "", {})
+            items.append(
+                {
+                    **{k: n.get(k) for k in ("id", "title", "year", "added", "watched")},
+                    "by": by_name,
+                    "runtime": m.get("runtime"),
+                    "imdb_rating": m.get("imdb_rating"),
+                    "poster": m.get("poster"),
+                }
+            )
+        watchlists.append({"series": name, "items": items})
+    pending = [
+        {k: r.get(k) for k in ("id", "kind", "series", "data", "by_name", "at")}
+        for r in lib["pending"].values()
+        if r.get("status") == "pending" and (viewer.is_admin or str(r.get("by")) == str(viewer.user_id))
+    ]
+    return web.json_response(
+        {
+            "viewer": viewer.as_json(),
+            "series": series,
+            "history": history,
+            "watchlists": watchlists,
+            "pending": pending,
+            "omdb": bool(os.environ.get(movies.SECRET)),
+            "approvals": bool(
+                getattr(getattr(bot, "config", None), "features", None) and bot.config.features.movienight.approvals
+            ),
+        }
+    )
+
+
+async def _who(request: web.Request) -> Any:
+    """The Discord member behind this request (for changes that may need approval)."""
+    viewer = viewer_of(request)
+    guild = _guild(request.app[BOT])
+    if viewer.user_id and guild is not None:
+        member = guild.get_member(int(viewer.user_id))
+        if member is None:
+            try:
+                member = await guild.fetch_member(int(viewer.user_id))
+            except discord.HTTPException:
+                member = None
+        if member is not None:
+            return member
+    return None
+
+
+async def post_movie_suggest(request: web.Request) -> web.Response:
+    """Members: suggest a movie or a history fix (goes to the mods). Admins: applied straight away."""
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    cog = _movie_cog(bot)
+    if cog is None:
+        raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+    payload = await request.json()
+    kind = payload.get("kind")
+    if kind == "nominate":
+        s = cog.series(_str(payload, "series", 50))
+        if s is None:
+            raise ApiError("Pick a series.")
+        title = _str(payload, "title", 100)
+        if not title:
+            raise ApiError("Type a title.")
+        year_raw = _str(payload, "year", 4)
+        year = int(year_raw) if year_raw.isdigit() else None
+        who = await _who(request)
+        if who is None:  # this PC's owner
+            m = await cog.details(title, year)
+            data = {
+                "title": m["title"] if m else title,
+                "year": (m or {}).get("year") or year,
+                "movie_id": (m or {}).get("id"),
+            }
+            return web.json_response({"ok": True, "message": await cog.apply("nominate", s.name, data, 0)})
+        return web.json_response({"ok": True, "message": await cog.nominate_text(who, s, title, year)})
+    if kind == "edit":
+        from .. import movies
+
+        hid = _str(payload, "hid", 20)
+        lib = movies.load()
+        e = next((x for x in lib["history"] if x["id"] == hid), None)
+        if e is None:
+            raise ApiError("That movie night isn't in the history anymore.", 404)
+        changes = {}
+        for k in ("date", "title", "series"):
+            if k in payload and isinstance(payload[k], str):
+                changes[k] = payload[k].strip()[:100]
+        if "year" in payload:
+            y = str(payload["year"]).strip()
+            changes["year"] = int(y) if y.isdigit() else None
+        if changes.get("date") and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", changes["date"]):
+            raise ApiError("Dates look like 2026-10-23.")
+        if not changes:
+            raise ApiError("Nothing to change.")
+        m = lib["movies"].get(e["movie_id"], {})
+        data = {"hid": hid, "changes": changes, "label": f"{m.get('title', '?')} ({e.get('date') or 'no date'})"}
+        if viewer.is_admin:
+            log.info("History fix from the movie pages (%s): %s", viewer.name, data)
+            return web.json_response({"ok": True, "message": cog._apply_edit(data)})
+        who = await _who(request)
+        if who is None:
+            raise ApiError("Couldn't find you in the server.", 403)
+        return web.json_response({"ok": True, "message": await cog.submit("edit", e.get("series") or "", data, who)})
+    raise ApiError("Unknown suggestion.")
+
+
+def _export_url(url: str, kind: str) -> str:
+    m = re.search(r"/(spreadsheets|document)/d/([A-Za-z0-9_-]+)", url)
+    if not m:
+        raise ApiError(f"That doesn't look like a Google {'Sheets' if kind == 'sheet' else 'Docs'} link.")
+    if kind == "sheet":
+        gid = re.search(r"[#&?]gid=(\d+)", url)
+        return f"https://docs.google.com/spreadsheets/d/{m[2]}/export?format=csv" + (f"&gid={gid[1]}" if gid else "")
+    return f"https://docs.google.com/document/d/{m[2]}/export?format=txt"
+
+
+async def _fetch_text(url: str) -> str:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as http:
+        async with http.get(url) as r:
+            text = await r.text(encoding="utf-8", errors="replace")
+            if r.status != 200 or "text/html" in r.headers.get("Content-Type", ""):
+                raise ApiError(
+                    "Google wouldn't share that file with Pingwin. Set it to 'Anyone with the link can view' "
+                    "(Share → General access), or download it (File → Download) and upload it here instead."
+                )
+            return text
+
+
+async def post_movie_admin(request: web.Request) -> web.Response:
+    from .. import movies
+
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    if not viewer.is_admin:
+        raise ApiError("That's for admins.", 403)
+    payload = await request.json()
+    action = payload.get("action")
+    cog = _movie_cog(bot)
+    if action == "import":
+        sheet_text = payload.get("sheet_csv") or ""
+        doc_text = payload.get("doc_text") or ""
+        if not sheet_text and payload.get("sheet_url"):
+            sheet_text = await _fetch_text(_export_url(str(payload["sheet_url"]), "sheet"))
+        if not doc_text and payload.get("doc_url"):
+            doc_text = await _fetch_text(_export_url(str(payload["doc_url"]), "doc"))
+        if not sheet_text and not doc_text:
+            raise ApiError("Give a spreadsheet and/or a ratings document.")
+        sheet = movies.parse_sheet(sheet_text) if sheet_text else []
+        lib = movies.load()
+        titles = {movies.norm(r["title"]) for r in sheet} | {movies.norm(m["title"]) for m in lib["movies"].values()}
+        doc = movies.parse_ratings_doc(doc_text, titles) if doc_text else []
+        guild = _guild(bot)
+        members = {
+            str(m.id): f"{m.display_name} {m.name} {m.global_name or ''}" for m in (guild.members if guild else [])
+        }
+        series = [s.name for s in bot.config.features.movienight.series if s.name]
+        stats = movies.import_history(lib, sheet, doc, series, members)
+        movies.save(lib)
+        log.info("Movie history imported (%s): %s", viewer.name, stats)
+        return web.json_response(
+            {
+                "ok": True,
+                "message": f"Imported {stats['entries']} movie nights, {stats['movies']} new movies and "
+                f"{stats['ratings']} ratings ({stats['skipped']} already there or not matched).",
+                "stats": stats,
+            }
+        )
+    if action == "lookup":
+        if cog is None or not os.environ.get(movies.SECRET):
+            raise ApiError("Add an OMDb API key under Features → Movie night first.")
+        lib = movies.load()
+        todo = [m for m in lib["movies"].values() if not m.get("looked_up")][: int(payload.get("limit", 40))]
+        found = 0
+        for m in todo:
+            before = movies.load()["movies"].get(m["id"], {})
+            got = await cog.details(m["title"], m.get("year"))
+            if got and got.get("looked_up") and not before.get("looked_up"):
+                found += 1
+            await asyncio.sleep(0.2)
+        lib = movies.load()
+        for m in todo:  # don't ask OMDb about the misses again
+            lib["movies"].get(m["id"], {}).setdefault("looked_up", time.time())
+        movies.save(lib)
+        left = sum(1 for m in lib["movies"].values() if not m.get("looked_up"))
+        return web.json_response({"ok": True, "message": f"Looked up {len(todo)} movies ({left} left)."})
+    if action in ("delete_entry", "delete_rating"):
+        lib = movies.load()
+        e = next((x for x in lib["history"] if x["id"] == payload.get("hid")), None)
+        if e is None:
+            raise ApiError("That movie night isn't in the history anymore.", 404)
+        if action == "delete_entry":
+            lib["history"].remove(e)
+            msg = "Removed from the history."
+        else:
+            gone = [k for k, r in e.get("ratings", {}).items() if r.get("name") == payload.get("name")]
+            for k in gone:
+                e["ratings"].pop(k)
+            msg = f"Removed {len(gone)} rating(s)."
+        movies.save(lib)
+        log.info("Movie history %s (%s)", action, viewer.name)
+        return web.json_response({"ok": True, "message": msg})
+    if action == "decide":
+        if cog is None:
+            raise ApiError("Movie night isn't loaded.", 409)
+
+        class _Mod:
+            display_name = name = viewer.name
+
+        return web.json_response(
+            {"ok": True, "message": await cog.decide(str(payload.get("id")), bool(payload.get("approve")), _Mod())}
+        )
+    raise ApiError("Unknown action")
+
+
 async def get_access(request: web.Request) -> web.Response:
     return web.json_response(access.report(request.app[BOT]))
 
@@ -1092,6 +1381,10 @@ def create_app(
     app[SESSIONS] = sessions or Sessions()
     app[PRESENCE] = editing.Presence(_pc(bot))
     app.router.add_get("/", index)
+    app.router.add_get("/movies", movies_page)
+    app.router.add_get("/api/movies", get_movies)
+    app.router.add_post("/api/movies/suggest", post_movie_suggest)
+    app.router.add_post("/api/movies/admin", post_movie_admin)
     app.router.add_get("/login", login)
     app.router.add_get("/auth/login", auth_login)
     app.router.add_get("/auth/callback", auth_callback)

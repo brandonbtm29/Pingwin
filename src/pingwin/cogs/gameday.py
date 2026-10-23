@@ -171,7 +171,7 @@ class GameDay(commands.GroupCog, group_name="gameday", group_description="Game d
         store.save(STATE, state)
         note_zone = ""
         if typed_zone is None and zones.get(interaction.user.id) is None:
-            note_zone = " Set yours with `/timezone set` if that's not your time zone."
+            note_zone = " Set yours with `/pingwin timezone set` if that's not your time zone."
         await interaction.followup.send(
             f"Posted: {msg.jump_url}\nI read **{when}** as {start.strftime('%a %b %d, %I:%M %p').replace(' 0', ' ')} "
             f"{zones.label(tz)}. Everyone sees it in their own time.{note_zone}",

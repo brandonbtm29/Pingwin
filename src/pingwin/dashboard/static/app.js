@@ -703,7 +703,7 @@ async function loadWatchlist() {
       el("span", { class: "t" }, n.title),
       el("button", { class: "btn", onclick: () => watchAction(s.key, n.id, "watched") }, n.watched ? "Unwatch" : "Watched"),
       el("button", { class: "btn icon", "aria-label": "Remove", onclick: () => { if (window.confirm(`Remove ${n.title}?`)) watchAction(s.key, n.id, "remove"); } }, "✕"),
-    ))) : el("p", { class: "hint" }, "Nothing nominated yet. Members use /movienight nominate."),
+    ))) : el("p", { class: "hint" }, "Nothing nominated yet. Members use /pingwin movie nominate."),
   )));
 }
 

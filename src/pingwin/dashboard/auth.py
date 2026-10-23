@@ -52,9 +52,15 @@ class Viewer:
     avatar: str | None = None
     sid: str = ""  # a short, stable id for this sign-in (for "who else is here")
     full_access: bool = False  # may manage backup PCs and remote access
+    level: str = "admin"  # "admin" (the dashboard) or "member" (only the movie pages)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.level == "admin"
 
     def as_json(self) -> dict[str, Any]:
         return {
+            "level": self.level,
             "kind": self.kind,
             "name": self.name,
             "user_id": self.user_id,
@@ -99,6 +105,7 @@ class Sessions:
             "user_id": str(user["id"]),
             "name": user.get("name") or "Someone",
             "avatar": user.get("avatar"),
+            "level": user.get("level", "admin"),
             "created": now,
             "expires": now + SESSION_SECONDS,
             "checked": now,
@@ -215,24 +222,31 @@ async def exchange_code(client_id: str, code: str, redirect_uri: str) -> dict[st
     return {"id": me["id"], "name": me.get("global_name") or me.get("username") or "Someone", "avatar": avatar}
 
 
-async def check_member(bot: Pingwin, user_id: int) -> tuple[bool, str, discord.Member | None]:
-    """Is this person allowed to use the dashboard? Returns (ok, reason if not, member)."""
+def _has_role(member: discord.Member, name: str | None) -> bool:
+    return bool(name) and any(r.name.casefold() == name.casefold() for r in member.roles)
+
+
+async def check_member(bot: Pingwin, user_id: int) -> tuple[str | None, str, discord.Member | None]:
+    """What may this person open? Returns (level, reason if nothing, member).
+
+    "admin": the whole dashboard (Manage Server, or the dashboard admin role).
+    "member": just the movie pages (members with the gate role, like Friend; anyone if there's no gate).
+    """
     guild = bot.home_guild
     if guild is None:
-        return False, "Pingwin isn't connected to the server right now. Try again in a minute.", None
+        return None, "Pingwin isn't connected to the server right now. Try again in a minute.", None
     member = guild.get_member(user_id)
     if member is None:
         try:
             member = await guild.fetch_member(user_id)
         except discord.NotFound:
-            return False, f"You're not a member of {guild.name}.", None
+            return None, f"You're not a member of {guild.name}.", None
         except discord.HTTPException:
-            return False, "Couldn't check your roles with Discord. Try again in a minute.", None
+            return None, "Couldn't check your roles with Discord. Try again in a minute.", None
     perms = member.guild_permissions
-    if perms.administrator or perms.manage_guild:
-        return True, "", member
-    role = bot.config.dashboard.admin_role
-    if role and any(r.name.casefold() == role.casefold() for r in member.roles):
-        return True, "", member
-    need = "Manage Server" + (f" or the {role} role" if role else "")
-    return False, f"You're signed in as {member.display_name}, but the dashboard needs {need} in {guild.name}.", member
+    if perms.administrator or perms.manage_guild or _has_role(member, bot.config.dashboard.admin_role):
+        return "admin", "", member
+    gate = bot.config.roles.required_role
+    if not gate or _has_role(member, gate):
+        return "member", "", member
+    return None, f"You're signed in as {member.display_name}, but you need the {gate} role in {guild.name}.", member

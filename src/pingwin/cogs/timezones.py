@@ -1,4 +1,4 @@
-"""/timezone: members pick their time zone, so the times they type mean their local time."""
+"""/pingwin timezone: members pick their time zone, so the times they type mean their local time."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class TimeZones(commands.GroupCog, group_name="timezone", group_description="You
         now = datetime.now(tz)
         await interaction.response.send_message(
             f"Saved: **{zones.label(tz)}** (it's {_clock(now)} there). Times you type, like "
-            "`/gameday create when:fri 8pm`, now mean your time.",
+            "`/pingwin gameday create when:fri 8pm`, now mean your time.",
             ephemeral=True,
         )
 
@@ -55,7 +55,7 @@ class TimeZones(commands.GroupCog, group_name="timezone", group_description="You
         if mine is None:
             text = (
                 f"You haven't picked one, so I use the server's: **{zones.label(server)}** "
-                f"({_clock(datetime.now(server))}). Set yours with `/timezone set`."
+                f"({_clock(datetime.now(server))}). Set yours with `/pingwin timezone set`."
             )
         else:
             text = f"Yours is **{zones.label(mine)}** ({_clock(datetime.now(mine))})."
