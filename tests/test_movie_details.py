@@ -47,7 +47,7 @@ ANSWERS = {
 
 
 def test_fill_details_merges_links_and_counts(monkeypatch):
-    async def fake(http, key, title, year=None, spent=None):
+    async def fake(http, key, title, year=None, spent=None, imdb_id=None):
         spent[0] += 2
         return ANSWERS.get(title)
 
@@ -74,7 +74,7 @@ def test_fill_details_merges_links_and_counts(monkeypatch):
 
 
 def test_fill_details_respects_budgets(monkeypatch):
-    async def fake(http, key, title, year=None, spent=None):
+    async def fake(http, key, title, year=None, spent=None, imdb_id=None):
         spent[0] += 3
         return ANSWERS.get(title)
 
@@ -93,7 +93,7 @@ def test_fill_details_respects_budgets(monkeypatch):
 
 
 def test_limit_pauses_until_tomorrow(monkeypatch):
-    async def limited(http, key, title, year=None, spent=None):
+    async def limited(http, key, title, year=None, spent=None, imdb_id=None):
         spent[0] += 1
         raise movies.OmdbLimit("Request limit reached!")
 
@@ -108,3 +108,46 @@ def test_limit_pauses_until_tomorrow(monkeypatch):
         assert movies.load()["omdb"]["used"] == 1
 
     asyncio.run(go())
+
+
+def test_search_suggests_library_then_omdb_and_caches(monkeypatch):
+    calls = []
+
+    async def fake_search(http, key, query, year=None, spent=None):
+        calls.append(query)
+        spent[0] += 1
+        return [{"title": "The Fly II", "year": 1989, "imdb_id": "tt0097368", "poster": None}]
+
+    monkeypatch.setattr(movies, "omdb_search", fake_search)
+
+    async def go():
+        seed()
+        cog = make_cog()
+        res = await cog.search("the fly")
+        assert [h["title"] for h in res["library"]] == ["The Fly"] and res["library"][0]["watched"]
+        assert res["omdb"][0]["imdb_id"] == "tt0097368"
+        again = await cog.search("The  Fly")  # same words: from the cache
+        assert again["omdb"] == res["omdb"] and calls == ["the fly"]
+        assert movies.load()["omdb"]["used"] == 1
+        short = await cog.search("fl")  # too short for OMDb, library only
+        assert short["omdb"] == [] and calls == ["the fly"]
+
+    asyncio.run(go())
+
+
+def test_search_without_a_key_says_so():
+    async def go():
+        seed()
+        cog = make_cog()
+        cog.bot.features.secret = lambda k: ""
+        res = await cog.search("arrival")
+        assert res["omdb"] == [] and "OMDb API key" in res["note"]
+
+    asyncio.run(go())
+
+
+def test_picked_suggestion_carries_the_imdb_id():
+    m = movienight.PICKED.fullmatch("tt0097368|The Fly II|1989")
+    assert m["id"] == "tt0097368" and m["title"] == "The Fly II" and m["year"] == "1989"
+    assert movienight.PICKED.fullmatch("|Some Indie|") is not None
+    assert movienight.PICKED.fullmatch("just typed a title") is None

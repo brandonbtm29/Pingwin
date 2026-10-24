@@ -21,7 +21,7 @@ function el(tag, attrs = {}, ...children) {
   }
   return node;
 }
-function put(node, ...kids) { node.replaceChildren(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false)); }
+function put(node, ...kids) { node.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false)); }
 
 function toast(message, isError = false) {
   const t = el("div", { class: "toast" + (isError ? " error" : "") }, message);
@@ -106,6 +106,8 @@ async function load() {
   if (admin) renderPeopleAdmin();
   renderWatchlists();
   renderStats();
+  renderImdb();
+  if (admin) renderImdbAdmin();
   renderPending();
 }
 
@@ -241,10 +243,28 @@ function showMovie(h) {
           try { toast((await api("/api/movies/admin", { action: "delete_rating", hid: h.id, key: r.key })).message); d.close(); await load(); } catch (e) { toast(e.message, true); }
         } }, "✕") : null),
       r.comment ? el("p", {}, r.comment) : null,
-      r.answered ? el("p", { class: "qa" }, el("em", {}, r.answered), r.answer ? ` → ${r.answer}` : "") : null,
-      r.ask ? el("p", { class: "qa ask" }, "Asked the next person: ", el("em", {}, r.ask)) : null))),
+      qaBlocks(r)))),
     data.viewer.level === "viewer" ? null : fix);
   d.showModal();
+}
+
+// The funny question chain: who asked them, and who they asked next.
+const andList = (list) => list.length > 1 ? `${list.slice(0, -1).join(", ")} & ${list[list.length - 1]}` : list[0] || "";
+function qaBlocks(r) {
+  const out = [];
+  if (r.answered) {
+    out.push(el("div", { class: "qa" },
+      el("span", { class: "qa-tag from" }, `From ${r.answered_from || "the last person"}`),
+      el("em", {}, r.answered),
+      r.answer ? el("span", { class: "qa-answer" }, `→ ${r.answer}`) : null));
+  }
+  if (r.ask) {
+    const to = r.ask_to && r.ask_to.length ? andList(r.ask_to) : "the next person";
+    out.push(el("div", { class: "qa ask" },
+      el("span", { class: "qa-tag to" }, r.asked_by ? `From ${r.asked_by} · To ${to}` : `To ${to}`),
+      el("em", {}, r.ask)));
+  }
+  return out.length ? out : null;
 }
 
 // ---------- watchlists ----------
@@ -337,13 +357,75 @@ function editQueue(series, q) {
 }
 $("d-queue").addEventListener("click", (e) => { if (e.target === $("d-queue")) $("d-queue").close(); });
 
+// Title suggestions while typing: movies we know first, then OMDb's catalog (IMDb's movies).
+let picked = null;  // { title, year, imdb_id } once someone picks a suggestion
+let acTimer = 0, acSeq = 0, acActive = -1;
+function acClose() { $("w-ac").hidden = true; $("w-title").setAttribute("aria-expanded", "false"); acActive = -1; }
+function acPick(h) {
+  picked = h;
+  $("w-title").value = h.title;
+  $("w-year").value = h.year || "";
+  acClose();
+}
+function acRender(res) {
+  const rows = [];
+  const seen = new Set();
+  const item = (h, src) => {
+    const key = h.imdb_id || `${h.title}|${h.year}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    return el("li", { role: "option", class: "ac-item", onmousedown: (e) => { e.preventDefault(); acPick(h); } },
+      posterArt(h, "ac-poster"),
+      el("span", { class: "ac-text" }, el("strong", {}, h.title), el("span", { class: "hint" }, [h.year, src].filter(Boolean).join(" · "))),
+      h.imdb_id ? el("a", { class: "ac-imdb", href: `https://www.imdb.com/title/${h.imdb_id}/`, target: "_blank", rel: "noopener", title: "Open on IMDb", onmousedown: (e) => e.stopPropagation() }, "IMDb ↗") : null);
+  };
+  const lib = res.library.map((h) => item(h, h.watched ? "watched before" : "in our library")).filter(Boolean);
+  const omdb = res.omdb.map((h) => item(h, "")).filter(Boolean);
+  if (lib.length) rows.push(el("li", { class: "ac-head", role: "presentation" }, "Already in our library"), lib);
+  if (omdb.length) rows.push(el("li", { class: "ac-head", role: "presentation" }, "From IMDb's catalog"), omdb);
+  if (res.note) rows.push(el("li", { class: "ac-note", role: "presentation" }, res.note));
+  put($("w-ac"), rows);
+  const open = rows.length > 0 && document.activeElement === $("w-title");
+  $("w-ac").hidden = !open;
+  $("w-title").setAttribute("aria-expanded", String(open));
+  acActive = -1;
+}
+$("w-title").addEventListener("input", () => {
+  picked = null;
+  clearTimeout(acTimer);
+  const q = $("w-title").value.trim();
+  if (q.length < 2) return acClose();
+  acTimer = setTimeout(async () => {
+    const seq = ++acSeq;
+    try {
+      const res = await api(`/api/movies/search?q=${encodeURIComponent(q)}`);
+      if (seq === acSeq) acRender(res);
+    } catch { /* suggestions are optional */ }
+  }, 350);
+});
+$("w-title").addEventListener("keydown", (e) => {
+  const items = [...$("w-ac").querySelectorAll(".ac-item")];
+  if ($("w-ac").hidden || !items.length) { if (e.key === "Enter") $("w-add").click(); return; }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    acActive = (acActive + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items.forEach((li, i) => li.setAttribute("aria-selected", String(i === acActive)));
+    items[acActive].scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (acActive >= 0) items[acActive].dispatchEvent(new MouseEvent("mousedown")); else { acClose(); $("w-add").click(); }
+  } else if (e.key === "Escape") acClose();
+});
+$("w-title").addEventListener("blur", () => setTimeout(acClose, 120));
+
 $("w-add").addEventListener("click", async () => {
   const title = $("w-title").value.trim();
   if (!title) return toast("Type a title first.", true);
+  const imdb = picked && picked.title === title ? picked.imdb_id : null;
   try {
-    const res = await api("/api/movies/suggest", { kind: "nominate", series: $("w-series").value, title, year: $("w-year").value.trim() });
+    const res = await api("/api/movies/suggest", { kind: "nominate", series: $("w-series").value, title, year: $("w-year").value.trim(), imdb_id: imdb || "" });
     toast(res.message.replace(/\*\*/g, ""));
-    $("w-title").value = ""; $("w-year").value = "";
+    $("w-title").value = ""; $("w-year").value = ""; picked = null;
     await load();
   } catch (e) { toast(e.message, true); }
 });
@@ -506,7 +588,7 @@ function renderReviews() {
   const inBand = (sc) => band === "" || (typeof sc === "number" && (band === "8" ? sc >= 8 : band === "5" ? sc >= 5 && sc < 8 : sc < 5));
   const everyone = allReviews();
   let rows = everyone.filter((r) => (!who || personKey(r) === who) && (!series || r.h.series === series) && inBand(r.score)
-    && (!q || [r.comment, r.answer, r.ask, r.answered, r.who, r.name, r.h.movie.title, r.h.movie.year].join(" ").toLowerCase().includes(q)));
+    && (!q || [r.comment, r.answer, r.ask, r.answered, r.who, r.name, r.answered_from, ...(r.ask_to || []), r.h.movie.title, r.h.movie.year].join(" ").toLowerCase().includes(q)));
   const sort = $("r-sort").value;
   const sc = (r) => (typeof r.score === "number" ? r.score : null);
   if (sort === "new") rows = sortRows(rows, (r) => nul(r.h.date), "desc");
@@ -550,8 +632,7 @@ function renderReviews() {
       el("span", { class: "score" }, scoreBadge(r.score))),
     el("div", { class: "hint" }, el("button", { class: "linkish", onclick: () => showMovie(r.h) }, movieLabel(r.h.movie)), ` · ${fmtDate(r.h.date)}`, r.h.series ? ` · ${r.h.series}` : ""),
     r.comment ? el("p", {}, r.comment) : null,
-    r.answered ? el("p", { class: "qa" }, el("em", {}, r.answered), r.answer ? ` → ${r.answer}` : "") : null,
-    r.ask ? el("p", { class: "qa ask" }, "Asked the next person: ", el("em", {}, r.ask)) : null)));
+    qaBlocks(r))));
   $("r-more").hidden = rows.length <= reviewLimit;
   $("r-more").textContent = `Show more (${rows.length - reviewLimit} left)`;
 }
@@ -592,7 +673,7 @@ function syncReview() {
   // The question the last reviewer passed on (or the one this person already answered).
   const others = h ? h.ratings.filter((r) => r.key !== who) : [];
   const last = [...others].reverse().find((r) => r.ask);
-  const q = mine && mine.answered ? { q: mine.answered, from: "Someone" } : last ? { q: last.ask, from: last.who } : null;
+  const q = mine && mine.answered ? { q: mine.answered, from: mine.answered_from || "Someone" } : last ? { q: last.ask, from: last.who } : null;
   $("rv-q-wrap").hidden = !q;
   if (q) { $("rv-q").textContent = q.q; $("rv-q-from").textContent = q.from; }
   put($("rv-score-badge"), scoreBadge(Number($("rv-score").value), " / 10"));
@@ -645,36 +726,64 @@ function likelyMembers(names) {
     return words.some((w) => mine.some((x) => x.startsWith(w) || w.startsWith(x) && x.length >= 4));
   });
 }
+// Who a rater key counts as right now: a member ("@id"), a typed name, or nobody yet.
+function personOf(key) {
+  if (/^\d+$/.test(key)) return `@${key}`;
+  const v = data.people[key] || "";
+  return v.startsWith("@") ? v : v ? `name:${v.toLowerCase()}` : "";
+}
 function renderPeopleAdmin() {
   const keys = new Map();
   for (const h of data.history) for (const r of h.ratings) {
-    const k = keys.get(r.key) || { key: r.key, names: new Set(), n: 0, discord: r.discord };
+    const k = keys.get(r.key) || { key: r.key, names: new Set(), n: 0, discord: r.discord, who: r.who };
     k.names.add(r.name); k.n++;
     keys.set(r.key, k);
   }
   const rows = [...keys.values()].sort((a, b) => b.n - a.n);
   const typed = rows.map((r) => data.people[r.key]).filter((v) => v && !v.startsWith("@"));
   put($("p-names"), [...new Set(typed)].sort((a, b) => a.localeCompare(b)).map((n) => el("option", { value: n })));
-  put($("p-rows"), rows.map((r) => {
-    const own = /^\d+$/.test(r.key);  // rated in Discord: already that member
-    const cur = data.people[r.key] || "";
-    const linked = own ? r.key : cur.startsWith("@") ? cur.slice(1) : "";
-    const likely = own ? [] : likelyMembers(r.names);
-    const opt = (m) => el("option", { value: m.id, selected: m.id === linked }, memberLabel(m));
-    const sel = el("select", { class: "p-member", "data-key": r.key, disabled: own, "aria-label": `Discord member for ${[...r.names][0]}` },
-      el("option", { value: "" }, own ? "" : "— not linked —"),
-      likely.length ? el("optgroup", { label: "Likely" }, likely.map(opt)) : null,
-      el("optgroup", { label: "Everyone" }, data.members.filter((m) => !likely.includes(m)).map(opt)),
-      linked && !data.members.some((m) => m.id === linked) ? el("option", { value: linked, selected: true }, "A former member") : null);
-    const name = el("input", { class: "p-as", "data-key": r.key, list: "p-names", maxlength: "40", value: cur.startsWith("@") ? "" : cur,
-      placeholder: [...r.names][0], disabled: own || !!linked, "aria-label": `Name for ${[...r.names][0]}` });
-    sel.addEventListener("change", () => { name.disabled = !!sel.value; if (sel.value) name.value = ""; });
-    return el("tr", {},
-      el("td", {}, el("span", { class: "p-written" }, avatar(r.names.values().next().value), [...r.names].join(" · "), own ? el("span", { class: "tag" }, "Discord") : null)),
-      el("td", { class: "num" }, r.n),
-      el("td", {}, sel, own ? el("div", { class: "hint" }, "Rated in Discord") : null),
-      el("td", {}, name));
-  }));
+  // Group the names that count as the same person; the rest wait at the bottom.
+  const groups = new Map();
+  const loose = [];
+  for (const r of rows) {
+    const g = personOf(r.key);
+    if (!g) { loose.push(r); continue; }
+    if (!groups.has(g)) groups.set(g, { id: g, rows: [], n: 0 });
+    const grp = groups.get(g);
+    grp.rows.push(r); grp.n += r.n;
+  }
+  const memberName = (id) => { const m = data.members.find((x) => x.id === id); return m ? memberLabel(m) : null; };
+  const title = (g) => g.id.startsWith("@") ? (memberName(g.id.slice(1)) || g.rows[0].who || "A former member") : g.rows[0].who || data.people[g.rows[0].key];
+  const sorted = [...groups.values()].sort((a, b) => b.n - a.n || title(a).localeCompare(title(b)));
+  const head = (label, sub, n, cls) => el("tr", { class: `p-group ${cls || ""}` },
+    el("th", { colspan: "4" }, el("span", { class: "p-written" }, cls === "loose" ? null : avatar(label), el("strong", {}, label), el("span", { class: "hint" }, sub)),
+      el("span", { class: "p-total" }, `${n} rating${n === 1 ? "" : "s"}`)));
+  $("p-summary").textContent = `${sorted.length} ${sorted.length === 1 ? "person" : "people"} grouped from ${rows.length - loose.length} names` + (loose.length ? ` · ${loose.length} not linked yet` : "");
+  put($("p-rows"),
+    sorted.map((g) => [
+      head(title(g), g.id.startsWith("@") ? `Discord member · ${g.rows.length} name${g.rows.length === 1 ? "" : "s"}` : `${g.rows.length} name${g.rows.length === 1 ? "" : "s"}`, g.n),
+      g.rows.map(personRow)]),
+    loose.length ? [head("Not linked yet", "pick a member or type a name to group these", loose.reduce((t, r) => t + r.n, 0), "loose"), loose.map(personRow)] : null);
+}
+function personRow(r) {
+  const own = /^\d+$/.test(r.key);  // rated in Discord: already that member
+  const cur = data.people[r.key] || "";
+  const linked = own ? r.key : cur.startsWith("@") ? cur.slice(1) : "";
+  const likely = own ? [] : likelyMembers(r.names);
+  const opt = (m) => el("option", { value: m.id, selected: m.id === linked }, memberLabel(m));
+  const sel = el("select", { class: "p-member", "data-key": r.key, disabled: own, "aria-label": `Discord member for ${[...r.names][0]}` },
+    el("option", { value: "" }, own ? "" : "— not linked —"),
+    likely.length ? el("optgroup", { label: "Likely" }, likely.map(opt)) : null,
+    el("optgroup", { label: "Everyone" }, data.members.filter((m) => !likely.includes(m)).map(opt)),
+    linked && !data.members.some((m) => m.id === linked) ? el("option", { value: linked, selected: true }, "A former member") : null);
+  const name = el("input", { class: "p-as", "data-key": r.key, list: "p-names", maxlength: "40", value: cur.startsWith("@") ? "" : cur,
+    placeholder: [...r.names][0], disabled: own || !!linked, "aria-label": `Name for ${[...r.names][0]}` });
+  sel.addEventListener("change", () => { name.disabled = !!sel.value; if (sel.value) name.value = ""; });
+  return el("tr", { class: "p-row" },
+    el("td", {}, el("span", { class: "p-written" }, [...r.names].join(" · "), own ? el("span", { class: "tag" }, "Discord") : null)),
+    el("td", { class: "num" }, r.n),
+    el("td", {}, sel, own ? el("div", { class: "hint" }, "Rated in Discord") : null),
+    el("td", {}, name));
 }
 $("p-save").addEventListener("click", async () => {
   const people = {};
@@ -724,6 +833,107 @@ $("o-go").addEventListener("click", async () => {
   $("o-result").textContent = "Looking up…";
   try { $("o-result").textContent = (await api("/api/movies/admin", { action: "lookup" })).message; await load(); }
   catch (e) { $("o-result").textContent = ""; toast(e.message, true); }
+  finally { btn.disabled = false; }
+});
+
+// ---------- IMDb lists ----------
+let xList = store.get("pingwin-imdb-list", "");
+let xShow = "all", xLimit = 80;
+const X_FILTERS = [["all", "All"], ["watched", "Watched"], ["listed", "On a watchlist"], ["neither", "Not yet"]];
+function xStatus(i) { return i.watched.length ? "watched" : i.lists.length ? "listed" : "neither"; }
+function renderImdb() {
+  const lists = data.imdb_lists || [];
+  $("m-imdb-tab").hidden = !lists.length;
+  if (!lists.length) return;
+  const cur = lists.find((l) => l.id === xList) || lists[0];
+  xList = cur.id;
+  put($("x-lists"), lists.length > 1 ? lists.map((l) => el("button", { class: "chip", "aria-pressed": String(l.id === cur.id),
+    onclick: () => { xList = l.id; store.set("pingwin-imdb-list", l.id); xLimit = 80; renderImdb(); } }, l.name, el("span", { class: "n" }, l.counts.total))) : null);
+  put($("x-meta"), el("strong", {}, cur.name), ` · ${cur.counts.total} movies · updated ${fmtDate(new Date(cur.imported * 1000).toISOString().slice(0, 10))}`,
+    cur.url ? [" · ", el("a", { href: cur.url, target: "_blank", rel: "noopener" }, "Open on IMDb ↗")] : null);
+  const c = cur.counts;
+  const pct = (n) => (c.total ? Math.round((100 * n) / c.total) : 0);
+  const tile = (t, label, n) => el("div", { class: `stat-tile ${t}` }, el("span", { class: "k" }, label), el("strong", {}, n.toLocaleString()),
+    el("span", { class: "s" }, `${pct(n)}% of the list`), el("div", { class: "x-meter" }, el("span", { style: `--w:${pct(n)}%` })));
+  put($("x-counts"), tile("t3", "Watched at movie night", c.watched), tile("t1", "On a watchlist", c.listed), tile("t2", "Not yet", c.neither));
+  const counts = { all: c.total, watched: c.watched, listed: c.listed, neither: c.neither };
+  put($("x-filter"), X_FILTERS.map(([k, label]) => el("button", { class: "chip", "aria-pressed": String(xShow === k),
+    onclick: () => { xShow = k; xLimit = 80; renderImdb(); } }, label, el("span", { class: "n" }, counts[k]))));
+  const q = $("x-search").value.trim().toLowerCase();
+  const sort = $("x-sort").value;
+  const rows = cur.items.filter((i) => (xShow === "all" || xStatus(i) === xShow) && (!q || `${i.title} ${i.year || ""}`.toLowerCase().includes(q)));
+  const by = {
+    position: (a, b) => (a.position || 1e9) - (b.position || 1e9),
+    added: (a, b) => String(b.added || "").localeCompare(String(a.added || "")),
+    title: (a, b) => a.title.localeCompare(b.title),
+    year: (a, b) => (b.year || 0) - (a.year || 0),
+    mine: (a, b) => (b.your_rating ?? -1) - (a.your_rating ?? -1),
+  };
+  rows.sort(by[sort] || by.position);
+  const guest = data.viewer.level === "viewer";
+  put($("x-rows"), rows.slice(0, xLimit).map((i) => {
+    const st = xStatus(i);
+    const status = st === "watched"
+      ? i.watched.map((w) => el("button", { class: "x-tag watched", onclick: () => { const h = data.history.find((x) => x.id === w.hid); if (h) showMovie(h); } },
+          `✅ ${fmtDate(w.date)}`, w.series ? ` · ${evName(w.series)}` : "", w.avg !== null ? [" · ", scoreBadge(w.avg)] : null))
+      : st === "listed" ? i.lists.map((s) => el("span", { class: "x-tag listed" }, `📋 On the ${evName(s)} watchlist`))
+      : [el("span", { class: "x-tag neither" }, "Not yet"), guest ? null : addToWatchlist(i)];
+    return el("li", { class: `x-row ${st}` },
+      posterArt(i, "x-poster"),
+      el("div", { class: "x-main" },
+        el("div", { class: "x-title" }, i.position ? el("span", { class: "x-pos" }, `#${i.position}`) : null,
+          i.imdb_id ? el("a", { href: `https://www.imdb.com/title/${i.imdb_id}/`, target: "_blank", rel: "noopener" }, i.title) : el("span", {}, i.title),
+          i.year ? el("span", { class: "hint" }, ` (${i.year})`) : null),
+        el("div", { class: "hint" }, [i.added ? `added ${fmtDate(i.added)}` : null, typeof i.your_rating === "number" ? `your rating ${fmt(i.your_rating)}/10` : null].filter(Boolean).join(" · ")),
+        el("div", { class: "x-status" }, status)));
+  }));
+  $("x-more").hidden = rows.length <= xLimit;
+  $("x-more").textContent = `Show more (${rows.length - xLimit} left)`;
+  $("x-missing-box").hidden = !cur.missing.length;
+  $("x-missing-title").textContent = `Watched with us, not on this list (${cur.missing.length})`;
+  put($("x-missing"), cur.missing.map((m) => el("li", {}, el("strong", {}, m.title), m.year ? ` (${m.year})` : "", el("span", { class: "hint" }, ` · ${fmtDate(m.date)}${m.series ? " · " + evName(m.series) : ""}`))));
+}
+function addToWatchlist(i) {
+  const sel = el("select", { class: "x-series", "aria-label": `Watchlist for ${i.title}` }, data.series.map((s) => el("option", { value: s }, evName(s))));
+  const go = el("button", { class: "btn small", onclick: async () => {
+    go.disabled = true;
+    try {
+      const res = await api("/api/movies/suggest", { kind: "nominate", series: sel.value, title: i.title, year: i.year ? String(i.year) : "", imdb_id: i.imdb_id || "" });
+      toast(res.message.replace(/\*\*/g, ""));
+      await load();
+    } catch (e) { toast(e.message, true); go.disabled = false; }
+  } }, "＋ Add");
+  return el("span", { class: "x-add" }, sel, go);
+}
+$("x-search").addEventListener("input", () => { xLimit = 80; renderImdb(); });
+$("x-sort").addEventListener("input", renderImdb);
+$("x-more").addEventListener("click", () => { xLimit += 80; renderImdb(); });
+function renderImdbAdmin() {
+  put($("x-admin"), (data.imdb_lists || []).map((l) => el("li", {},
+    el("span", {}, el("strong", {}, l.name), ` · ${l.counts.total} movies · ${l.counts.watched} watched with us`),
+    el("span", { class: "row-btns" },
+      el("button", { class: "btn small", onclick: () => { $("x-name").value = l.name; $("x-url").value = l.url || ""; $("x-file").click(); } }, "Replace…"),
+      el("button", { class: "btn small danger", onclick: async () => {
+        if (!window.confirm(`Remove ${l.name}? (Your list on IMDb isn't touched.)`)) return;
+        try { toast((await api("/api/movies/admin", { action: "imdb_list", op: "delete", id: l.id })).message); await load(); } catch (e) { toast(e.message, true); }
+      } }, "Remove")))));
+}
+$("x-file").addEventListener("change", () => {
+  const f = $("x-file").files[0];
+  if (f && !$("x-name").value.trim()) $("x-name").value = f.name.replace(/\.csv$/i, "").replace(/[_-]+/g, " ").trim();
+});
+$("x-go").addEventListener("click", async () => {
+  const btn = $("x-go");
+  const csv = await readFile($("x-file"));
+  if (!csv) return toast("Pick the CSV file you exported from IMDb.", true);
+  btn.disabled = true;
+  $("x-result").textContent = "Reading the list…";
+  try {
+    const res = await api("/api/movies/admin", { action: "imdb_list", name: $("x-name").value.trim(), url: $("x-url").value.trim(), csv });
+    $("x-result").textContent = res.message;
+    $("x-file").value = ""; $("x-name").value = ""; $("x-url").value = "";
+    await load();
+  } catch (e) { $("x-result").textContent = ""; toast(e.message, true); }
   finally { btn.disabled = false; }
 });
 

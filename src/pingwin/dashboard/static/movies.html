@@ -31,6 +31,7 @@
     <button role="tab" data-tab="reviews">Reviews</button>
     <button role="tab" data-tab="watchlists">Watchlists</button>
     <button role="tab" data-tab="stats">Stats</button>
+    <button role="tab" data-tab="imdb" id="m-imdb-tab" hidden>IMDb lists</button>
     <button role="tab" data-tab="admin" id="m-admin-tab" hidden>Admin</button>
   </nav>
 
@@ -128,7 +129,11 @@
         <p class="hint" id="w-note"></p>
         <div class="row-actions">
           <select id="w-series" aria-label="Series"></select>
-          <input id="w-title" placeholder="Title" maxlength="100" aria-label="Title">
+          <div class="ac-wrap">
+            <input id="w-title" placeholder="Start typing a title…" maxlength="100" aria-label="Title" autocomplete="off"
+              role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="w-ac">
+            <ul id="w-ac" class="ac-list" role="listbox" hidden></ul>
+          </div>
           <input id="w-year" placeholder="Year (optional)" maxlength="4" inputmode="numeric" aria-label="Year" class="year">
           <button class="btn primary" id="w-add">Suggest</button>
         </div>
@@ -176,7 +181,48 @@
       </div>
     </section>
 
+    <section id="tab-imdb" class="tab" hidden>
+      <div class="panel">
+        <div class="chips" id="x-lists" role="group" aria-label="IMDb list"></div>
+        <p class="hint" id="x-meta"></p>
+        <div class="stat-tiles" id="x-counts"></div>
+        <div class="row-actions filters">
+          <input id="x-search" type="search" placeholder="Search this list…" aria-label="Search this list">
+          <div class="chips" id="x-filter" role="group" aria-label="Show"></div>
+          <select id="x-sort" aria-label="Sort">
+            <option value="position">List order</option>
+            <option value="added">Newest added</option>
+            <option value="title">Title</option>
+            <option value="year">Year</option>
+            <option value="mine">Your rating</option>
+          </select>
+        </div>
+      </div>
+      <ul class="x-rows" id="x-rows"></ul>
+      <div class="row-actions center"><button class="btn" id="x-more" hidden>Show more</button></div>
+      <details class="panel" id="x-missing-box">
+        <summary><strong id="x-missing-title"></strong></summary>
+        <p class="hint">Movie nights we've had that aren't on this IMDb list (handy if the list is a watched log).</p>
+        <ul class="x-missing" id="x-missing"></ul>
+      </details>
+    </section>
+
     <section id="tab-admin" class="tab" hidden>
+      <div class="panel">
+        <h2>IMDb lists</h2>
+        <p class="hint">Compare your IMDb lists with our history and watchlists. On IMDb, open the list and pick
+          <strong>⋯ → Export</strong> (for your ratings: <strong>Your ratings → ⋯ → Export</strong>). IMDb gets the
+          CSV file ready under <strong>Your exports</strong>; download it and pick it here. Uploading the same list again
+          replaces it. Movies in our library also get any details they were missing.</p>
+        <div class="row-actions">
+          <input id="x-name" placeholder="Name, like Horror log" maxlength="60" aria-label="List name">
+          <input id="x-url" placeholder="IMDb list link (optional)" maxlength="220" aria-label="IMDb list link">
+          <label class="file">IMDb export (.csv)<input type="file" id="x-file" accept=".csv,text/csv"></label>
+          <button class="btn primary" id="x-go">Add list</button>
+        </div>
+        <span class="hint" id="x-result"></span>
+        <ul class="x-admin" id="x-admin"></ul>
+      </div>
       <div class="panel">
         <h2>Import history</h2>
         <p class="hint">From a movie log spreadsheet (date, movie, year, duration, session, ratings, …) and a ratings
@@ -209,6 +255,7 @@
           belongs to, and all of their ratings (nicknames, typos and their own Discord ratings) count as that person,
           shown with their server name. For someone who isn't in the server, type a <strong>name</strong> instead;
           names typed the same way are grouped too. Likely matches are listed first.</p>
+        <p class="hint" id="p-summary"></p>
         <div class="table-wrap">
           <table class="movie-table people-table">
             <thead><tr><th>Written as</th><th class="num">Ratings</th><th>Discord member</th><th>Or a name</th></tr></thead>

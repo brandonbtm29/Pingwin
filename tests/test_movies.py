@@ -346,3 +346,60 @@ def test_series_names_from_full_names():
     assert movies.series_name("mm", ["MM", "FF"], full) == "MM"
     assert movies.series_name("Bonus Night", ["MM", "FF"], full) == "Bonus Night"
     assert movies.series_name("", ["MM"], full) == "Other"
+
+
+QUESTION_DOC = """The Fly
+Date watched: 1/5/2026
+Sam (8/10): Gross in the best way.
+* To Alina: How many teleporters out of ten?
+Alex (7/10): Loved the ending.
+Alina (9/10): Five teleporters.
+To ellie from alina and sebastian: Moms crawling across the ceiling?
+Ellie (6/10): Fine.
+"""
+
+
+def test_questions_know_who_asked_whom(tmp_path, monkeypatch):
+    monkeypatch.setenv("PINGWIN_DATA", str(tmp_path))
+    secs = movies.parse_ratings_doc(QUESTION_DOC)
+    sam, alex, alina, ellie = secs[0]["ratings"]
+    assert sam["ask_to"] == "Alina" and sam["ask"].startswith("How many teleporters")
+    assert alina["ask_to"] == "Ellie" and alina["asked_by"] == "Alina & Sebastian"
+    lib = movies.load()
+    sheet = [
+        {
+            "date": "2026-01-05",
+            "title": "The Fly",
+            "year": 1986,
+            "runtime": 96,
+            "imdb_rating": 7.6,
+            "director": None,
+            "writer": None,
+            "stars": None,
+            "session": "MMM",
+            "group_avg": None,
+        }
+    ]
+    movies.import_history(lib, sheet, secs, ["MMM"])
+    e = lib["history"][0]
+    chain = movies.question_chain(e, movies.rater_names(lib))
+    assert chain["name:sam"]["to"] == ["Alina"]
+    assert chain["name:alina"]["from"] == "Sam"  # Sam's question skipped Alex and went to Alina
+    assert chain["name:alex"]["from"] is None
+    assert chain["name:ellie"]["from"] == "Alina & Sebastian"
+    # Ratings imported before questions were linked get linked on the next import.
+    for r in e["ratings"].values():
+        r.pop("answered_from")
+        r["answered"] = "wrong"
+    movies.import_history(lib, sheet, secs, ["MMM"])
+    assert movies.question_chain(e, movies.rater_names(lib)) == chain
+    assert e["ratings"]["name:alex"]["answered"] == ""
+
+
+def test_discord_ratings_remember_who_asked():
+    e = {"ratings": {}}
+    movies.add_rating(e, "1", name="Sam", score=8, ask="How many flies?")
+    asker = movies.open_asker(e, skip="2")
+    movies.add_rating(e, "2", name="Alex", score=7, answer="Three", answered="How many flies?", answered_from=asker)
+    chain = movies.question_chain(e, {"1": "Sam", "2": "Alex"})
+    assert chain["2"]["from"] == "Sam" and chain["1"]["to"] == ["Alex"]

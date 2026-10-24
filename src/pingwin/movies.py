@@ -126,23 +126,21 @@ async def omdb_lookup(
     title: str,
     year: int | str | None = None,
     spent: list[int] | None = None,
+    imdb_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Look a movie up on OMDb: the exact title, then a search for the closest match. None if not found.
+    """Look a movie up on OMDb: by IMDb ID if we have one, else the exact title, then a search for the
+    closest match. None if not found.
 
     `spent` counts the requests made (up to three), for the daily budget."""
     spent = spent if spent is not None else [0]
 
     async def ask(params: dict[str, str]) -> dict[str, Any]:
-        spent[0] += 1
-        async with http.get(OMDB, params={"apikey": key, **params}) as r:
-            d = await r.json(content_type=None)
-        err = str(d.get("Error", ""))
-        if "limit" in err.lower():
-            raise OmdbLimit(err)
-        if "api key" in err.lower():
-            raise OmdbKeyError(err or "OMDb didn't accept the API key")
-        return d
+        return await _omdb_get(http, key, params, spent)
 
+    if imdb_id and IMDB_ID.fullmatch(imdb_id):
+        d = await ask({"i": imdb_id})
+        if d.get("Response") == "True":
+            return from_omdb(d)
     y = {"y": str(year)} if year else {}
     d = await ask({"t": title, "type": "movie", **y})
     if d.get("Response") == "True":
@@ -152,6 +150,66 @@ async def omdb_lookup(
         return None
     d = await ask({"i": hits[0]["imdbID"]})
     return from_omdb(d) if d.get("Response") == "True" else None
+
+
+IMDB_ID = re.compile(r"tt\d{6,10}")
+
+
+async def _omdb_get(http: aiohttp.ClientSession, key: str, params: dict[str, str], spent: list[int]) -> dict[str, Any]:
+    spent[0] += 1
+    async with http.get(OMDB, params={"apikey": key, **params}) as r:
+        d = await r.json(content_type=None)
+    err = str(d.get("Error", ""))
+    if "limit" in err.lower():
+        raise OmdbLimit(err)
+    if "api key" in err.lower():
+        raise OmdbKeyError(err or "OMDb didn't accept the API key")
+    return d
+
+
+async def omdb_search(
+    http: aiohttp.ClientSession, key: str, query: str, year: int | str | None = None, spent: list[int] | None = None
+) -> list[dict[str, Any]]:
+    """Movies whose titles match what someone is typing (one OMDb request, up to 10 results)."""
+    spent = spent if spent is not None else [0]
+    params = {"s": query.strip(), "type": "movie", **({"y": str(year)} if year else {})}
+    d = await _omdb_get(http, key, params, spent)
+    out = []
+    for hit in d.get("Search") or []:
+        y = re.match(r"\d{4}", hit.get("Year", "") or "")
+        out.append(
+            {
+                "title": hit.get("Title", ""),
+                "year": int(y[0]) if y else None,
+                "imdb_id": hit.get("imdbID"),
+                "poster": None if hit.get("Poster") in (None, "", "N/A") else hit["Poster"],
+            }
+        )
+    return [h for h in out if h["title"]]
+
+
+def search_library(lib: dict[str, Any], query: str, limit: int = 6) -> list[dict[str, Any]]:
+    """Movies we already know (watched or listed) whose titles match, best first."""
+    q = norm(query)
+    if len(q) < 2:
+        return []
+    watched = {e["movie_id"] for e in lib["history"]}
+    hits = []
+    for m in lib["movies"].values():
+        t = norm(m.get("title", ""))
+        if q in t:
+            hits.append((0 if t.startswith(q) else 1, -(m.get("year") or 0), m))
+    hits.sort(key=lambda h: (h[0], h[1]))
+    return [
+        {
+            "title": m["title"],
+            "year": m.get("year"),
+            "imdb_id": m.get("imdb_id"),
+            "poster": m.get("poster"),
+            "watched": m["id"] in watched,
+        }
+        for *_, m in hits[:limit]
+    ]
 
 
 RETRY_AFTER = 7 * 86400  # look a missed movie up again after a week, up to MAX_TRIES times
@@ -262,6 +320,7 @@ def add_rating(
     answer: str = "",
     ask: str = "",
     answered: str = "",
+    answered_from: str | None = None,
 ) -> None:
     entry.setdefault("ratings", {})[key] = {
         "name": name,
@@ -271,6 +330,7 @@ def add_rating(
         "answered": answered.strip(),  # the question they were asked by the previous rater
         "answer": answer.strip(),
         "ask": ask.strip(),  # the question they pass on to the next rater
+        "answered_from": answered_from if answered else None,  # rater key of whoever asked them
         "at": time.time(),
     }
 
@@ -382,6 +442,35 @@ def open_question(entry: dict[str, Any]) -> str:
     return rs[-1].get("ask", "") if rs else ""
 
 
+def open_asker(entry: dict[str, Any], skip: str | None = None) -> str | None:
+    """The rater key of whoever asked the open question (the most recent rater, if they asked one)."""
+    rs = sorted(((k, r) for k, r in entry.get("ratings", {}).items() if k != skip), key=lambda kv: kv[1].get("at", 0))
+    return rs[-1][0] if rs and rs[-1][1].get("ask") else None
+
+
+def question_chain(entry: dict[str, Any], names: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Who asked whom, for each rater key: {"from": name, "to": [names]}.
+
+    "from" is whoever asked them the question they answered; "to" is who their own question went to."""
+    ratings = entry.get("ratings", {})
+
+    def who(k: str) -> str:
+        return names.get(k) or ratings.get(k, {}).get("name") or "Someone"
+
+    out: dict[str, dict[str, Any]] = {k: {"from": None, "to": []} for k in ratings}
+    for k, r in ratings.items():
+        src = r.get("answered_from")
+        if r.get("answered") and src:
+            asker = ratings.get(src, {})
+            out[k]["from"] = asker.get("asked_by") or who(src)
+            if src in out:
+                out[src]["to"].append(who(k))
+    for k, r in ratings.items():
+        if r.get("ask") and not out[k]["to"] and r.get("ask_to"):
+            out[k]["to"] = [r["ask_to"]]  # as written in the document, for someone who didn't rate
+    return out
+
+
 def parse_score(text: str) -> float | None:
     m = re.search(r"-?\d+(?:\.\d+)?", text or "")
     if not m:
@@ -483,7 +572,9 @@ RATING = re.compile(
     r"\(\s*(?P<score>[\d.]+|NA|N/A|U|)\s*/\s*10(?:\.0)?\s*\)\s*[:\-–]?\s*(?P<comment>.*)$"
 )
 RATING_ALT = re.compile(r"^(?P<name>[A-Z][\w .'’&/-]{0,30}):\s*(?P<score>[\d.]+)\s*/\s*10\s*(?P<comment>.*)$")
-QUESTION = re.compile(r"^To\s*(?P<to>[^:]{0,30}):\s*(?P<q>.*)$")
+QUESTION = re.compile(r"^To\s*(?P<to>[^:]{0,60}):\s*(?P<q>.*)$", re.I)
+FROM_PART = re.compile(r"\s+from\s+", re.I)
+NAME_SPLIT = re.compile(r"\s*(?:,|&|\band\b|\+)\s*", re.I)
 DATE_LINE = re.compile(r"^Date watched:\s*(?P<date>.+)$", re.I)
 
 
@@ -495,6 +586,12 @@ BULLET = re.compile(r"^[*•\-–]\s*")
 HOW_MANY = re.compile(r"^how many\b|\bout of\b", re.I)
 SEPARATOR = re.compile(r"^[_\-=*]{6,}$")
 TOC_LINE = re.compile(r"^(?P<title>\S.*?)(?:\t+|\s{2,})(?P<page>\d{1,4})$")
+
+
+def _people_text(text: str) -> str:
+    """'alina and sebastian' -> 'Alina & Sebastian' (names as written, tidied)."""
+    names = [n.strip() for n in NAME_SPLIT.split(text.strip()) if n.strip()]
+    return " & ".join(n[:1].upper() + n[1:] for n in names)
 
 
 def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[str, Any]]:
@@ -575,7 +672,14 @@ def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[st
         m = is_rating
         if m:
             score = None if m["score"] in ("", "NA", "N/A", "U") else _num(m["score"])
-            last_rating = {"name": m["name"].strip(), "score": score, "comment": m["comment"].strip(), "ask": ""}
+            last_rating = {
+                "name": m["name"].strip(),
+                "score": score,
+                "comment": m["comment"].strip(),
+                "ask": "",
+                "ask_to": "",
+                "asked_by": "",
+            }
             cur["ratings"].append(last_rating)
             continue
         bare = BULLET.sub("", ln)
@@ -584,6 +688,10 @@ def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[st
             q = (m["q"] if m else bare).strip()
             if q:
                 last_rating["ask"] = q
+                if m:
+                    parts = FROM_PART.split(m["to"].strip(), maxsplit=1)  # 'To Ellie from Alina and Sam'
+                    last_rating["ask_to"] = _people_text(parts[0])
+                    last_rating["asked_by"] = _people_text(parts[1]) if len(parts) > 1 else ""
             continue
         if (
             last_rating is not None
@@ -612,6 +720,45 @@ def _close(a: str, b: str) -> bool:
     if len(min(a, b, key=len)) >= 8 and (a.startswith(b) or b.startswith(a)):
         return True
     return difflib.SequenceMatcher(None, a, b).ratio() >= 0.85
+
+
+def _names_in(text: str) -> list[str]:
+    return [n.casefold() for n in NAME_SPLIT.split(text or "") if len(n.strip()) >= 2]
+
+
+def _question_links(
+    rows: list[tuple[str, str | None, dict[str, Any]]], members: dict[str, str]
+) -> dict[str, tuple[str, str]]:
+    """{rater key: (asker key, question)} for one document section.
+
+    'To Alina: ...' under Sam's rating goes to Alina (whoever rated as Alina or matches her);
+    a question without a 'To' goes to the next person who rated."""
+    out: dict[str, tuple[str, str]] = {}
+    for i, (key, _uid, r) in enumerate(rows):
+        q = r.get("ask", "")
+        if not q:
+            continue
+        targets = []
+        for name in _names_in(r.get("ask_to", "")):
+            uid = match_name(name, members)
+            hit = next(
+                (
+                    k
+                    for k, u, x in rows[i + 1 :] + rows[:i]
+                    if (uid and u == uid)
+                    or x["name"].casefold() == name
+                    or (len(name) >= 3 and x["name"].casefold().startswith(name))
+                    or (len(x["name"]) >= 3 and name.startswith(x["name"].casefold()))
+                ),
+                None,
+            )
+            if hit and hit != key:
+                targets.append(hit)
+        if not targets and not r.get("ask_to") and i + 1 < len(rows):
+            targets = [rows[i + 1][0]]
+        for t in targets:
+            out.setdefault(t, (key, q))
+    return out
 
 
 def import_history(
@@ -680,12 +827,21 @@ def import_history(
         if entry is None:
             stats["skipped"] += 1
             continue
-        asked = ""
+        rows = []
         for r in sec["ratings"]:
             uid = match_name(r["name"], members)
-            key = uid or f"name:{r['name'].casefold()}"
-            if key in entry["ratings"]:
-                asked = r.get("ask", "")
+            rows.append((uid or f"name:{r['name'].casefold()}", uid, r))
+        links = _question_links(rows, members)
+        for key, uid, r in rows:
+            asker, question = links.get(key, (None, ""))
+            old = entry["ratings"].get(key)
+            if old is not None:  # already imported: fill in who asked whom, keep everything else
+                for f, v in (("ask_to", r.get("ask_to", "")), ("asked_by", r.get("asked_by", ""))):
+                    if v and not old.get(f):
+                        old[f] = v
+                if old.get("at", 0) == 0 and "answered_from" not in old:  # imported before questions were linked
+                    old["answered_from"] = asker
+                    old["answered"] = question
                 continue
             add_rating(
                 entry,
@@ -695,10 +851,12 @@ def import_history(
                 comment=r["comment"],
                 user_id=uid,
                 ask=r.get("ask", ""),
-                answered=asked,
+                answered=question,
+                answered_from=asker,
             )
-            entry["ratings"][key]["at"] = 0  # imported: keep document order stable
-            asked = r.get("ask", "")
+            entry["ratings"][key].update(
+                {"at": 0, "ask_to": r.get("ask_to", ""), "asked_by": r.get("asked_by", "")}
+            )  # imported: keep document order stable
             stats["ratings"] += 1
     lib["history"].sort(key=lambda e: (e.get("date") or "9999", e.get("created", 0)))
     return stats

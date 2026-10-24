@@ -169,6 +169,9 @@ async def open_rating(interaction: discord.Interaction, hid: str) -> None:
     await interaction.response.send_modal(RateModal(hid, movie, entry, str(interaction.user.id)))
 
 
+PICKED = re.compile(r"(?P<id>(?:tt\d{6,10})?)\|(?P<title>[^|]+)\|(?P<year>\d{4})?")
+
+
 class RateModal(discord.ui.Modal):
     def __init__(self, hid: str, movie: dict[str, Any], entry: dict[str, Any], uid: str) -> None:
         super().__init__(title=f"Rate {movie['title']}"[:45])
@@ -176,6 +179,7 @@ class RateModal(discord.ui.Modal):
         mine = entry.get("ratings", {}).get(uid, {})
         question = movies.open_question({"ratings": {k: v for k, v in entry.get("ratings", {}).items() if k != uid}})
         self.question = question
+        self.asker = movies.open_asker(entry, skip=uid)
         self.score = discord.ui.TextInput(
             label="Your score out of 10",
             placeholder="Like 7 or 7.5",
@@ -230,6 +234,7 @@ class RateModal(discord.ui.Modal):
             score=score,
             comment=str(self.comment.value or ""),
             answered=self.question if self.answer else "",
+            answered_from=self.asker,
             answer=str(self.answer.value or "") if self.answer else "",
             ask=str(self.ask.value or ""),
         )
@@ -298,6 +303,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     def __init__(self, bot: Pingwin) -> None:
         self.bot = bot
         self.http: aiohttp.ClientSession | None = None
+        self._search_cache: dict[tuple[str, int | None], tuple[float, list[dict[str, Any]]]] = {}
         self._filling = asyncio.Lock()
         self.check.start()
         self.fill_loop.start()
@@ -373,13 +379,17 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         b = movies.load().get("omdb", {})
         return b.get("status") if b.get("pause_until", 0) > time.time() else None
 
-    async def _ask_omdb(self, title: str, year: int | str | None) -> dict[str, Any] | None:
-        """One lookup, counted against today's budget. Pauses itself on limit or key errors."""
+    async def _ask_omdb(
+        self, title: str, year: int | str | None, imdb_id: str | None = None, search: bool = False
+    ) -> Any:
+        """One lookup (or a title search), counted against today's budget. Pauses itself on limit or key errors."""
         key = self.bot.features.secret(movies.SECRET)
         spent = [0]
         status, pause = "", 0.0
         try:
-            return await movies.omdb_lookup(self._http(), key, title, year, spent)
+            if search:
+                return await movies.omdb_search(self._http(), key, title, year, spent)
+            return await movies.omdb_lookup(self._http(), key, title, year, spent, imdb_id)
         except movies.OmdbLimit:
             tomorrow = datetime.now(UTC).replace(hour=0, minute=5, second=0, microsecond=0) + timedelta(days=1)
             status, pause = "OMDb's daily limit was reached. Pingwin carries on tomorrow.", tomorrow.timestamp()
@@ -397,15 +407,22 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 log.warning("Movie details paused: %s", status)
             movies.save(lib)
 
-    async def details(self, title: str, year: int | str | None = None) -> dict[str, Any] | None:
-        """A movie from the library, looked up on OMDb (once) if we don't have its details yet."""
+    async def details(
+        self, title: str, year: int | str | None = None, imdb_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """A movie from the library, looked up on OMDb (once) if we don't have its details yet.
+
+        `imdb_id` (picked from the search suggestions) pins down exactly which movie it is."""
         lib = movies.load()
-        m = movies.find_movie(lib, title, year)
+        if imdb_id and not movies.IMDB_ID.fullmatch(imdb_id):
+            imdb_id = None
+        m = next((x for x in lib["movies"].values() if imdb_id and x.get("imdb_id") == imdb_id), None)
+        m = m or movies.find_movie(lib, title, year)
         key = self.bot.features.secret(movies.SECRET)
         if (m and m.get("looked_up")) or not key or self._omdb_paused():
             return m
         try:
-            info = await self._ask_omdb(title, year)
+            info = await self._ask_omdb(title, year, imdb_id)
         except (TimeoutError, aiohttp.ClientError, ValueError, movies.OmdbLimit) as e:
             log.warning("Movie lookup failed for %s: %s", title, e)
             return m
@@ -427,6 +444,40 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         movies.save(lib)
         return m
 
+    async def search(self, query: str, year: int | None = None) -> dict[str, Any]:
+        """Suggestions while someone types a title: our own library first, then OMDb's catalog
+        (IMDb's movies), cached for a day so typing the same thing again costs nothing."""
+        query = re.sub(r"\s+", " ", query).strip()[:80]
+        lib = movies.load()
+        out: dict[str, Any] = {"library": movies.search_library(lib, query), "omdb": [], "note": ""}
+        if len(query) < 3:
+            return out
+        if not self.bot.features.secret(movies.SECRET):
+            out["note"] = "Add an OMDb API key (Features → Movie night) for suggestions from IMDb's catalog."
+            return out
+        if self._omdb_paused():
+            out["note"] = "Suggestions from IMDb's catalog are paused for today."
+            return out
+        ck = (query.casefold(), year)
+        hit = self._search_cache.get(ck)
+        if hit and time.time() - hit[0] < 86400:
+            out["omdb"] = hit[1]
+            return out
+        daily = int(getattr(self.cfg, "omdb_daily", 800) or 800)
+        if self._budget(lib).get("used", 0) >= daily:
+            out["note"] = "Today's OMDb requests are used up. Suggestions are back tomorrow."
+            return out
+        try:
+            found = await self._ask_omdb(query, year, search=True)
+        except (TimeoutError, aiohttp.ClientError, ValueError, movies.OmdbLimit) as e:
+            log.info("Movie search failed for %r: %s", query, e)
+            return out
+        if len(self._search_cache) > 500:
+            self._search_cache.clear()
+        self._search_cache[ck] = (time.time(), found)
+        out["omdb"] = found
+        return out
+
     async def fill_details(self, max_requests: int) -> dict[str, Any]:
         """Look up movies that are missing details, a few at a time, within today's budget."""
         if not self.bot.features.secret(movies.SECRET):
@@ -447,8 +498,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 if used - used0 + 3 > max_requests or used + 3 > daily:
                     break
                 title, year = item[-2], item[-1]
-                try:
-                    info = await self._ask_omdb(title, year)
+                known = movies.load()["movies"].get(item[1], {}) if item[0] == "movie" else {}
+                try:  # an IMDb ID (say, from an IMDb list) finds exactly the right movie in one request
+                    info = await self._ask_omdb(title, year, known.get("imdb_id"))
                 except (movies.OmdbLimit, movies.OmdbKeyError):
                     break
                 except (TimeoutError, aiohttp.ClientError) as e:
@@ -998,6 +1050,28 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             pass
 
     # ------------------------------------------------------------ autocomplete
+    async def catalog_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Movie suggestions while typing a title. A picked one carries its IMDb ID along."""
+        if len(current.strip()) < 3:
+            return []
+        try:
+            found = await asyncio.wait_for(self.search(current), timeout=2.2)
+        except TimeoutError:
+            return []
+        seen, choices = set(), []
+        for h in [*found["library"], *found["omdb"]]:
+            key = h.get("imdb_id") or movies.movie_id(h["title"], h.get("year"))
+            if key in seen:
+                continue
+            seen.add(key)
+            label = f"{h['title']} ({h['year']})" if h.get("year") else h["title"]
+            if h.get("watched"):
+                label += " · watched before"
+            value = f"{h.get('imdb_id') or ''}|{h['title']}|{h.get('year') or ''}"
+            if len(value) <= 100:
+                choices.append(app_commands.Choice(name=label[:100], value=value))
+        return choices[:25]
+
     async def series_autocomplete(self, interaction: discord.Interaction, current: str):
         return [
             app_commands.Choice(name=s.name, value=s.name)
@@ -1021,7 +1095,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     @app_commands.describe(
         series="Which movie night", title="The movie (or franchise)", year="Optional, helps find the right one"
     )
-    @app_commands.autocomplete(series=series_autocomplete)
+    @app_commands.autocomplete(series=series_autocomplete, title=catalog_autocomplete)
     async def nominate(
         self,
         interaction: discord.Interaction,
@@ -1032,10 +1106,20 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         s = await self._check(interaction, series)
         if s is None:
             return
+        imdb_id = None
+        picked = PICKED.fullmatch(title)
+        if picked:  # chosen from the suggestions
+            imdb_id = picked["id"] or None
+            title = picked["title"]
+            year = year or (int(picked["year"]) if picked["year"] else None)
         await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send(await self.nominate_text(interaction.user, s, title, year), ephemeral=True)
+        await interaction.followup.send(
+            await self.nominate_text(interaction.user, s, title, year, imdb_id), ephemeral=True
+        )
 
-    async def nominate_text(self, member: discord.abc.User, s, title: str, year: int | None = None) -> str:
+    async def nominate_text(
+        self, member: discord.abc.User, s, title: str, year: int | None = None, imdb_id: str | None = None
+    ) -> str:
         """Used by /pingwin movie nominate and the movie pages."""
         if not self._allowed(member, self.cfg.nominate, self.cfg.nominate_role):
             return "You can't nominate movies here."
@@ -1049,7 +1133,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 f"You already have {len(mine)} nominations waiting (the limit is {self.cfg.max_per_person}). "
                 "Remove one with `/pingwin movie remove` first."
             )
-        m = await self.details(title, year)
+        m = await self.details(title, year, imdb_id)
         note = ""
         lib = movies.load()
         seen = [e for e in lib["history"] if m and e["movie_id"] == m["id"]]
@@ -1218,10 +1302,12 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         code = movieaccess.new_login_code(user.id, user.display_name, user.display_avatar.with_size(64).url)
         base = url.rsplit("/movies", 1)[0]
         await interaction.response.send_message(
-            f"🎞️ **Browse** the history, reviews and watchlists: {self.view_url()}\n"
-            f"✍️ **Your personal sign-in link** (to write reviews and suggest movies): {base}/movies/login?code={code}\n"
+            f"🎞️ **Browse** the history, reviews and watchlists: <{self.view_url()}>\n"
+            "✍️ **Your personal sign-in link** (to write reviews and suggest movies): "
+            f"<{base}/movies/login?code={code}>\n"
             "-# Only you can see this. The sign-in link works once, for 15 minutes.",
             ephemeral=True,
+            suppress_embeds=True,
         )
 
     @app_commands.command(name="poll", description="Start a poll from the watchlist")

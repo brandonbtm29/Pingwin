@@ -72,7 +72,8 @@ server, and you can remove one at any time by tapping its button again.
   service) the user ID of each attendee and how much to add to their balance. See
   [UnbelievaBoat's privacy policy](https://unbelievaboat.com/privacy).
 - **OMDb:** if the operator adds an OMDb key, Pingwin looks up movie titles and years there (once per
-  movie) for details like runtime and IMDb rating. No Discord user data is sent. See
+  movie) for details like runtime and IMDb rating, and sends the words typed in a movie title box to suggest
+  matching titles. No Discord user data is sent. See
   [OMDb](https://www.omdbapi.com/legal.htm).
 - **Google:** only when an admin imports old movie history from a Google Sheets or Docs link. Pingwin
   downloads those files; it doesn't send anything.

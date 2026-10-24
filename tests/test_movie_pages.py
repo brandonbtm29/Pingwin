@@ -183,13 +183,57 @@ def test_view_only_link_and_personal_sign_in(tmp_path, data, monkeypatch):  # no
         r = await client.get("/api/movies", headers=guest)
         assert r.status == 401
         code = movieaccess.new_login_code(42, "Riley")
-        r = await client.get(f"/movies/login?code={code}", headers=PUBLIC)
-        assert r.status == 200 and "Signed in" in await r.text()
+        for _ in range(2):  # Discord's link preview opens it first: that mustn't use the code up
+            r = await client.get(f"/movies/login?code={code}", headers=PUBLIC)
+            assert r.status == 200 and "Hi, Riley!" in await r.text() and "pingwin_session" not in r.cookies
+        form = {"code": code}
+        r = await client.post("/movies/login", data=form, headers={**PUBLIC, "Origin": "https://evil.example"})
+        assert r.status == 403
+        r = await client.post("/movies/login", data=form, headers={**PUBLIC, "Origin": ORIGIN}, allow_redirects=False)
+        assert r.status == 303 and r.headers["Location"] == "/movies"
         session = r.cookies["pingwin_session"].value
         me = {**PUBLIC, "Cookie": f"pingwin_session={session}", "X-Pingwin": "1", "Origin": ORIGIN}
         body = await (await client.get("/api/movies", headers=me)).json()
         assert body["viewer"]["level"] == "member" and body["viewer"]["user_id"] == "42"
         r = await client.get(f"/movies/login?code={code}", headers=PUBLIC)  # used up
         assert r.status == 403
+        r = await client.post("/movies/login", data=form, headers={**PUBLIC, "Origin": ORIGIN}, allow_redirects=False)
+        assert r.status == 403
+
+    run(scenario, tmp_path)
+
+
+def test_imdb_lists_and_question_chain_on_the_pages(tmp_path, data):  # noqa: F811
+    doc = DOC.replace(
+        "Sam (8/10): Gross in the best way.", "Sam (8/10): Gross in the best way.\nTo Alex: How many flies?"
+    )
+    csv_text = (
+        "Position,Const,Created,Title,Title Type,Year,Runtime (mins),Genres,Directors\n"
+        "1,tt0091064,2025-02-01,The Fly,Movie,1986,96,Horror,David Cronenberg\n"
+        "2,tt2543164,2025-03-01,Arrival,Movie,2016,116,Drama,Denis Villeneuve\n"
+    )
+
+    async def scenario(client, app):
+        hdr = headers(app, "admin")
+        await client.post(
+            "/api/movies/admin", json={"action": "import", "sheet_csv": SHEET, "doc_text": doc}, headers=hdr
+        )
+        payload = {"action": "imdb_list", "name": "Horror log", "csv": csv_text}
+        r = await client.post("/api/movies/admin", json=payload, headers=hdr)
+        assert r.status == 200, await r.text()
+        member = headers(app, "member")
+        r = await client.post("/api/movies/admin", json=payload, headers=member)
+        assert r.status == 403
+        body = await (await client.get("/api/movies", headers=member)).json()
+        (lst,) = body["imdb_lists"]
+        assert lst["name"] == "Horror log" and lst["counts"]["watched"] == 1 and lst["counts"]["neither"] == 1
+        by = {x["name"]: x for x in body["history"][0]["ratings"]}
+        assert by["Sam"]["ask_to"] == ["Alex"] and by["Alex"]["answered_from"] == "Sam"
+        r = await client.get("/api/movies/search?q=fly", headers=member)
+        assert r.status == 200  # (no movie night cog in this test: empty suggestions)
+        r = await client.post(
+            "/api/movies/admin", json={"action": "imdb_list", "op": "delete", "id": lst["id"]}, headers=hdr
+        )
+        assert (await (await client.get("/api/movies", headers=member)).json())["imdb_lists"] == []
 
     run(scenario, tmp_path)

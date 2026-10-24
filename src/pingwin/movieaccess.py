@@ -72,6 +72,12 @@ def new_login_code(user_id: int | str, name: str, avatar: str | None = None) -> 
     return code
 
 
+def peek_login_code(code: str | None) -> dict[str, Any] | None:
+    """Who a sign-in code is for, without using it up (link previews open links too)."""
+    found = _load()["codes"].get(code or "")
+    return found if found and found.get("expires", 0) >= time.time() else None
+
+
 def take_login_code(code: str | None) -> dict[str, Any] | None:
     """The member a sign-in code belongs to. Each code works once, until it expires."""
     if not code:

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.17.0 (2026-10-24)
+- **Personal sign-in links work again.** Discord opens links to make previews, which used up the
+  single-use code before the person clicked. Now the link opens a page with an **Open the movie pages**
+  button, and only pressing it signs in. The `/pingwin movie page` reply also no longer shows previews.
+- **Who asked whom:** the funny question chain shows **From** (who asked you) and **To** (who your question
+  went to) on reviews and in each movie's ratings. Imported ratings documents are read for `To Alex:` and
+  `To Ellie from Alina and Sam:` lines; running the import again links ratings imported earlier.
+- **People** on the Admin tab groups every name under the person it counts as (a member or a typed name),
+  with each person's total, and lists names that aren't linked yet at the bottom.
+- **Title suggestions:** typing in *Suggest a movie* (and the title in `/pingwin movie nominate`) suggests
+  matches from our library and from IMDb's catalog via OMDb, with posters and IMDb links. Picking one keeps
+  its IMDb ID, so the details are exactly the right movie. Needs the OMDb key; searches are cached and count
+  toward the daily OMDb budget.
+- **IMDb lists:** upload an IMDb list or ratings export (CSV) on the Admin tab. A new **IMDb lists** tab shows
+  each movie as watched at movie night (when, which event, our score), on a watchlist, or not yet (with an
+  **Add** button), plus the movie nights that aren't on the list. Library movies also get missing details
+  from the file, and OMDb uses the IMDb ID when it has one.
+
 ## 0.16.0 (2026-10-24)
 - **Franchise queues:** a series can work through one franchise in order. Pingwin announces each showtime's
   part ("part 7 of 10"), logs it when the movie starts (Rate it still comes), and when the franchise is done,

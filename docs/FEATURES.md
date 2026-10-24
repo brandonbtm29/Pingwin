@@ -195,7 +195,8 @@ the movie pages, where mods can approve them too.
 When a movie night ends (the poll winner, or `/pingwin movie tonight`), Pingwin logs it in the history.
 About when the movie finishes (showtime + its runtime), it posts a **Rate it** button in the series'
 channel. Each person gives a score out of 10 and a comment, and can answer the question the previous person
-asked and leave one for the next (like "How many jump scares out of 10?"). The message keeps a live
+asked and leave one for the next (like "How many jump scares out of 10?"). The movie pages show each
+question's **From** and **To**. The message keeps a live
 average next to IMDb's, and closes after *Ratings stay open for* hours (48 by default).
 
 ### Movie details (OMDb)
@@ -223,8 +224,9 @@ There are three ways in, and nobody has to type a Discord password:
   review or suggest anything. *Reset link* makes a new one: the old link stops working and the pinned post
   is updated.
 - **A personal sign-in link.** `/pingwin movie page` replies (only to that person) with the view link and
-  their own sign-in link. It signs them in with no Discord screen, so they can write reviews and suggest
-  movies. Each one works once, for 15 minutes.
+  their own sign-in link. It opens a page with an **Open the movie pages** button that signs them in with
+  no Discord screen, so they can write reviews and suggest movies. Each one works once, for 15 minutes.
+  (Opening the link doesn't use it up, so Discord's link previews and link scanners can't spend it.)
 - **Sign in with Discord**, as before.
 
 Members (with the member role, like **Friend**) see:
@@ -237,7 +239,10 @@ Members (with the member role, like **Friend**) see:
   enter a review for a member. Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
   them, or click someone's card for their average, how they compare with the group, and their favorites.
 - **Watchlists:** each series' list as poster cards, with filters for named lists (like *Horror*), and a
-  form to suggest a movie.
+  form to suggest a movie. Typing a title suggests matches from our library and from IMDb's catalog (via
+  OMDb, with the key added), with posters; picking one pins down exactly which movie it is. The title in
+  `/pingwin movie nominate` suggests the same way.
+- **IMDb lists** (once an admin adds one): see below.
 - **Stats:** charts of movie nights per year (by series), favorites and least favorites, where you
   disagreed with IMDb, how everyone scores, the most active critics, genres and directors. Hover or tab to
   any bar for the details.
@@ -272,7 +277,25 @@ and their Discord name. On the **Admin** tab, **People** lists every name. Pick 
 name belongs to (likely matches are listed first), and those ratings join that member's own Discord ratings
 under their current server name, on the Reviews tab, in the stats and in Discord recaps. For someone who
 isn't in the server, type a name instead (like `Mrs. Smith` and `Mrs Smith` → `Sam`). The original names
-stay as written; set it back to *not linked* and clear the name to undo.
+stay as written; set it back to *not linked* and clear the name to undo. The table groups names under the
+person they count as, with each person's total, and lists names that aren't linked yet at the bottom.
+
+### IMDb lists
+
+IMDb has no public API, so lists come in as the CSV file IMDb makes. On IMDb, open the list and choose
+**⋯ → Export** (or **Your ratings → ⋯ → Export**); when it's ready under **Your exports**, download it. On
+the movie pages' **Admin** tab, under **IMDb lists**, give it a name (and the list's link, if you like) and
+pick the file. Uploading the same list again replaces it. TV series and episodes are skipped.
+
+The **IMDb lists** tab then shows, for each movie on the list, whether we **watched** it at a movie night
+(the date, event and our score; click for the details), whether it's **on a watchlist**, or **not yet**
+(with an **Add** button that suggests it to a watchlist). Filter and sort it, and open **Watched with us,
+not on this list** to see what a watched log is missing. Movies in our library also pick up missing details
+from the file (IMDb ID, runtime, IMDb rating, genre, director), and OMDb lookups use the IMDb ID.
+
+In ratings documents, a question line can say who it's for: `To Alex: How many …?`, or
+`To Ellie from Alina and Sam: …` when it came from more than one person. A question without `To` goes to
+the next person who rated.
 
 ### Importing a watchlist from Discord
 

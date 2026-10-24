@@ -16,6 +16,7 @@ Security model
 from __future__ import annotations
 
 import asyncio
+import csv
 import hmac
 import html
 import logging
@@ -79,7 +80,15 @@ PRESENCE: web.AppKey[Any] = web.AppKey("presence", object)
 OPEN_PATHS = {"/login", "/auth/login", "/auth/callback", "/movies/login"}
 VIEW_COOKIE = "pingwin_view"  # the shared view-only movie link
 VIEW_PATHS = {"/movies", "/api/movies"}  # all a view-only visitor can open
-MEMBER_PATHS = {"/movies", "/api/movies", "/api/movies/suggest", "/api/movies/review", "/api/signout", "/api/presence"}
+MEMBER_PATHS = {
+    "/movies",
+    "/api/movies",
+    "/api/movies/suggest",
+    "/api/movies/search",
+    "/api/movies/review",
+    "/api/signout",
+    "/api/presence",
+}
 DASHBOARDS = "dashboards"  # shared: each PC's public dashboard link, for /pingwin dashboard
 PUBLIC: web.RequestKey[bool] = web.RequestKey("public", bool)
 VIEWER: web.RequestKey[Any] = web.RequestKey("viewer", object)
@@ -407,11 +416,32 @@ async def auth_callback(request: web.Request) -> web.StreamResponse:
 
 
 async def movies_login(request: web.Request) -> web.StreamResponse:
-    """A personal sign-in link from /pingwin movie page: signs one member in, no Discord screen."""
+    """A personal sign-in link from /pingwin movie page: signs one member in, no Discord screen.
+
+    Opening the link only shows a button; pressing it (a POST) uses the code. Discord, chat apps and
+    link scanners open links to make previews, and used to spend the single-use code first."""
     from .. import movieaccess
 
     bot = request.app[BOT]
-    found = movieaccess.take_login_code(request.query.get("code"))
+    expired = "That sign-in link was already used or has expired. Run /pingwin movie page again."
+    if request.method == "GET":
+        code = request.query.get("code", "")[:64]
+        peek = movieaccess.peek_login_code(code)
+        if peek is None:
+            return signin_page(request, expired, 403)
+        return _page(
+            f"<h1>Hi, {html.escape(str(peek.get('name') or 'there'))}!</h1>"
+            "<p>Press the button to sign in to the movie pages, so you can write reviews and suggest movies.</p>"
+            '<form method="post" action="/movies/login">'
+            f'<input type="hidden" name="code" value="{html.escape(code, quote=True)}">'
+            '<button class="btn primary big" type="submit">Open the movie pages</button></form>'
+            '<p class="hint">This link is just for you and works once.</p>'
+        )
+    origin = request.headers.get("Origin")
+    if origin and _hostname(origin.split("://", 1)[-1]) != _hostname(request.host):
+        return signin_page(request, "That sign-in didn't come from this page.", 403)
+    form = await request.post()
+    found = movieaccess.take_login_code(str(form.get("code", ""))[:64])
     if found is None:
         return signin_page(
             request, "That sign-in link was already used or has expired. Run /pingwin movie page again.", 403
@@ -427,7 +457,7 @@ async def movies_login(request: web.Request) -> web.StreamResponse:
     }
     token = request.app[SESSIONS].create(user)
     log.info("%s signed in to the movie pages with a personal link (%s)", user["name"], level)
-    response = _page('<p>Signed in. Opening the movie pages…</p><meta http-equiv="refresh" content="0;url=/movies">')
+    response = web.HTTPSeeOther("/movies")
     response.set_cookie(
         SESSION_COOKIE,
         token,
@@ -1009,6 +1039,7 @@ async def get_movies(request: web.Request) -> web.Response:
     for e in reversed(lib["history"]):
         m = lib["movies"].get(e["movie_id"], {"title": "?"})
         ratings = sorted(e.get("ratings", {}).items(), key=lambda kv: kv[1].get("at", 0))
+        chain = movies.question_chain(e, names)
         history.append(
             {
                 "id": e["id"],
@@ -1023,6 +1054,9 @@ async def get_movies(request: web.Request) -> web.Response:
                         "who": names.get(k) or r.get("name"),
                         "who_id": links.get(k),
                         "discord": bool(r.get("user_id")),
+                        "asked_by": r.get("asked_by") or None,
+                        "ask_to": chain[k]["to"],
+                        "answered_from": chain[k]["from"],
                     }
                     for k, r in ratings
                 ],
@@ -1061,6 +1095,17 @@ async def get_movies(request: web.Request) -> web.Response:
                 }
             )
         watchlists.append({"series": name, "items": items, "queue": _queue_json(state.get(slug(name), {}), lib)})
+    from .. import imdblists
+
+    noms = {name: state.get(slug(name), {}).get("nominations", []) for name in series}
+    imdb = [
+        {
+            "id": lid,
+            **{k: lst.get(k) for k in ("name", "url", "imported")},
+            **imdblists.compare(lib, lst, noms),
+        }
+        for lid, lst in sorted(lib.get("imdb_lists", {}).items(), key=lambda kv: kv[1].get("name", "").casefold())
+    ]
     pending = [
         {k: r.get(k) for k in ("id", "kind", "series", "data", "by_name", "at")}
         for r in lib["pending"].values()
@@ -1074,6 +1119,7 @@ async def get_movies(request: web.Request) -> web.Response:
             "franchise_series": [s.name for s in all_series if getattr(s, "franchises", False)],
             "history": history,
             "watchlists": watchlists,
+            "imdb_lists": imdb,
             "pending": pending,
             "people": lib.get("people", {}),
             "members": sorted(
@@ -1121,6 +1167,16 @@ async def _who(request: web.Request) -> Any:
     return None
 
 
+async def get_movie_search(request: web.Request) -> web.Response:
+    """Title suggestions for the Suggest a movie box: our library, then OMDb's catalog."""
+    cog = _movie_cog(request.app[BOT])
+    q = request.query.get("q", "")[:80]
+    y = request.query.get("y", "")
+    if cog is None or len(q.strip()) < 2:
+        return web.json_response({"library": [], "omdb": [], "note": ""})
+    return web.json_response(await cog.search(q, int(y) if y.isdigit() and len(y) == 4 else None))
+
+
 async def post_movie_suggest(request: web.Request) -> web.Response:
     """Members: suggest a movie or a history fix (goes to the mods). Admins: applied straight away."""
     bot = request.app[BOT]
@@ -1139,16 +1195,17 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
             raise ApiError("Type a title.")
         year_raw = _str(payload, "year", 4)
         year = int(year_raw) if year_raw.isdigit() else None
+        imdb_id = _str(payload, "imdb_id", 12) or None
         who = await _who(request)
         if who is None:  # this PC's owner
-            m = await cog.details(title, year)
+            m = await cog.details(title, year, imdb_id)
             data = {
                 "title": m["title"] if m else title,
                 "year": (m or {}).get("year") or year,
                 "movie_id": (m or {}).get("id"),
             }
             return web.json_response({"ok": True, "message": await cog.apply("nominate", s.name, data, 0)})
-        return web.json_response({"ok": True, "message": await cog.nominate_text(who, s, title, year)})
+        return web.json_response({"ok": True, "message": await cog.nominate_text(who, s, title, year, imdb_id)})
     if kind == "edit":
         from .. import movies
 
@@ -1302,6 +1359,7 @@ async def post_movie_review(request: web.Request) -> web.Response:
         raise ApiError("That movie night isn't in the history anymore.", 404)
     old = e.get("ratings", {}).get(uid)
     question = old.get("answered", "") if old else movies.open_question(e)
+    asker = old.get("answered_from") if old else movies.open_asker(e, skip=uid)
     answer = _str(payload, "answer", 500)
     movies.add_rating(
         e,
@@ -1311,6 +1369,7 @@ async def post_movie_review(request: web.Request) -> web.Response:
         score=score,
         comment=_str(payload, "comment", 1500),
         answered=question if answer else "",
+        answered_from=asker,
         answer=answer,
         ask=_str(payload, "ask", 300),
     )
@@ -1516,6 +1575,30 @@ async def post_movie_admin(request: web.Request) -> web.Response:
                 f"{st['already']} already on the list.",
             }
         )
+    if action == "imdb_list":
+        from .. import imdblists
+
+        lib = movies.load()
+        if payload.get("op") == "delete":
+            gone = lib.get("imdb_lists", {}).pop(_str(payload, "id", 60), None)
+            movies.save(lib)
+            return web.json_response({"ok": True, "message": f"Removed {gone['name']}." if gone else "Already gone."})
+        text = payload.get("csv")
+        if not isinstance(text, str) or not text.strip():
+            raise ApiError("Pick the CSV file IMDb made (on the list: ⋯ → Export).")
+        try:
+            items = imdblists.parse_csv(text)
+        except (ValueError, csv.Error) as e:
+            raise ApiError(str(e)) from None
+        if not items:
+            raise ApiError("No movies found in that file.")
+        res = imdblists.save_list(lib, _str(payload, "name", 60), _str(payload, "url", 220), items)
+        movies.save(lib)
+        log.info("IMDb list %s imported (%s): %s movies", res["name"], viewer.name, res["items"])
+        msg = f"Saved {res['name']}: {res['items']} movies."
+        if res["filled"]:
+            msg += f" Filled in details for {res['filled']} movies in our library."
+        return web.json_response({"ok": True, "message": msg})
     if action == "people":
         mapping = payload.get("people")
         if not isinstance(mapping, dict) or len(mapping) > 500:
@@ -1791,7 +1874,7 @@ async def post_action(request: web.Request) -> web.Response:
 def create_app(
     bot: Any, key: str, *, remote: Remote | None = None, sessions: Sessions | None = None
 ) -> web.Application:
-    app = web.Application(middlewares=[guard], client_max_size=256 * 1024)
+    app = web.Application(middlewares=[guard], client_max_size=2 * 1024 * 1024)  # (IMDb list exports)
     app[BOT] = bot
     app[KEY] = key
     port = getattr(getattr(getattr(bot, "config", None), "dashboard", None), "port", 8787)
@@ -1801,8 +1884,10 @@ def create_app(
     app.router.add_get("/", index)
     app.router.add_get("/movies", movies_page)
     app.router.add_get("/movies/login", movies_login)
+    app.router.add_post("/movies/login", movies_login)
     app.router.add_get("/api/movies", get_movies)
     app.router.add_post("/api/movies/suggest", post_movie_suggest)
+    app.router.add_get("/api/movies/search", get_movie_search)
     app.router.add_post("/api/movies/review", post_movie_review)
     app.router.add_post("/api/movies/admin", post_movie_admin)
     app.router.add_get("/login", login)
