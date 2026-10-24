@@ -444,14 +444,30 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         movies.save(lib)
         return m
 
+    def search_budget(self) -> dict[str, int]:
+        """Today's OMDb requests: used, the daily cap, and how many are left for people searching."""
+        daily = int(getattr(self.cfg, "omdb_daily", 800) or 800)
+        used = int(self._budget(movies.load()).get("used", 0))
+        return {"used": used, "daily": daily, "left": max(0, daily - used)}
+
+    def _search_warning(self) -> str:
+        b = self.search_budget()
+        if b["left"] <= max(10, b["daily"] // 10):
+            return (
+                f"Heads up: only {b['left']} of today's {b['daily']} movie searches are left. "
+                "Suggestions from IMDb stop when they run out and come back tomorrow."
+            )
+        return ""
+
     async def search(self, query: str, year: int | None = None) -> dict[str, Any]:
         """Suggestions while someone types a title: our own library first, then OMDb's catalog
         (IMDb's movies), cached for a day so typing the same thing again costs nothing."""
         query = re.sub(r"\s+", " ", query).strip()[:80]
         lib = movies.load()
-        out: dict[str, Any] = {"library": movies.search_library(lib, query), "omdb": [], "note": ""}
+        out: dict[str, Any] = {"library": movies.search_library(lib, query), "omdb": [], "note": "", "warn": ""}
         if len(query) < 3:
             return out
+        out["warn"] = self._search_warning() if self.bot.features.secret(movies.SECRET) else ""
         if not self.bot.features.secret(movies.SECRET):
             out["note"] = "Add an OMDb API key (Features → Movie night) for suggestions from IMDb's catalog."
             return out
@@ -478,6 +494,50 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         out["omdb"] = found
         return out
 
+    async def find_matches(self, query: str, year: int | None = None) -> list[dict[str, Any]]:
+        """IMDb entries for an admin matching a movie by hand (always asks OMDb; cached like search)."""
+        query = re.sub(r"\s+", " ", query).strip()[:80]
+        if not query or not self.bot.features.secret(movies.SECRET):
+            return []
+        ck = (query.casefold(), year)
+        hit = self._search_cache.get(ck)
+        if hit and time.time() - hit[0] < 86400:
+            return hit[1]
+        found = await self._ask_omdb(query, year, search=True)
+        self._search_cache[ck] = (time.time(), found)
+        return found
+
+    async def match_imdb(self, kind: str, item_id: str, imdb_id: str, series_key: str = "") -> str:
+        """Point a library movie (or a watchlist movie) at the IMDb entry an admin picked."""
+        if not movies.IMDB_ID.fullmatch(imdb_id or ""):
+            raise ValueError("That isn't an IMDb link or ID (they look like tt0091064).")
+        if not self.bot.features.secret(movies.SECRET):
+            raise ValueError("Add an OMDb API key first.")
+        info = await self._ask_omdb("", None, imdb_id)
+        if not info or info.get("imdb_id") != imdb_id:
+            raise ValueError("OMDb doesn't know that IMDb ID.")
+        lib = movies.load()
+        if kind == "movie":
+            m = lib["movies"].get(item_id)
+            if m is None:
+                raise ValueError("That movie isn't in the library anymore.")
+            movies.set_match(m, info)
+            movies.save(lib)
+            return f"{m['title']} now points at {info['title']} ({info.get('year') or '?'}) on IMDb."
+        state = store.load(STATE)
+        n = next((x for x in state.get(series_key, {}).get("nominations", []) if x["id"] == item_id), None)
+        if n is None:
+            raise ValueError("That watchlist movie isn't there anymore.")
+        m = next((x for x in lib["movies"].values() if x.get("imdb_id") == imdb_id), None)
+        m = m or movies.upsert_movie(lib, {**info, "title": n["title"], "year": n.get("year") or info.get("year")})
+        movies.set_match(m, info)
+        movies.save(lib)
+        n["movie_id"] = m["id"]
+        n["year"] = n.get("year") or m.get("year")
+        n.pop("omdb_tries", None)
+        store.save(STATE, state)
+        return f"{n['title']} now points at {info['title']} ({info.get('year') or '?'}) on IMDb."
+
     async def fill_details(self, max_requests: int) -> dict[str, Any]:
         """Look up movies that are missing details, a few at a time, within today's budget."""
         if not self.bot.features.secret(movies.SECRET):
@@ -487,6 +547,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             if paused:
                 return {"looked": 0, "found": 0, "message": paused}
             daily = int(getattr(self.cfg, "omdb_daily", 800) or 800)
+            reserve = max(20, daily // 8)  # left for people searching titles on the movie pages and in Discord
             lib = movies.load()
             used0 = self._budget(lib).get("used", 0)
             lib.get("omdb", {}).pop("status", None)
@@ -495,7 +556,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             looked = found = 0
             for item in todo:
                 used = self._budget(movies.load()).get("used", 0)
-                if used - used0 + 3 > max_requests or used + 3 > daily:
+                if used - used0 + 4 > max_requests or used + 4 > daily - reserve:
                     break
                 title, year = item[-2], item[-1]
                 known = movies.load()["movies"].get(item[1], {}) if item[0] == "movie" else {}
@@ -1059,6 +1120,11 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         except TimeoutError:
             return []
         seen, choices = set(), []
+        if found.get("warn"):  # picking this just keeps what they typed
+            b = self.search_budget()
+            choices.append(
+                app_commands.Choice(name=f"⚠️ Only {b['left']} movie searches left today", value=current[:100])
+            )
         for h in [*found["library"], *found["omdb"]]:
             key = h.get("imdb_id") or movies.movie_id(h["title"], h.get("year"))
             if key in seen:

@@ -83,11 +83,17 @@ def test_fill_details_respects_budgets(monkeypatch):
     async def go():
         seed()
         cog = make_cog(daily=800)
-        assert (await cog.fill_details(6))["looked"] == 2  # this run's share
+        assert (await cog.fill_details(8))["looked"] == 2  # this run's share (up to 4 requests a movie)
         lib = movies.load()
-        lib["omdb"]["used"] = 798
+        lib["omdb"]["used"] = 700
         movies.save(lib)
-        assert (await cog.fill_details(100))["looked"] == 0  # today's budget
+        assert (await cog.fill_details(100))["looked"] == 0  # the last eighth is kept for title searches
+        assert cog.search_budget() == {"used": 700, "daily": 800, "left": 100}
+        assert cog._search_warning() == ""
+        lib = movies.load()
+        lib["omdb"]["used"] = 730
+        movies.save(lib)
+        assert "only 70 of today's 800" in cog._search_warning()
 
     asyncio.run(go())
 
@@ -151,3 +157,76 @@ def test_picked_suggestion_carries_the_imdb_id():
     assert m["id"] == "tt0097368" and m["title"] == "The Fly II" and m["year"] == "1989"
     assert movienight.PICKED.fullmatch("|Some Indie|") is not None
     assert movienight.PICKED.fullmatch("just typed a title") is None
+
+
+def test_hand_matching_fixes_movies_and_watchlist_items(monkeypatch):
+    info = {"title": "Arrival", "year": 2016, "imdb_id": "tt2543164", "poster": "https://x/a.jpg", "genre": "Drama"}
+
+    async def by_id(http, key, title, year=None, spent=None, imdb_id=None):
+        spent[0] += 1
+        return dict(info) if imdb_id == "tt2543164" else None
+
+    monkeypatch.setattr(movies, "omdb_lookup", by_id)
+
+    async def go():
+        seed()
+        lib = movies.load()
+        fly = movies.find_movie(lib, "The Fly", 1986)
+        fly.update(imdb_id="tt0000001", genre="Wrong", omdb_tries=0)
+        cal = movies.find_movie(lib, "Dr. Caligari", 1989)
+        cal["omdb_tries"] = 3
+        movies.save(lib)
+        state = store.load(movienight.STATE)
+        state["mmm"]["nominations"][0]["omdb_tries"] = 3
+        store.save(movienight.STATE, state)
+        um = movies.unmatched(movies.load(), store.load(movienight.STATE))
+        assert [(x["kind"], x["title"]) for x in um] == [("movie", "Dr. Caligari"), ("nom", "Arrival")]
+        cog = make_cog()
+        with pytest.raises(ValueError):
+            await cog.match_imdb("movie", fly["id"], "not-an-id")
+        msg = await cog.match_imdb("nom", "n1", "tt2543164", "mmm")
+        assert "Arrival" in msg
+        n = store.load(movienight.STATE)["mmm"]["nominations"][0]
+        m = movies.load()["movies"][n["movie_id"]]
+        assert m["imdb_id"] == "tt2543164" and m["poster"] == "https://x/a.jpg" and n["year"] == 2016
+        await cog.match_imdb("movie", fly["id"], "tt2543164")  # a wrong match is replaced
+        fixed = movies.load()["movies"][fly["id"]]
+        assert fixed["imdb_id"] == "tt2543164" and fixed["genre"] == "Drama" and fixed["title"] == "The Fly"
+        lib, watch = movies.load(), store.load(movienight.STATE)
+        assert movies.retry_unmatched(lib, watch) == 1 and "omdb_tries" not in lib["movies"][cal["id"]]
+
+    asyncio.run(go())
+
+
+def test_lookup_falls_back_to_a_year_off(monkeypatch):
+    asked = []
+
+    class Resp:
+        def __init__(self, d):
+            self.d = d
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def json(self, content_type=None):
+            return self.d
+
+    class Http:
+        def get(self, url, params):
+            asked.append({k: v for k, v in params.items() if k != "apikey"})
+            if "i" in params:
+                return Resp({"Response": "True", "Title": "Kill List", "Year": "2011", "imdbID": params["i"]})
+            if "s" in params and "y" not in params:
+                hits = [
+                    {"Title": "Kill List", "Year": "2011", "imdbID": "tt1788391"},
+                    {"Title": "Kill List 2", "Year": "2030"},
+                ]
+                return Resp({"Response": "True", "Search": hits})
+            return Resp({"Response": "False", "Error": "Movie not found!"})
+
+    info = asyncio.run(movies.omdb_lookup(Http(), "k", "Kill List", 2012))
+    assert info["imdb_id"] == "tt1788391" and len(asked) == 4
+    assert movies.imdb_id_in("https://www.imdb.com/title/tt1788391/?ref_=x") == "tt1788391"

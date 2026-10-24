@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.0 (2026-10-24)
+- **Search warnings:** when fewer than a tenth of the day's OMDb requests are left, title suggestions on the
+  movie pages (and in `/pingwin movie nominate`) say so. The background details filler now leaves the last
+  eighth of the day's requests for people searching.
+- **Match movies to IMDb by hand:** the Admin tab lists movies OMDb couldn't find (*Not matched to IMDb*).
+  **Find it** searches IMDb's catalog so you can pick the right one, or paste its IMDb link. A wrong match is
+  fixed from the movie itself (**Wrong movie?**). **Try them all again** retries every unmatched movie.
+- **Better automatic matching:** when OMDb's year is one off ours, Pingwin searches without the year and
+  keeps a match within a year.
+- **IMDb links:** each movie's details show **Open on IMDb**, and watchlist titles link to IMDb.
+- **Review IMDb lists before saving:** uploading an export opens a review of every row (watched, on a
+  watchlist or not yet, the library movie it matches, and what it would fill in). Untick what you don't want,
+  then save.
+
 ## 0.17.0 (2026-10-24)
 - **Personal sign-in links work again.** Discord opens links to make previews, which used up the
   single-use code before the person clicked. Now the link opens a page with an **Open the movie pages**

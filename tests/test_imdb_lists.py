@@ -53,3 +53,14 @@ def test_bad_links_are_dropped_and_names_make_ids():
     lib = movies.load()
     res = imdblists.save_list(lib, "  My   list ", "javascript:alert(1)", imdblists.parse_csv(CSV))
     assert res["id"] == "n-mylist" and lib["imdb_lists"]["n-mylist"]["url"] == ""
+
+
+def test_preview_shows_matches_and_what_gets_filled():
+    lib = movies.load()
+    fly = movies.upsert_movie(lib, {"title": "The Fly", "year": 1986})
+    lib["history"].append(movies.new_entry(fly, "2026-01-05", "MMM"))
+    rows = imdblists.preview(lib, imdblists.parse_csv(CSV), {"MMM": []})
+    assert [r["row"] for r in rows] == [0, 1, 2]
+    assert rows[0]["match"] == {"title": "The Fly", "year": 1986} and "imdb_id" in rows[0]["fills"]
+    assert rows[1]["match"] is None and rows[1]["fills"] == []
+    assert "imdb_lists" not in lib  # nothing saved

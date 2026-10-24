@@ -209,10 +209,21 @@ get the extra details.
 
 With a key, Pingwin **fills in missing details by itself**: every 20 minutes it looks up a few movies (the
 history first, newest first, then the watchlists), staying under *OMDb requests per day* (800 by default;
-one movie takes 1 to 3 requests). If OMDb says the daily limit is reached it waits until the next day, and
-movies it can't find are tried again a week later (three tries). A result from a different year is treated
-as a miss, so a remake or a namesake never replaces your movie. The movie pages' **Admin** tab shows the
-progress, and **Look up missing details** does a bigger batch right away.
+one movie takes 1 to 4 requests), and it leaves the last eighth of the day's requests for people searching
+titles. If OMDb says the daily limit is reached it waits until the next day, and movies it can't find are
+tried again a week later (three tries). When OMDb's year is one off ours it searches without the year and
+keeps a match within a year; anything further off is treated as a miss, so a remake or a namesake never
+replaces your movie. The movie pages' **Admin** tab shows the progress, and **Look up missing details** does
+a bigger batch right away.
+
+Title suggestions (on the movie pages and in `/pingwin movie nominate`) also use the day's requests. When
+fewer than a tenth are left, the suggestions say so, and they come back the next day once they run out.
+
+**Not matched to IMDb** on the **Admin** tab lists the movies OMDb couldn't find. **Find it** searches IMDb's
+catalog so you can pick the right one, or paste the movie's IMDb link; its poster and details replace what
+was there. If a movie was matched to the wrong one, open it from History and press **Wrong movie?**.
+**Try them all again** looks every unmatched movie up again. Each movie's details have an **Open on IMDb**
+link, and watchlist titles link to IMDb too.
 
 ### Movie pages
 
@@ -284,8 +295,11 @@ person they count as, with each person's total, and lists names that aren't link
 
 IMDb has no public API, so lists come in as the CSV file IMDb makes. On IMDb, open the list and choose
 **⋯ → Export** (or **Your ratings → ⋯ → Export**); when it's ready under **Your exports**, download it. On
-the movie pages' **Admin** tab, under **IMDb lists**, give it a name (and the list's link, if you like) and
-pick the file. Uploading the same list again replaces it. TV series and episodes are skipped.
+the movie pages' **Admin** tab, under **IMDb lists**, give it a name (and the list's link, if you like), pick
+the file and press **Review list…**. Nothing is saved yet: the review shows every row with whether we watched
+it, whether it's on a watchlist, the library movie it matches and the details it would fill in. Untick
+anything you don't want (*Tick shown* and *Untick shown* work on the filtered rows), then **Save**. Uploading
+the same list again replaces it. TV series and episodes are skipped.
 
 The **IMDb lists** tab then shows, for each movie on the list, whether we **watched** it at a movie night
 (the date, event and our score; click for the details), whether it's **on a watchlist**, or **not yet**

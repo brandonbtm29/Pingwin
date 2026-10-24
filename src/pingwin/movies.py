@@ -141,15 +141,101 @@ async def omdb_lookup(
         d = await ask({"i": imdb_id})
         if d.get("Response") == "True":
             return from_omdb(d)
+    if not title.strip():
+        return None
     y = {"y": str(year)} if year else {}
     d = await ask({"t": title, "type": "movie", **y})
     if d.get("Response") == "True":
         return from_omdb(d)
     hits = (await ask({"s": title, "type": "movie", **y})).get("Search") or []
+    if not hits and year:
+        # OMDb's year can be a year off ours (festival vs release), so search without it and keep a close one.
+        near = []
+        for h in (await ask({"s": title, "type": "movie"})).get("Search") or []:
+            m = re.match(r"\d{4}", h.get("Year", "") or "")
+            if m and abs(int(m[0]) - int(year)) <= 1:
+                near.append(h)
+        hits = near
     if not hits:
         return None
     d = await ask({"i": hits[0]["imdbID"]})
     return from_omdb(d) if d.get("Response") == "True" else None
+
+
+def imdb_id_in(text: str) -> str | None:
+    """An IMDb ID from a pasted link or ID ('https://www.imdb.com/title/tt0091064/' -> 'tt0091064')."""
+    m = IMDB_ID.search(text or "")
+    return m[0] if m else None
+
+
+def set_match(m: dict[str, Any], info: dict[str, Any]) -> None:
+    """Point a library movie at the IMDb entry someone picked, replacing details from a wrong match."""
+    for k, v in info.items():
+        if k in ("title", "id") or v in (None, "", "N/A"):
+            continue
+        m[k] = v
+    if not m.get("year") and info.get("year"):
+        m["year"] = info["year"]
+    m.pop("omdb_tries", None)
+    m.pop("omdb_at", None)
+    m["matched_by_hand"] = True
+
+
+def unmatched(lib: dict[str, Any], watch: dict[str, Any]) -> list[dict[str, Any]]:
+    """Movies with no IMDb entry yet that OMDb couldn't find: watched ones first, then watchlist movies."""
+    watched = {e["movie_id"]: e.get("date") for e in lib["history"]}
+    out = []
+    for m in lib["movies"].values():
+        if m.get("imdb_id") or m.get("omdb_tries", 0) == 0:
+            continue
+        out.append(
+            {
+                "kind": "movie",
+                "id": m["id"],
+                "title": m["title"],
+                "year": m.get("year"),
+                "tries": m.get("omdb_tries", 0),
+                "watched": watched.get(m["id"]),
+            }
+        )
+    for key, data in watch.items():
+        if not isinstance(data, dict):
+            continue
+        for n in data.get("nominations", []):
+            if n.get("watched") or (n.get("movie_id") and n["movie_id"] in lib["movies"]) or not n.get("omdb_tries"):
+                continue
+            out.append(
+                {
+                    "kind": "nom",
+                    "id": n["id"],
+                    "series_key": key,
+                    "title": n["title"],
+                    "year": n.get("year"),
+                    "tries": n.get("omdb_tries", 0),
+                    "watched": None,
+                }
+            )
+    out.sort(key=lambda x: (x["watched"] is None, -(int((x["watched"] or "0").replace("-", "") or 0))))
+    return out
+
+
+def retry_unmatched(lib: dict[str, Any], watch: dict[str, Any]) -> int:
+    """Let the background filler look everything that wasn't found up again (with the newer search)."""
+    n = 0
+    for m in lib["movies"].values():
+        if not m.get("imdb_id") and m.get("omdb_tries"):
+            m.pop("omdb_tries", None)
+            m.pop("omdb_at", None)
+            m.pop("looked_up", None)
+            n += 1
+    for data in watch.values():
+        if isinstance(data, dict):
+            for x in data.get("nominations", []):
+                if x.get("omdb_tries") and not x.get("watched"):
+                    x.pop("omdb_tries", None)
+                    x.pop("omdb_at", None)
+                    n += 1
+    return n
 
 
 IMDB_ID = re.compile(r"tt\d{6,10}")

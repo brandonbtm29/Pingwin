@@ -107,7 +107,7 @@ async function load() {
   renderWatchlists();
   renderStats();
   renderImdb();
-  if (admin) renderImdbAdmin();
+  if (admin) { renderImdbAdmin(); renderUnmatched(); }
   renderPending();
 }
 
@@ -227,7 +227,9 @@ function showMovie(h) {
         el("dt", {}, "Watched"), el("dd", {}, fmtDate(h.date)),
         el("dt", {}, "Event"), el("dd", {}, evName(h.series) || "–"),
         el("dt", {}, "Our rating"), el("dd", {}, scoreBadge(h.avg, " / 10")),
-        el("dt", {}, "IMDb"), el("dd", {}, fmt(m.imdb_rating)),
+        el("dt", {}, "IMDb"), el("dd", {}, m.imdb_rating ? fmt(m.imdb_rating) : "–",
+          m.imdb_id ? [" · ", imdbLink(m.imdb_id, "Open on IMDb ↗")] : el("span", { class: "hint" }, " · not matched yet"),
+          admin ? [" · ", el("button", { class: "linkish", onclick: () => { d.close(); openMatcher({ kind: "movie", id: m.id, title: m.title, year: m.year }); } }, m.imdb_id ? "Wrong movie?" : "Find it")] : null),
         m.runtime ? [el("dt", {}, "Runtime"), el("dd", {}, `${m.runtime} min`)] : null,
         m.director ? [el("dt", {}, "Director"), el("dd", {}, m.director)] : null,
         m.writer ? [el("dt", {}, "Writer"), el("dd", {}, m.writer)] : null,
@@ -246,6 +248,54 @@ function showMovie(h) {
       qaBlocks(r)))),
     data.viewer.level === "viewer" ? null : fix);
   d.showModal();
+}
+
+function imdbLink(id, label, cls = "imdb-link") {
+  return el("a", { class: cls, href: `https://www.imdb.com/title/${id}/`, target: "_blank", rel: "noopener", title: "Open on IMDb" }, label);
+}
+
+// ---------- matching a movie to its IMDb entry (admins) ----------
+function openMatcher(item) {
+  const d = $("d-match");
+  const q = el("input", { type: "search", value: item.title, "aria-label": "Search IMDb's catalog", placeholder: "Title, or paste an IMDb link" });
+  const y = el("input", { value: item.year || "", placeholder: "Year", inputmode: "numeric", maxlength: "4", class: "year", "aria-label": "Year" });
+  const list = el("ul", { class: "ac-list static" });
+  const note = el("p", { class: "hint" });
+  const find = async () => {
+    put(list, el("li", { class: "ac-note" }, "Searching…"));
+    try {
+      const res = await api("/api/movies/admin", { action: "imdb_find", q: q.value.trim(), year: y.value.trim() });
+      note.textContent = res.budget ? `${res.budget.left} of today's ${res.budget.daily} OMDb requests left.` : "";
+      put(list, res.results.length ? res.results.map((h) => el("li", { class: "ac-item" },
+        posterArt(h, "ac-poster"),
+        el("span", { class: "ac-text" }, el("strong", {}, h.title), el("span", { class: "hint" }, String(h.year || ""))),
+        imdbLink(h.imdb_id, "IMDb ↗", "ac-imdb"),
+        el("button", { class: "btn small primary", onclick: async (ev) => {
+          ev.target.disabled = true;
+          try { toast((await api("/api/movies/admin", { action: "imdb_match", kind: item.kind, id: item.id, series_key: item.series_key || "", imdb: h.imdb_id })).message); d.close(); await load(); }
+          catch (e) { toast(e.message, true); ev.target.disabled = false; }
+        } }, "Use this"))) : el("li", { class: "ac-note" }, "Nothing found. Try a shorter title, no year, or paste the IMDb link."));
+    } catch (e) { put(list); toast(e.message, true); }
+  };
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter") find(); });
+  y.addEventListener("keydown", (e) => { if (e.key === "Enter") find(); });
+  put(d,
+    el("div", { class: "dialog-head" }, el("h2", {}, `Find ${item.title} on IMDb`), el("button", { class: "btn icon", "aria-label": "Close", onclick: () => d.close() }, "✕")),
+    el("p", { class: "hint" }, "Search IMDb's catalog (through OMDb) and pick the right one, or paste the movie's IMDb link. Its poster and details replace what we had."),
+    el("div", { class: "row-actions" }, q, y, el("button", { class: "btn primary", onclick: find }, "Search")),
+    note, list);
+  d.showModal();
+  find();
+}
+$("d-match").addEventListener("click", (e) => { if (e.target === $("d-match")) $("d-match").close(); });
+function renderUnmatched() {
+  const u = data.unmatched || [];
+  $("u-box").hidden = !u.length || !data.omdb;
+  $("u-title").textContent = `Not matched to IMDb (${u.length})`;
+  put($("u-list"), u.slice(0, 200).map((x) => el("li", {},
+    el("span", {}, el("strong", {}, x.title), x.year ? ` (${x.year})` : "",
+      el("span", { class: "hint" }, x.kind === "nom" ? " · on a watchlist" : x.watched ? ` · watched ${fmtDate(x.watched)}` : " · in the library")),
+    el("button", { class: "btn small", onclick: () => openMatcher(x) }, "Find it"))));
 }
 
 // The funny question chain: who asked them, and who they asked next.
@@ -286,7 +336,7 @@ function renderWatchlists() {
       shown.length ? el("ul", { class: "poster-grid" }, shown.map((i) => el("li", { class: "poster-card" },
         posterArt({ title: i.title, poster: i.poster }),
         el("div", { class: "pc-body" },
-          el("strong", {}, i.title), i.year ? el("span", { class: "hint" }, ` ${i.year}`) : null,
+          i.imdb_id ? imdbLink(i.imdb_id, el("strong", {}, i.title), "pc-title") : el("strong", {}, i.title), i.year ? el("span", { class: "hint" }, ` ${i.year}`) : null,
           el("div", { class: "pc-meta" }, i.list ? el("span", { class: "chip small" }, i.list) : null, i.runtime ? `${i.runtime} min` : null, i.imdb_rating ? `IMDb ${fmt(i.imdb_rating)}` : null),
           i.note ? el("div", { class: "hint" }, i.note) : null,
           el("div", { class: "hint" }, `suggested by ${i.by}`))))) :
@@ -384,6 +434,7 @@ function acRender(res) {
   if (lib.length) rows.push(el("li", { class: "ac-head", role: "presentation" }, "Already in our library"), lib);
   if (omdb.length) rows.push(el("li", { class: "ac-head", role: "presentation" }, "From IMDb's catalog"), omdb);
   if (res.note) rows.push(el("li", { class: "ac-note", role: "presentation" }, res.note));
+  if (res.warn) rows.unshift(el("li", { class: "ac-warn", role: "presentation" }, "⚠️ ", res.warn));
   put($("w-ac"), rows);
   const open = rows.length > 0 && document.activeElement === $("w-title");
   $("w-ac").hidden = !open;
@@ -929,11 +980,79 @@ $("x-go").addEventListener("click", async () => {
   btn.disabled = true;
   $("x-result").textContent = "Reading the list…";
   try {
-    const res = await api("/api/movies/admin", { action: "imdb_list", name: $("x-name").value.trim(), url: $("x-url").value.trim(), csv });
-    $("x-result").textContent = res.message;
-    $("x-file").value = ""; $("x-name").value = ""; $("x-url").value = "";
-    await load();
+    const res = await api("/api/movies/admin", { action: "imdb_list", op: "preview", csv });
+    $("x-result").textContent = "";
+    reviewList(csv, res.rows);
   } catch (e) { $("x-result").textContent = ""; toast(e.message, true); }
+  finally { btn.disabled = false; }
+});
+
+// Review an IMDb export before it's saved: untick anything that shouldn't be kept.
+function reviewList(csv, rows) {
+  const d = $("d-review");
+  const keep = new Set(rows.map((r) => r.row));
+  let show = "all";
+  const status = (r) => (r.watched.length ? "watched" : r.lists.length ? "listed" : "neither");
+  const count = el("span", { class: "hint" });
+  const body = el("tbody");
+  const name = el("input", { value: $("x-name").value.trim(), placeholder: "Name, like Horror log", maxlength: "60", "aria-label": "List name" });
+  const url = el("input", { value: $("x-url").value.trim(), placeholder: "IMDb list link (optional)", maxlength: "220", "aria-label": "IMDb list link" });
+  const draw = () => {
+    const shown = rows.filter((r) => show === "all" || status(r) === show);
+    put(body, shown.map((r) => {
+      const box = el("input", { type: "checkbox", checked: keep.has(r.row), "aria-label": `Keep ${r.title}` });
+      box.addEventListener("change", () => { if (box.checked) keep.add(r.row); else keep.delete(r.row); sync(); });
+      const st = status(r);
+      return el("tr", { class: keep.has(r.row) ? "" : "dropped" },
+        el("td", {}, box),
+        el("td", {}, r.imdb_id ? imdbLink(r.imdb_id, r.title) : r.title, r.year ? el("span", { class: "hint" }, ` (${r.year})`) : null),
+        el("td", {}, st === "watched" ? el("span", { class: "x-tag watched" }, `✅ watched ${fmtDate(r.watched[0].date)}`)
+          : st === "listed" ? el("span", { class: "x-tag listed" }, `📋 ${r.lists.map(evName).join(", ")}`)
+          : el("span", { class: "x-tag neither" }, "Not yet")),
+        el("td", { class: "hint" }, r.match ? `${r.match.title}${r.match.year ? ` (${r.match.year})` : ""}` : "–",
+          r.fills.length ? el("div", {}, `fills in ${r.fills.map((f) => f.replace("imdb_id", "IMDb link").replace("imdb_rating", "IMDb rating")).join(", ")}`) : null));
+    }));
+  };
+  const sync = () => {
+    count.textContent = `${keep.size} of ${rows.length} movies will be kept.`;
+    save.disabled = !keep.size;
+    save.textContent = `Save ${keep.size} movie${keep.size === 1 ? "" : "s"}`;
+    draw();
+  };
+  const filters = el("div", { class: "chips" }, [["all", "All"], ["watched", "Watched"], ["listed", "On a watchlist"], ["neither", "Not yet"]].map(([k, label]) =>
+    el("button", { class: "chip", "aria-pressed": String(k === show), onclick: (ev) => {
+      show = k; ev.currentTarget.parentNode.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c === ev.currentTarget))); draw();
+    } }, label, el("span", { class: "n" }, k === "all" ? rows.length : rows.filter((r) => status(r) === k).length))));
+  const visible = () => rows.filter((r) => show === "all" || status(r) === show);
+  const save = el("button", { class: "btn primary", onclick: async () => {
+    save.disabled = true;
+    try {
+      const skip = rows.filter((r) => !keep.has(r.row)).map((r) => r.row);
+      const res = await api("/api/movies/admin", { action: "imdb_list", csv, skip, name: name.value.trim(), url: url.value.trim() });
+      toast(res.message); $("x-result").textContent = res.message;
+      $("x-file").value = ""; $("x-name").value = ""; $("x-url").value = "";
+      d.close(); await load();
+    } catch (e) { toast(e.message, true); save.disabled = false; }
+  } });
+  put(d,
+    el("div", { class: "dialog-head" }, el("h2", {}, "Review the IMDb list"), el("button", { class: "btn icon", "aria-label": "Close", onclick: () => d.close() }, "✕")),
+    el("p", { class: "hint" }, "Nothing is saved until you press Save. Untick movies you don't want in this list. Movies that match one in our library also fill in what it's missing."),
+    el("div", { class: "row-actions" }, name, url),
+    el("div", { class: "row-actions" }, filters,
+      el("button", { class: "btn small", onclick: () => { visible().forEach((r) => keep.add(r.row)); sync(); } }, "Tick shown"),
+      el("button", { class: "btn small", onclick: () => { visible().forEach((r) => keep.delete(r.row)); sync(); } }, "Untick shown")),
+    el("div", { class: "table-wrap review-table" }, el("table", { class: "movie-table" },
+      el("thead", {}, el("tr", {}, el("th", {}, "Keep"), el("th", {}, "On the IMDb list"), el("th", {}, "For us"), el("th", {}, "Matches in our library"))), body)),
+    el("div", { class: "row-actions" }, save, count));
+  sync();
+  d.showModal();
+}
+$("d-review").addEventListener("click", (e) => { if (e.target === $("d-review")) $("d-review").close(); });
+$("u-retry").addEventListener("click", async () => {
+  const btn = $("u-retry");
+  btn.disabled = true; $("u-result").textContent = "Looking them up again…";
+  try { $("u-result").textContent = (await api("/api/movies/admin", { action: "imdb_retry" })).message; await load(); }
+  catch (e) { $("u-result").textContent = ""; toast(e.message, true); }
   finally { btn.disabled = false; }
 });
 

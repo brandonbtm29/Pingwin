@@ -218,7 +218,14 @@ def test_imdb_lists_and_question_chain_on_the_pages(tmp_path, data):  # noqa: F8
         await client.post(
             "/api/movies/admin", json={"action": "import", "sheet_csv": SHEET, "doc_text": doc}, headers=hdr
         )
-        payload = {"action": "imdb_list", "name": "Horror log", "csv": csv_text}
+        preview = {"action": "imdb_list", "op": "preview", "csv": csv_text}
+        r = await client.post("/api/movies/admin", json=preview, headers=hdr)
+        assert r.status == 200, await r.text()
+        assert [x["title"] for x in (await r.json())["rows"]] == ["The Fly", "Arrival"]
+        assert (await (await client.get("/api/movies", headers=hdr)).json())["imdb_lists"] == []  # not saved yet
+        payload = {"action": "imdb_list", "name": "Horror log", "csv": csv_text, "skip": []}
+        r = await client.post("/api/movies/admin", json={**payload, "skip": [0, 1]}, headers=hdr)
+        assert r.status == 400  # everything left out
         r = await client.post("/api/movies/admin", json=payload, headers=hdr)
         assert r.status == 200, await r.text()
         member = headers(app, "member")

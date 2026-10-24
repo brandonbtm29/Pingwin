@@ -166,3 +166,22 @@ def compare(lib: dict[str, Any], lst: dict[str, Any], watchlists: dict[str, list
         "missing": missing,
         "counts": {"total": len(items), "watched": watched, "listed": listed, "neither": len(items) - watched - listed},
     }
+
+
+def preview(
+    lib: dict[str, Any], items: list[dict[str, Any]], watchlists: dict[str, list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """What each row of an export would be, before anything is saved: the library movie it matches,
+    whether we watched it or it's on a watchlist, and which details it would fill in."""
+    out = compare(lib, {"items": items}, watchlists)["items"]
+    for i, (it, row) in enumerate(zip(items, out, strict=True)):
+        m = match(lib, it)
+        row["row"] = i
+        row["match"] = {"title": m["title"], "year": m.get("year")} if m else None
+        row["fills"] = (
+            [k for k in ("imdb_id", "runtime", "imdb_rating", "genre", "director") if it.get(k) and not m.get(k)]
+            if m
+            else []
+        )
+        row["kind"] = it.get("kind")
+    return out

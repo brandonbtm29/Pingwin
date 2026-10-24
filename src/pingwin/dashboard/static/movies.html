@@ -218,7 +218,7 @@
           <input id="x-name" placeholder="Name, like Horror log" maxlength="60" aria-label="List name">
           <input id="x-url" placeholder="IMDb list link (optional)" maxlength="220" aria-label="IMDb list link">
           <label class="file">IMDb export (.csv)<input type="file" id="x-file" accept=".csv,text/csv"></label>
-          <button class="btn primary" id="x-go">Add list</button>
+          <button class="btn primary" id="x-go">Review list…</button>
         </div>
         <span class="hint" id="x-result"></span>
         <ul class="x-admin" id="x-admin"></ul>
@@ -270,12 +270,22 @@
         <p class="hint" id="o-note"></p>
         <div class="progress" id="o-progress" hidden><div class="bar"><span id="o-bar"></span></div><p class="hint" id="o-status"></p></div>
         <div class="row-actions"><button class="btn" id="o-go">Look up missing details</button><span class="hint" id="o-result"></span></div>
+        <details id="u-box" class="unmatched" hidden>
+          <summary><strong id="u-title">Not matched to IMDb</strong></summary>
+          <p class="hint">OMDb couldn't find these by title and year. <strong>Find it</strong> searches IMDb's catalog so you
+            can pick the right one (or paste its IMDb link). To fix a wrong match, open the movie from History and press
+            <strong>Wrong movie?</strong></p>
+          <div class="row-actions"><button class="btn small" id="u-retry">Try them all again</button><span class="hint" id="u-result"></span></div>
+          <ul class="u-list" id="u-list"></ul>
+        </details>
       </div>
     </section>
   </main>
 
   <dialog id="d-movie" class="movie-dialog"></dialog>
   <dialog id="d-queue" class="movie-dialog"></dialog>
+  <dialog id="d-match" class="movie-dialog"></dialog>
+  <dialog id="d-review" class="movie-dialog wide"></dialog>
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <div class="tip" id="tip" role="tooltip" hidden></div>
   <script src="/static/movies.js"></script>

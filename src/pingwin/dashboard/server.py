@@ -1022,6 +1022,16 @@ def _movie_cog(bot: Any):
     return bot.get_cog("MovieNight") if hasattr(bot, "get_cog") else None
 
 
+def _series_names(bot: Any) -> list[str]:
+    cog = _movie_cog(bot)
+    if cog is not None and hasattr(cog, "all_series"):
+        return [s.name for s in cog.all_series]
+    from ..cogs.movienight import GENERAL
+
+    mine = [s.name for s in bot.config.features.movienight.series if s.name] if hasattr(bot, "config") else []
+    return [*mine, GENERAL.name]
+
+
 async def get_movies(request: web.Request) -> web.Response:
     from .. import movies
     from ..cogs.movienight import STATE as WATCH
@@ -1092,6 +1102,8 @@ async def get_movies(request: web.Request) -> web.Response:
                     "runtime": m.get("runtime"),
                     "imdb_rating": m.get("imdb_rating"),
                     "poster": m.get("poster"),
+                    "imdb_id": m.get("imdb_id"),
+                    "movie_id": n.get("movie_id"),
                 }
             )
         watchlists.append({"series": name, "items": items, "queue": _queue_json(state.get(slug(name), {}), lib)})
@@ -1120,6 +1132,8 @@ async def get_movies(request: web.Request) -> web.Response:
             "history": history,
             "watchlists": watchlists,
             "imdb_lists": imdb,
+            "unmatched": movies.unmatched(lib, state) if viewer.is_admin else [],
+            "search_budget": cog.search_budget() if cog is not None and hasattr(cog, "search_budget") else None,
             "pending": pending,
             "people": lib.get("people", {}),
             "members": sorted(
@@ -1501,6 +1515,42 @@ async def post_movie_admin(request: web.Request) -> web.Response:
             raise ApiError("Add an OMDb API key under Features → Movie night first.")
         res = await cog.fill_details(int(payload.get("requests", 120)))
         return web.json_response({"ok": True, "message": res["message"]})
+    if action in ("imdb_find", "imdb_match", "imdb_retry"):
+        if cog is None or not os.environ.get(movies.SECRET):
+            raise ApiError("Add an OMDb API key under Features → Movie night first.")
+        from ..cogs.movienight import STATE as WATCH
+
+        if action == "imdb_retry":
+            lib, watch = movies.load(), store.load(WATCH)
+            n = movies.retry_unmatched(lib, watch)
+            movies.save(lib)
+            store.save(WATCH, watch)
+            res = await cog.fill_details(min(200, 4 * n)) if n else {"found": 0}
+            msg = f"Looked {n} movies up again: found {res['found']}." if n else "Nothing to retry."
+            return web.json_response({"ok": True, "message": msg})
+        try:
+            if action == "imdb_find":
+                q = _str(payload, "q", 80)
+                pasted = movies.imdb_id_in(q)
+                if pasted:  # a pasted IMDb link: just that movie
+                    info = await cog._ask_omdb("", None, pasted)
+                    hits = [{k: info.get(k) for k in ("title", "year", "imdb_id", "poster")}] if info else []
+                else:
+                    y = _str(payload, "year", 4)
+                    hits = await cog.find_matches(q, int(y) if y.isdigit() else None)
+                return web.json_response({"ok": True, "results": hits, "budget": cog.search_budget()})
+            msg = await cog.match_imdb(
+                _str(payload, "kind", 10),
+                _str(payload, "id", 80),
+                movies.imdb_id_in(_str(payload, "imdb", 200)) or "",
+                _str(payload, "series_key", 60),
+            )
+        except movies.OmdbLimit:
+            raise ApiError("OMDb's daily limit is used up. Try again tomorrow.", 429) from None
+        except (ValueError, aiohttp.ClientError, TimeoutError) as e:
+            raise ApiError(str(e) or "OMDb didn't answer. Try again.") from None
+        log.info("IMDb match set by hand (%s): %s", viewer.name, msg)
+        return web.json_response({"ok": True, "message": msg})
     if action in ("delete_entry", "delete_rating"):
         lib = movies.load()
         e = next((x for x in lib["history"] if x["id"] == payload.get("hid")), None)
@@ -1592,6 +1642,19 @@ async def post_movie_admin(request: web.Request) -> web.Response:
             raise ApiError(str(e)) from None
         if not items:
             raise ApiError("No movies found in that file.")
+        if payload.get("op") == "preview":  # nothing saved yet: the admin reviews the rows first
+            from ..cogs.movienight import STATE as WATCH
+            from ..features import slug
+
+            state = store.load(WATCH)
+            noms = {name: state.get(slug(name), {}).get("nominations", []) for name in _series_names(bot)}
+            return web.json_response({"ok": True, "rows": imdblists.preview(lib, items, noms)})
+        skip = payload.get("skip") or []
+        if isinstance(skip, list):
+            drop = {int(i) for i in skip if isinstance(i, int) or str(i).isdigit()}
+            items = [it for i, it in enumerate(items) if i not in drop]
+        if not items:
+            raise ApiError("Every movie was left out, so there's nothing to save.")
         res = imdblists.save_list(lib, _str(payload, "name", 60), _str(payload, "url", 220), items)
         movies.save(lib)
         log.info("IMDb list %s imported (%s): %s movies", res["name"], viewer.name, res["items"])
