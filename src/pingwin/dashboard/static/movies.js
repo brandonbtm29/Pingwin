@@ -107,7 +107,7 @@ async function load() {
   renderWatchlists();
   renderStats();
   renderImdb();
-  if (admin) { renderImdbAdmin(); renderUnmatched(); }
+  if (admin) { renderImdbAdmin(); renderUnmatched(); renderBackups(); showAdminTab(store.get("pingwin-movies-admin-tab", "people")); }
   renderPending();
 }
 
@@ -291,7 +291,9 @@ $("d-match").addEventListener("click", (e) => { if (e.target === $("d-match")) $
 function renderUnmatched() {
   const u = data.unmatched || [];
   $("u-box").hidden = !u.length || !data.omdb;
+  $("u-none").hidden = !!u.length || !data.omdb;
   $("u-title").textContent = `Not matched to IMDb (${u.length})`;
+  $("a-n-details").textContent = u.length ? String(u.length) : "";
   put($("u-list"), u.slice(0, 200).map((x) => el("li", {},
     el("span", {}, el("strong", {}, x.title), x.year ? ` (${x.year})` : "",
       el("span", { class: "hint" }, x.kind === "nom" ? " · on a watchlist" : x.watched ? ` · watched ${fmtDate(x.watched)}` : " · in the library")),
@@ -486,7 +488,9 @@ $("w-add").addEventListener("click", async () => {
 // swaps them in one place; every bar has a visible value label and a hover/focus tooltip.
 function bar(pct, cls, tip) {
   const b = el("span", { class: `b ${cls}`, tabindex: "0", "data-tip": tip });
-  b.style.setProperty("--w", `${Math.max(0, Math.min(100, pct))}%`);
+  const p = Math.max(0, Math.min(100, pct));
+  b.style.setProperty("--w", `${p}%`);
+  b.style.setProperty("--r", String(p / 100));  // share of the room left after the value label
   return b;
 }
 function hbars(id, rows, { max, color, label, value, tip, empty = "Not enough ratings yet." }) {
@@ -534,7 +538,7 @@ function renderStats() {
     return el("div", { class: "col" }, el("span", { class: "cv" }, total), el("div", { class: "track" }, col), el("span", { class: "cl" }, y));
   }) : el("p", { class: "hint" }, "No dated movie nights yet."));
 
-  const movieLink = (x) => el("button", { class: "linkish", onclick: () => showMovie(x) }, movieLabel(x.movie));
+  const movieLink = (x) => el("button", { class: "linkish", title: movieLabel(x.movie), onclick: () => showMovie(x) }, movieLabel(x.movie));
   const avgTip = (x) => `${movieLabel(x.movie)}: ${fmt(x.avg)} from ${x.ratings.length} ratings` + (x.movie.imdb_rating ? ` · IMDb ${fmt(x.movie.imdb_rating)}` : "");
   hbars("s-top", [...rated].sort((a, b) => b.avg - a.avg).slice(0, 10), { max: 10, color: "c1", label: movieLink, value: (x) => x.avg, tip: avgTip });
   hbars("s-bottom", [...rated].sort((a, b) => a.avg - b.avg).slice(0, 10), { max: 10, color: "c2", label: movieLink, value: (x) => x.avg, tip: avgTip });
@@ -544,9 +548,9 @@ function renderStats() {
     .sort((a, b) => Math.abs(b.d) - Math.abs(a.d)).slice(0, 12).sort((a, b) => b.d - a.d);
   const gMax = Math.max(1, ...gaps.map((g) => Math.abs(g.d)));
   put($("s-gap"), gaps.length ? gaps.map(({ x, d }) => {
-    const b = bar((50 * Math.abs(d)) / gMax, d >= 0 ? "pos" : "neg", `${movieLabel(x.movie)}: us ${fmt(x.avg)} vs IMDb ${fmt(x.movie.imdb_rating)} (${signed(d)})`);
+    const b = bar((100 * Math.abs(d)) / gMax, d >= 0 ? "pos" : "neg", `${movieLabel(x.movie)}: us ${fmt(x.avg)} vs IMDb ${fmt(x.movie.imdb_rating)} (${signed(d)})`);
     const track = el("div", { class: `dt ${d >= 0 ? "up" : "down"}` }, b, el("span", { class: "hv" }, signed(d)));
-    track.style.setProperty("--w", `${(50 * Math.abs(d)) / gMax}%`);
+    track.style.setProperty("--r", String(Math.abs(d) / gMax));
     return el("div", { class: "drow" }, el("div", { class: "hl" }, movieLink(x)), track);
   }) : el("p", { class: "hint" }, "Needs movies with both our ratings and an IMDb rating."));
 
@@ -564,7 +568,7 @@ function renderStats() {
   const raters = {};
   for (const r of scored) { const k = r.who_id || r.who; raters[k] = raters[k] || { name: r.who, n: 0, sum: 0 }; raters[k].n++; raters[k].sum += r.score; }
   hbars("s-raters", Object.values(raters).sort((a, b) => b.n - a.n).slice(0, 10), { color: "c3",
-    label: (p) => el("span", { class: "who" }, avatar(p.name), p.name, " ", scoreBadge(p.sum / p.n)), value: (p) => p.n, tip: (p) => `${p.name}: ${p.n} reviews, average ${fmt(p.sum / p.n)}` });
+    label: (p) => el("span", { class: "who", title: p.name }, avatar(p.name), el("span", { class: "nm" }, p.name), scoreBadge(p.sum / p.n)), value: (p) => p.n, tip: (p) => `${p.name}: ${p.n} reviews, average ${fmt(p.sum / p.n)}` });
 
   const genres = {};
   for (const x of h) for (const g of (x.movie.genre || "").split(",").map((t) => t.trim()).filter(Boolean)) genres[g] = (genres[g] || 0) + 1;
@@ -692,7 +696,13 @@ for (const id of ["r-search", "r-person", "r-series", "r-score", "r-sort"]) $(id
 
 // ---------- write a review ----------
 const me = () => data.viewer && data.viewer.user_id;
-function reviewer() { return $("rv-who-wrap").hidden ? me() : $("rv-who").value; }
+const GUEST = "__guest";
+const guestName = () => $("rv-guest").value.replace(/\s+/g, " ").trim();
+function reviewer() {
+  if ($("rv-who-wrap").hidden) return me();
+  if ($("rv-who").value === GUEST) return guestName() ? `name:${guestName().toLowerCase()}` : "";
+  return $("rv-who").value;
+}
 function fillReviewForm() {
   const admin = data.viewer.level === "admin";
   const keepMovie = $("rv-movie").value;
@@ -702,8 +712,11 @@ function fillReviewForm() {
   $("rv-who-wrap").hidden = !admin;
   if (admin) {
     const keep = $("rv-who").value || store.get("pingwin-review-as", "") || me() || "";
-    put($("rv-who"), el("option", { value: "" }, "Pick a person…"), data.members.map((m) => el("option", { value: m.id }, memberLabel(m) + (m.id === me() ? " (you)" : ""))));
-    $("rv-who").value = data.members.some((m) => m.id === keep) ? keep : "";
+    put($("rv-who"), el("option", { value: "" }, "Pick a person…"),
+      el("option", { value: GUEST }, "➕ A guest without Discord…"),
+      el("optgroup", { label: "Members" }, data.members.map((m) => el("option", { value: m.id }, memberLabel(m) + (m.id === me() ? " (you)" : "")))));
+    $("rv-who").value = keep === GUEST || data.members.some((m) => m.id === keep) ? keep : "";
+    $("rv-guest-wrap").hidden = $("rv-who").value !== GUEST;
   }
   $("rv-as-note").textContent = !admin && data.viewer.name ? ` as ${data.viewer.name}` : "";
   syncReview();
@@ -738,14 +751,21 @@ function openReview(hid) {
 }
 $("rv-score").addEventListener("input", () => put($("rv-score-badge"), scoreBadge(Number($("rv-score").value), " / 10")));
 $("rv-movie").addEventListener("change", syncReview);
-$("rv-who").addEventListener("change", () => { store.set("pingwin-review-as", $("rv-who").value); syncReview(); });
+$("rv-who").addEventListener("change", () => {
+  store.set("pingwin-review-as", $("rv-who").value);
+  $("rv-guest-wrap").hidden = $("rv-who").value !== GUEST;
+  if (!$("rv-guest-wrap").hidden) $("rv-guest").focus();
+  syncReview();
+});
+$("rv-guest").addEventListener("input", syncReview);
 $("rv-go").addEventListener("click", async () => {
   const who = reviewer();
-  if (!who) return toast("Pick who the review is from.", true);
+  const isGuest = !$("rv-who-wrap").hidden && $("rv-who").value === GUEST;
+  if (!who) return toast(isGuest ? "Type the guest's name." : "Pick who the review is from.", true);
   const btn = $("rv-go");
   btn.disabled = true;
   try {
-    const res = await api("/api/movies/review", { hid: $("rv-movie").value, as_user: who, score: $("rv-score").value,
+    const res = await api("/api/movies/review", { hid: $("rv-movie").value, ...(isGuest ? { guest: guestName() } : { as_user: who }), score: $("rv-score").value,
       comment: $("rv-comment").value, answer: $("rv-q-wrap").hidden ? "" : $("rv-answer").value, ask: $("rv-ask").value });
     $("rv-result").textContent = res.message;
     await load();
@@ -777,10 +797,71 @@ function likelyMembers(names) {
     return words.some((w) => mine.some((x) => x.startsWith(w) || w.startsWith(x) && x.length >= 4));
   });
 }
+// Combining: tick several names, then pick who they all are.
+const pPicked = new Set();
+let pRows = [];
+function syncPicked() {
+  for (const k of [...pPicked]) if (!pRows.some((r) => r.key === k)) pPicked.delete(k);
+  $("p-bar").hidden = !pPicked.size;
+  $("p-picked").textContent = `${pPicked.size} name${pPicked.size === 1 ? "" : "s"} picked`;
+  document.querySelectorAll("#p-rows tr.p-row").forEach((tr) => tr.classList.toggle("picked", pPicked.has(tr.dataset.key)));
+}
+$("p-clear").addEventListener("click", () => { pPicked.clear(); document.querySelectorAll("#p-rows .pick input").forEach((b) => { b.checked = false; }); syncPicked(); });
+$("p-combine").addEventListener("click", () => {
+  const rows = pRows.filter((r) => pPicked.has(r.key));
+  if (rows.length < 2) return toast("Tick at least two names to combine.", true);
+  const d = $("d-combine");
+  const owned = rows.filter((r) => /^\d+$/.test(r.key)).map((r) => r.key);
+  const linked = rows.map((r) => (data.people[r.key] || "")).filter((v) => v.startsWith("@")).map((v) => v.slice(1));
+  const suggest = owned[0] || linked[0] || "";
+  const typed = rows.map((r) => data.people[r.key]).find((v) => v && !v.startsWith("@")) || "";
+  const sel = el("select", { "aria-label": "Discord member" }, el("option", { value: "" }, "— no Discord account —"),
+    data.members.map((m) => el("option", { value: m.id, selected: m.id === suggest }, memberLabel(m))));
+  const name = el("input", { maxlength: "40", list: "p-names", value: suggest ? "" : typed || [...rows[0].names][0], placeholder: "Their name", "aria-label": "Name" });
+  const sync = () => { name.disabled = !!sel.value; nameWrap.classList.toggle("muted", !!sel.value); };
+  const nameWrap = el("label", {}, "Or, for someone without Discord, a name", name);
+  sel.addEventListener("change", sync);
+  put(d,
+    el("div", { class: "dialog-head" }, el("h2", {}, `Combine ${rows.length} names`), el("button", { class: "btn icon", "aria-label": "Close", onclick: () => d.close() }, "✕")),
+    el("p", { class: "hint" }, "All of these ratings will count as one person:"),
+    el("ul", { class: "combine-list" }, rows.map((r) => el("li", {}, el("strong", {}, [...r.names].join(" · ")), el("span", { class: "hint" }, ` · ${r.n} rating${r.n === 1 ? "" : "s"}`), /^\d+$/.test(r.key) ? el("span", { class: "tag" }, "Discord") : null))),
+    el("label", {}, "Count them as this Discord member", sel),
+    nameWrap,
+    owned.length > 1 ? el("p", { class: "hint warn" }, "More than one Discord account is ticked. They'll all count as the member you pick (like someone's old and new account).") : null,
+    el("div", { class: "row-actions" },
+      el("button", { class: "btn primary", onclick: async () => {
+        const as = sel.value ? `@${sel.value}` : name.value.replace(/\s+/g, " ").trim();
+        if (!as) return toast("Pick a member or type a name.", true);
+        const people = {};
+        for (const r of rows) people[r.key] = /^\d+$/.test(r.key) && as === `@${r.key}` ? "" : as;
+        try {
+          toast((await api("/api/movies/admin", { action: "people", people })).message);
+          pPicked.clear(); d.close(); await load();
+        } catch (e) { toast(e.message, true); }
+      } }, "Combine"),
+      el("button", { class: "btn", onclick: () => d.close() }, "Cancel")));
+  sync();
+  d.showModal();
+});
+$("d-combine").addEventListener("click", (e) => { if (e.target === $("d-combine")) $("d-combine").close(); });
+
+// Admin sub-tabs
+function showAdminTab(name) {
+  document.querySelectorAll("#a-tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.sub === name)));
+  document.querySelectorAll(".a-sub").forEach((s) => { s.hidden = s.dataset.sub !== name; });
+  store.set("pingwin-movies-admin-tab", name);
+}
+document.querySelectorAll("#a-tabs button").forEach((b) => b.addEventListener("click", () => showAdminTab(b.dataset.sub)));
+function renderBackups() {
+  const b = data.backups || [];
+  put($("b-list"), b.length ? b.map((x) => el("li", {}, el("strong", {}, fmtDate(x.day)), el("span", { class: "hint" }, ` · ${x.file} · ${Math.max(1, Math.round(x.bytes / 1024)).toLocaleString()} KB`)))
+    : el("li", { class: "hint" }, "The first copy is made with the next change to the movie pages."));
+}
+
 // Who a rater key counts as right now: a member ("@id"), a typed name, or nobody yet.
 function personOf(key) {
-  if (/^\d+$/.test(key)) return `@${key}`;
   const v = data.people[key] || "";
+  if (/^\d+$/.test(key)) return v.startsWith("@") ? v : `@${key}`;
   return v.startsWith("@") ? v : v ? `name:${v.toLowerCase()}` : "";
 }
 function renderPeopleAdmin() {
@@ -791,6 +872,7 @@ function renderPeopleAdmin() {
     keys.set(r.key, k);
   }
   const rows = [...keys.values()].sort((a, b) => b.n - a.n);
+  pRows = rows;
   const typed = rows.map((r) => data.people[r.key]).filter((v) => v && !v.startsWith("@"));
   put($("p-names"), [...new Set(typed)].sort((a, b) => a.localeCompare(b)).map((n) => el("option", { value: n })));
   // Group the names that count as the same person; the rest wait at the bottom.
@@ -807,7 +889,7 @@ function renderPeopleAdmin() {
   const title = (g) => g.id.startsWith("@") ? (memberName(g.id.slice(1)) || g.rows[0].who || "A former member") : g.rows[0].who || data.people[g.rows[0].key];
   const sorted = [...groups.values()].sort((a, b) => b.n - a.n || title(a).localeCompare(title(b)));
   const head = (label, sub, n, cls) => el("tr", { class: `p-group ${cls || ""}` },
-    el("th", { colspan: "4" }, el("span", { class: "p-written" }, cls === "loose" ? null : avatar(label), el("strong", {}, label), el("span", { class: "hint" }, sub)),
+    el("th", { colspan: "5" }, el("span", { class: "p-written" }, cls === "loose" ? null : avatar(label), el("strong", {}, label), el("span", { class: "hint" }, sub)),
       el("span", { class: "p-total" }, `${n} rating${n === 1 ? "" : "s"}`)));
   $("p-summary").textContent = `${sorted.length} ${sorted.length === 1 ? "person" : "people"} grouped from ${rows.length - loose.length} names` + (loose.length ? ` · ${loose.length} not linked yet` : "");
   put($("p-rows"),
@@ -815,6 +897,8 @@ function renderPeopleAdmin() {
       head(title(g), g.id.startsWith("@") ? `Discord member · ${g.rows.length} name${g.rows.length === 1 ? "" : "s"}` : `${g.rows.length} name${g.rows.length === 1 ? "" : "s"}`, g.n),
       g.rows.map(personRow)]),
     loose.length ? [head("Not linked yet", "pick a member or type a name to group these", loose.reduce((t, r) => t + r.n, 0), "loose"), loose.map(personRow)] : null);
+  $("a-n-people").textContent = loose.length ? String(loose.length) : "";
+  syncPicked();
 }
 function personRow(r) {
   const own = /^\d+$/.test(r.key);  // rated in Discord: already that member
@@ -830,7 +914,10 @@ function personRow(r) {
   const name = el("input", { class: "p-as", "data-key": r.key, list: "p-names", maxlength: "40", value: cur.startsWith("@") ? "" : cur,
     placeholder: [...r.names][0], disabled: own || !!linked, "aria-label": `Name for ${[...r.names][0]}` });
   sel.addEventListener("change", () => { name.disabled = !!sel.value; if (sel.value) name.value = ""; });
-  return el("tr", { class: "p-row" },
+  const pick = el("input", { type: "checkbox", checked: pPicked.has(r.key), "aria-label": `Pick ${[...r.names][0]} to combine` });
+  pick.addEventListener("change", () => { if (pick.checked) pPicked.add(r.key); else pPicked.delete(r.key); syncPicked(); });
+  return el("tr", { class: "p-row" + (pPicked.has(r.key) ? " picked" : ""), "data-key": r.key },
+    el("td", { class: "pick" }, pick),
     el("td", {}, el("span", { class: "p-written" }, [...r.names].join(" · "), own ? el("span", { class: "tag" }, "Discord") : null)),
     el("td", { class: "num" }, r.n),
     el("td", {}, sel, own ? el("div", { class: "hint" }, "Rated in Discord") : null),

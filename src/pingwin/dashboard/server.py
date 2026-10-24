@@ -19,6 +19,7 @@ import asyncio
 import csv
 import hmac
 import html
+import json
 import logging
 import math
 import os
@@ -1133,6 +1134,7 @@ async def get_movies(request: web.Request) -> web.Response:
             "watchlists": watchlists,
             "imdb_lists": imdb,
             "unmatched": movies.unmatched(lib, state) if viewer.is_admin else [],
+            "backups": store.backups(movies.STATE) if viewer.is_admin else [],
             "search_budget": cog.search_budget() if cog is not None and hasattr(cog, "search_budget") else None,
             "pending": pending,
             "people": lib.get("people", {}),
@@ -1179,6 +1181,29 @@ async def _who(request: web.Request) -> Any:
         if member is not None:
             return member
     return None
+
+
+async def get_movie_export(request: web.Request) -> web.Response:
+    """Admins: download the reviews as a spreadsheet, or the whole movie library (everything Pingwin keeps)."""
+    from .. import movies
+
+    bot = request.app[BOT]
+    lib = movies.load()
+    day = time.strftime("%Y-%m-%d")
+    if request.query.get("what") == "library":
+        body = json.dumps(lib, indent=2, ensure_ascii=False, default=str)
+        name, ctype = f"pingwin-movie-library-{day}.json", "application/json"
+    else:
+        guild = _guild(bot) if hasattr(bot, "guilds") else None
+        members = {str(m.id): m.display_name for m in guild.members if not m.bot} if guild is not None else {}
+        body = "\ufeff" + movies.reviews_csv(lib, movies.rater_names(lib, members))  # BOM: Excel reads UTF-8
+        name, ctype = f"pingwin-movie-reviews-{day}.csv", "text/csv"
+    return web.Response(
+        text=body,
+        content_type=ctype,
+        charset="utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"},
+    )
 
 
 async def get_movie_search(request: web.Request) -> web.Response:
@@ -1343,7 +1368,8 @@ def movies_secret() -> str:
 
 async def post_movie_review(request: web.Request) -> web.Response:
     """Add or change a review from the movie pages. Members review as themselves; admins can also
-    enter one for a member (for someone who told them their score)."""
+    enter one for a member (for someone who told them their score), or for a guest without Discord
+    (saved under their name, like imported ratings, so People can group it)."""
     from .. import movies
 
     bot = request.app[BOT]
@@ -1352,18 +1378,27 @@ async def post_movie_review(request: web.Request) -> web.Response:
     guild = _guild(bot)
     uid = str(viewer.user_id) if viewer.user_id else ""
     as_user = str(payload.get("as_user") or "").strip()
-    if as_user and as_user != uid:
+    guest = re.sub(r"\s+", " ", str(payload.get("guest") or "")).strip()[:40]
+    if guest and not viewer.is_admin:
+        raise ApiError("Only mods can enter a review for someone else.", 403)
+    if guest and (len(guest) < 2 or guest.startswith("@")):
+        raise ApiError("Type the guest's name.")
+    if as_user and as_user != uid and not guest:
         if not viewer.is_admin:
             raise ApiError("You can only review as yourself.", 403)
         if not as_user.isdigit():
             raise ApiError("Pick who the review is from.")
         uid = as_user
-    if not uid:
-        raise ApiError("Pick who the review is from (or sign in with Discord to review as yourself).")
-    member = guild.get_member(int(uid)) if guild is not None else None
-    name = member.display_name if member else (viewer.name if uid == str(viewer.user_id) else "")
-    if not name:
-        raise ApiError("That person isn't in the server.", 404)
+    if guest:
+        key, user_id, name = f"name:{guest.casefold()}", None, guest
+    else:
+        if not uid:
+            raise ApiError("Pick who the review is from (or sign in with Discord to review as yourself).")
+        member = guild.get_member(int(uid)) if guild is not None else None
+        name = member.display_name if member else (viewer.name if uid == str(viewer.user_id) else "")
+        if not name:
+            raise ApiError("That person isn't in the server.", 404)
+        key, user_id = uid, uid
     score = movies.parse_score(str(payload.get("score", "")))
     if score is None:
         raise ApiError("The score needs to be a number from 0 to 10.")
@@ -1371,15 +1406,15 @@ async def post_movie_review(request: web.Request) -> web.Response:
     e = next((x for x in lib["history"] if x["id"] == payload.get("hid")), None)
     if e is None:
         raise ApiError("That movie night isn't in the history anymore.", 404)
-    old = e.get("ratings", {}).get(uid)
+    old = e.get("ratings", {}).get(key)
     question = old.get("answered", "") if old else movies.open_question(e)
-    asker = old.get("answered_from") if old else movies.open_asker(e, skip=uid)
+    asker = old.get("answered_from") if old else movies.open_asker(e, skip=key)
     answer = _str(payload, "answer", 500)
     movies.add_rating(
         e,
-        uid,
+        key,
         name=name,
-        user_id=uid,
+        user_id=user_id,
         score=score,
         comment=_str(payload, "comment", 1500),
         answered=question if answer else "",
@@ -1388,7 +1423,7 @@ async def post_movie_review(request: web.Request) -> web.Response:
         ask=_str(payload, "ask", 300),
     )
     if old:
-        e["ratings"][uid]["at"] = old.get("at", time.time())  # keep its place in the question chain
+        e["ratings"][key]["at"] = old.get("at", time.time())  # keep its place in the question chain
     movies.save(lib)
     log.info("Movie review %s on the movie pages (%s for %s)", "changed" if old else "added", viewer.name, name)
     cog = _movie_cog(bot)
@@ -1951,6 +1986,7 @@ def create_app(
     app.router.add_get("/api/movies", get_movies)
     app.router.add_post("/api/movies/suggest", post_movie_suggest)
     app.router.add_get("/api/movies/search", get_movie_search)
+    app.router.add_get("/api/movies/export", get_movie_export)
     app.router.add_post("/api/movies/review", post_movie_review)
     app.router.add_post("/api/movies/admin", post_movie_admin)
     app.router.add_get("/login", login)

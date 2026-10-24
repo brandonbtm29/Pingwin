@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.19.0 (2026-10-24)
+- **Guests without Discord:** mods can enter a review for someone who watched along without a Discord
+  account (Write a review → *A guest without Discord…*). It's saved under their name, like imported ratings.
+- **Combine:** on People, tick several names and press **Combine** to count them all as one Discord member or
+  one name (including someone's old and new Discord accounts).
+- **Admin tab** is split into **People**, **Imports**, **Movie details** and **Backups**, with counts of names
+  not linked yet and movies not matched to IMDb. People works as cards on phones.
+- **Backups:** Pingwin keeps a dated copy of the movie library from before each day's first change, for 14 days
+  (`state/backups`). The Backups tab lists them and downloads the reviews as a spreadsheet (.csv) or everything
+  as JSON.
+- **Stats:** long titles and names end in "…" (hover for the whole thing) instead of running past the chart,
+  each person's average stays visible, and the bar values always fit. On phones, labels sit above their bars.
+
 ## 0.18.0 (2026-10-24)
 - **Search warnings:** when fewer than a tenth of the day's OMDb requests are left, title suggestions on the
   movie pages (and in `/pingwin movie nominate`) say so. The background details filler now leaves the last

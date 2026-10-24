@@ -43,7 +43,56 @@ def load() -> dict[str, Any]:
 
 
 def save(lib: dict[str, Any]) -> None:
+    store.snapshot(STATE)  # a dated copy before the day's first change (state/backups, 14 days)
     store.save(STATE, lib)
+
+
+def reviews_csv(lib: dict[str, Any], names: dict[str, str]) -> str:
+    """Every rating as a spreadsheet: a plain record of the reviews that opens anywhere."""
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(
+        [
+            "Date",
+            "Movie",
+            "Year",
+            "Event",
+            "Person",
+            "Written as",
+            "Score",
+            "Comment",
+            "Question they answered",
+            "Asked by",
+            "Their answer",
+            "Question they asked",
+            "Asked to",
+            "IMDb",
+        ]
+    )
+    for e in lib["history"]:
+        m = lib["movies"].get(e["movie_id"], {})
+        ratings = e.get("ratings", {})
+        chain = question_chain(e, names)
+        for k, r in sorted(ratings.items(), key=lambda kv: kv[1].get("at", 0)):
+            w.writerow(
+                [
+                    e.get("date") or "",
+                    m.get("title", "?"),
+                    m.get("year") or "",
+                    e.get("series") or "",
+                    names.get(k) or r.get("name") or "",
+                    r.get("name") or "",
+                    "" if r.get("score") is None else f"{r['score']:g}",
+                    r.get("comment") or "",
+                    r.get("answered") or "",
+                    chain[k]["from"] or "",
+                    r.get("answer") or "",
+                    r.get("ask") or "",
+                    " & ".join(chain[k]["to"]),
+                    f"https://www.imdb.com/title/{m['imdb_id']}/" if m.get("imdb_id") else "",
+                ]
+            )
+    return out.getvalue()
 
 
 def norm(title: str) -> str:

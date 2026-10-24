@@ -247,7 +247,8 @@ Members (with the member role, like **Friend**) see:
   correction to the mods (including a poster image link, if a movie has no picture).
 - **Reviews:** **Write a review** for any movie night: a score, what you thought, an answer to the last
   person's question and one for the next. Reviewing the same movie again updates yours. Admins can also
-  enter a review for a member. Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
+  enter a review for a member, or for a guest without Discord (saved under their name, like imported
+  ratings, so **People** can group it). Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
   them, or click someone's card for their average, how they compare with the group, and their favorites.
 - **Watchlists:** each series' list as poster cards, with filters for named lists (like *Horror*), and a
   form to suggest a movie. Typing a title suggests matches from our library and from IMDb's catalog (via
@@ -289,7 +290,20 @@ name belongs to (likely matches are listed first), and those ratings join that m
 under their current server name, on the Reviews tab, in the stats and in Discord recaps. For someone who
 isn't in the server, type a name instead (like `Mrs. Smith` and `Mrs Smith` → `Sam`). The original names
 stay as written; set it back to *not linked* and clear the name to undo. The table groups names under the
-person they count as, with each person's total, and lists names that aren't linked yet at the bottom.
+person they count as, with each person's total, and lists names that aren't linked yet at the bottom. To
+group several at once, tick them and press **Combine**, then pick the Discord member (or type the name) they
+all count as.
+
+The **Admin** tab is split into **People**, **Imports** (history, Discord watchlists, IMDb lists), **Movie
+details** (OMDb progress and movies not matched to IMDb) and **Backups**.
+
+### Where reviews are kept
+
+Everything on the movie pages (history, reviews, People, movie details, IMDb lists) is in
+`state/movielib.json` in the shared settings folder, so SyncThing copies it to every PC. Before the first
+change each day, Pingwin saves a dated copy in `state/backups` and keeps 14 of them. To roll back, stop
+Pingwin and copy a backup over `movielib.json`. The **Backups** tab lists the copies and downloads the reviews
+as a spreadsheet (one row per review, with the question chain) or the whole library as JSON.
 
 ### IMDb lists
 

@@ -80,7 +80,10 @@
       <details class="panel write-review" id="rv-box">
         <summary><span class="wr-title">✍️ Write a review</span><span class="hint" id="rv-as-note"></span></summary>
         <div class="rv-form">
-          <label id="rv-who-wrap" hidden>Review from<select id="rv-who"></select></label>
+          <div id="rv-who-wrap" class="grid2" hidden>
+            <label>Review from<select id="rv-who"></select></label>
+            <label id="rv-guest-wrap" hidden>Guest's name<input id="rv-guest" maxlength="40" list="p-names" placeholder="Like Mrs. Smith"></label>
+          </div>
           <label>Movie<select id="rv-movie"></select></label>
           <div class="rv-score">
             <label for="rv-score">Score</label>
@@ -208,76 +211,119 @@
     </section>
 
     <section id="tab-admin" class="tab" hidden>
-      <div class="panel">
-        <h2>IMDb lists</h2>
-        <p class="hint">Compare your IMDb lists with our history and watchlists. On IMDb, open the list and pick
-          <strong>⋯ → Export</strong> (for your ratings: <strong>Your ratings → ⋯ → Export</strong>). IMDb gets the
-          CSV file ready under <strong>Your exports</strong>; download it and pick it here. Uploading the same list again
-          replaces it. Movies in our library also get any details they were missing.</p>
-        <div class="row-actions">
-          <input id="x-name" placeholder="Name, like Horror log" maxlength="60" aria-label="List name">
-          <input id="x-url" placeholder="IMDb list link (optional)" maxlength="220" aria-label="IMDb list link">
-          <label class="file">IMDb export (.csv)<input type="file" id="x-file" accept=".csv,text/csv"></label>
-          <button class="btn primary" id="x-go">Review list…</button>
+      <nav class="subtabs" id="a-tabs" role="tablist" aria-label="Admin">
+        <button role="tab" data-sub="people" aria-selected="true">👥 People <span class="n" id="a-n-people"></span></button>
+        <button role="tab" data-sub="imports">📥 Imports</button>
+        <button role="tab" data-sub="details">🎞️ Movie details <span class="n" id="a-n-details"></span></button>
+        <button role="tab" data-sub="records">🗄️ Backups</button>
+      </nav>
+
+      <div class="a-sub" data-sub="people">
+        <div class="panel">
+          <div class="a-head">
+            <div>
+              <h2>People</h2>
+              <p class="hint">Ratings keep the name they were written with. Link each name to a <strong>Discord member</strong>,
+                or type a <strong>name</strong> for someone without Discord, and their ratings count as one person.
+                Tick names and press <strong>Combine</strong> to group several at once.</p>
+            </div>
+          </div>
+          <p class="hint" id="p-summary"></p>
+          <div class="combine-bar" id="p-bar" hidden>
+            <span id="p-picked"></span>
+            <button class="btn small primary" id="p-combine">Combine…</button>
+            <button class="btn small" id="p-clear">Clear</button>
+          </div>
+          <div class="table-wrap">
+            <table class="movie-table people-table">
+              <thead><tr><th class="pick"><span class="sr-only">Pick</span></th><th>Written as</th><th class="num">Ratings</th><th>Discord member</th><th>Or a name</th></tr></thead>
+              <tbody id="p-rows"></tbody>
+            </table>
+          </div>
+          <datalist id="p-names"></datalist>
+          <div class="row-actions"><button class="btn primary" id="p-save">Save people</button><span class="hint" id="p-result"></span></div>
         </div>
-        <span class="hint" id="x-result"></span>
-        <ul class="x-admin" id="x-admin"></ul>
       </div>
-      <div class="panel">
-        <h2>Import history</h2>
-        <p class="hint">From a movie log spreadsheet (date, movie, year, duration, session, ratings, …) and a ratings
-          document ("Name (7/10): comment"). Running it again only adds what's new.</p>
-        <label>Google Sheets link<input id="i-sheet" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
-        <label>Google Docs link (ratings)<input id="i-doc" placeholder="https://docs.google.com/document/d/…"></label>
-        <p class="hint">Or upload files you downloaded (File → Download → CSV, and → Plain text):</p>
-        <div class="row-actions">
-          <label class="file">Spreadsheet (.csv)<input type="file" id="i-sheet-file" accept=".csv,text/csv"></label>
-          <label class="file">Ratings (.txt)<input type="file" id="i-doc-file" accept=".txt,text/plain"></label>
+
+      <div class="a-sub" data-sub="imports" hidden>
+        <div class="a-grid">
+          <div class="panel">
+            <h2>📒 Movie night history</h2>
+            <p class="hint">From the movie log spreadsheet and the ratings document. Running it again only adds what's new.</p>
+            <label>Google Sheets link<input id="i-sheet" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+            <label>Google Docs link (ratings)<input id="i-doc" placeholder="https://docs.google.com/document/d/…"></label>
+            <details class="more"><summary class="hint">Or upload downloaded files</summary>
+              <p class="hint">File → Download → CSV (sheet) and → Plain text (doc).</p>
+              <div class="row-actions">
+                <label class="file">Spreadsheet (.csv)<input type="file" id="i-sheet-file" accept=".csv,text/csv"></label>
+                <label class="file">Ratings (.txt)<input type="file" id="i-doc-file" accept=".txt,text/plain"></label>
+              </div>
+            </details>
+            <div class="row-actions"><button class="btn primary" id="i-go">Import</button><span class="hint" id="i-result"></span></div>
+          </div>
+          <div class="panel">
+            <h2>💬 Watchlist from Discord</h2>
+            <p class="hint">Paste a list message's link (right-click → <strong>Copy Message Link</strong>). ✅ lines count as
+              watched; 🇽, ❌ and unmarked lines join the watchlist. Duplicates are skipped.</p>
+            <label>Message link<input id="l-link" placeholder="https://discord.com/channels/…"></label>
+            <div class="grid2">
+              <label>Series<select id="l-series"></select></label>
+              <label>List name (optional)<input id="l-label" maxlength="40" placeholder="Horror"></label>
+            </div>
+            <details class="more"><summary class="hint">Or paste the list instead</summary><textarea id="l-text" rows="6" placeholder="🇽 Movie title (1999)"></textarea></details>
+            <div class="row-actions"><button class="btn primary" id="l-go">Add to watchlist</button><span class="hint" id="l-result"></span></div>
+          </div>
+          <div class="panel wide">
+            <h2>🎬 IMDb lists</h2>
+            <p class="hint">On IMDb, open the list → <strong>⋯ → Export</strong> (ratings: <strong>Your ratings → ⋯ → Export</strong>),
+              then download it from <strong>Your exports</strong>. You review every row before anything is saved; uploading the
+              same list again replaces it.</p>
+            <div class="row-actions">
+              <input id="x-name" placeholder="Name, like Horror log" maxlength="60" aria-label="List name">
+              <input id="x-url" placeholder="IMDb list link (optional)" maxlength="220" aria-label="IMDb list link">
+              <label class="file">IMDb export (.csv)<input type="file" id="x-file" accept=".csv,text/csv"></label>
+              <button class="btn primary" id="x-go">Review list…</button>
+            </div>
+            <span class="hint" id="x-result"></span>
+            <ul class="x-admin" id="x-admin"></ul>
+          </div>
         </div>
-        <div class="row-actions"><button class="btn primary" id="i-go">Import</button><span class="hint" id="i-result"></span></div>
       </div>
-      <div class="panel">
-        <h2>Import a watchlist from Discord</h2>
-        <p class="hint">Paste the link to a list message (right-click it → <strong>Copy Message Link</strong>). Lines
-          marked ✅ count as watched and are skipped; 🇽, ❌ or unmarked lines join the watchlist. Movies already on the
-          list or in the history are skipped too.</p>
-        <label>Message link<input id="l-link" placeholder="https://discord.com/channels/…"></label>
-        <div class="row-actions">
-          <label class="inline">Series<select id="l-series"></select></label>
-          <label class="inline">List name (optional)<input id="l-label" maxlength="40" placeholder="Horror"></label>
+
+      <div class="a-sub" data-sub="details" hidden>
+        <div class="panel">
+          <h2>Movie details from OMDb</h2>
+          <p class="hint" id="o-note"></p>
+          <div class="progress" id="o-progress" hidden><div class="bar"><span id="o-bar"></span></div><p class="hint" id="o-status"></p></div>
+          <div class="row-actions"><button class="btn" id="o-go">Look up missing details</button><span class="hint" id="o-result"></span></div>
         </div>
-        <details><summary class="hint">Or paste the list instead</summary><textarea id="l-text" rows="6" placeholder="🇽 Movie title (1999)"></textarea></details>
-        <div class="row-actions"><button class="btn primary" id="l-go">Add to watchlist</button><span class="hint" id="l-result"></span></div>
-      </div>
-      <div class="panel">
-        <h2>People</h2>
-        <p class="hint">Ratings keep the name they were written with. Pick the <strong>Discord member</strong> each name
-          belongs to, and all of their ratings (nicknames, typos and their own Discord ratings) count as that person,
-          shown with their server name. For someone who isn't in the server, type a <strong>name</strong> instead;
-          names typed the same way are grouped too. Likely matches are listed first.</p>
-        <p class="hint" id="p-summary"></p>
-        <div class="table-wrap">
-          <table class="movie-table people-table">
-            <thead><tr><th>Written as</th><th class="num">Ratings</th><th>Discord member</th><th>Or a name</th></tr></thead>
-            <tbody id="p-rows"></tbody>
-          </table>
-        </div>
-        <datalist id="p-names"></datalist>
-        <div class="row-actions"><button class="btn primary" id="p-save">Save people</button><span class="hint" id="p-result"></span></div>
-      </div>
-      <div class="panel">
-        <h2>Movie details</h2>
-        <p class="hint" id="o-note"></p>
-        <div class="progress" id="o-progress" hidden><div class="bar"><span id="o-bar"></span></div><p class="hint" id="o-status"></p></div>
-        <div class="row-actions"><button class="btn" id="o-go">Look up missing details</button><span class="hint" id="o-result"></span></div>
-        <details id="u-box" class="unmatched" hidden>
-          <summary><strong id="u-title">Not matched to IMDb</strong></summary>
+        <div class="panel" id="u-box" hidden>
+          <h2 id="u-title">Not matched to IMDb</h2>
           <p class="hint">OMDb couldn't find these by title and year. <strong>Find it</strong> searches IMDb's catalog so you
             can pick the right one (or paste its IMDb link). To fix a wrong match, open the movie from History and press
             <strong>Wrong movie?</strong></p>
           <div class="row-actions"><button class="btn small" id="u-retry">Try them all again</button><span class="hint" id="u-result"></span></div>
           <ul class="u-list" id="u-list"></ul>
-        </details>
+        </div>
+        <p class="hint center" id="u-none" hidden>✅ Every movie is matched to IMDb.</p>
+      </div>
+
+      <div class="a-sub" data-sub="records" hidden>
+        <div class="panel">
+          <h2>Where reviews are kept</h2>
+          <p class="hint">Everything on these pages (the history, every review, People, watchlists' movie details and
+            IMDb lists) is in <code>state\movielib.json</code> in the shared SyncThing folder, so every PC has it.
+            Pingwin also keeps a dated copy from before each day's first change, for 14 days, in
+            <code>state\backups</code>. To roll back, stop Pingwin and copy one over <code>movielib.json</code>.</p>
+          <div class="row-actions">
+            <a class="btn primary" href="/api/movies/export?what=reviews" download>⬇️ Reviews (.csv)</a>
+            <a class="btn" href="/api/movies/export?what=library" download>⬇️ Everything (.json)</a>
+          </div>
+          <p class="hint">The spreadsheet has one row per review: date, movie, event, person, score, comment and the
+            question chain. It opens in Excel or Google Sheets.</p>
+          <h3>Daily copies</h3>
+          <ul class="b-list" id="b-list"></ul>
+        </div>
       </div>
     </section>
   </main>
@@ -286,6 +332,7 @@
   <dialog id="d-queue" class="movie-dialog"></dialog>
   <dialog id="d-match" class="movie-dialog"></dialog>
   <dialog id="d-review" class="movie-dialog wide"></dialog>
+  <dialog id="d-combine" class="movie-dialog"></dialog>
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <div class="tip" id="tip" role="tooltip" hidden></div>
   <script src="/static/movies.js"></script>

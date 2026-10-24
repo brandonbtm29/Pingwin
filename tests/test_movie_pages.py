@@ -244,3 +244,56 @@ def test_imdb_lists_and_question_chain_on_the_pages(tmp_path, data):  # noqa: F8
         assert (await (await client.get("/api/movies", headers=member)).json())["imdb_lists"] == []
 
     run(scenario, tmp_path)
+
+
+def test_guests_without_discord_and_the_reviews_download(tmp_path, data):  # noqa: F811
+    async def scenario(client, app):
+        admin = headers(app, "admin")
+        await client.post(
+            "/api/movies/admin", json={"action": "import", "sheet_csv": SHEET, "doc_text": DOC}, headers=admin
+        )
+        hid = (await (await client.get("/api/movies", headers=admin)).json())["history"][0]["id"]
+        body = {"hid": hid, "score": "6", "comment": "Came over for this one.", "guest": "Mrs. Smith"}
+        r = await client.post("/api/movies/review", json=body, headers=admin)
+        assert r.status == 200, await r.text()
+        r = await client.post("/api/movies/review", json=body, headers=headers(app, "member"))
+        assert r.status == 403  # only mods enter reviews for guests
+        got = (await (await client.get("/api/movies", headers=admin)).json())["history"][0]["ratings"]
+        mine = [x for x in got if x["key"] == "name:mrs. smith"]
+        assert len(mine) == 1 and mine[0]["who"] == "Mrs. Smith" and not mine[0]["discord"]
+        # Combine the guest with Sam: both count as one name.
+        r = await client.post(
+            "/api/movies/admin",
+            json={"action": "people", "people": {"name:mrs. smith": "Sam", "name:sam": "Sam"}},
+            headers=admin,
+        )
+        assert r.status == 200
+        r = await client.get("/api/movies/export?what=reviews", headers=admin)
+        assert r.status == 200 and "attachment" in r.headers["Content-Disposition"]
+        text = await r.text()
+        assert "Came over for this one." in text and text.splitlines()[0].lstrip("﻿").startswith("Date,Movie")
+        r = await client.get("/api/movies/export?what=library", headers=admin)
+        assert (await r.json())["history"][0]["id"] == hid
+        r = await client.get("/api/movies/export", headers=headers(app, "member"))
+        assert r.status == 403  # admins only
+
+    run(scenario, tmp_path)
+
+
+def test_daily_snapshots_keep_two_weeks(data):  # noqa: F811
+    from datetime import date
+
+    from pingwin import movies, store
+
+    movies.save(movies.load())  # nothing to copy yet
+    assert store.backups(movies.STATE) == []
+    lib = movies.load()
+    lib["people"] = {"name:x": "X"}
+    movies.save(lib)  # copies the file as it was before today's change
+    (b,) = store.backups(movies.STATE)
+    assert b["day"] == date.today().isoformat()
+    for d in range(1, 20):
+        (store.backups_dir() / f"movielib-2020-01-{d:02d}.json").write_text("{}", encoding="utf-8")
+    (store.backups_dir() / f"movielib-{date.today().isoformat()}.json").unlink()
+    movies.save(lib)
+    assert len(store.backups(movies.STATE)) == 14
