@@ -102,13 +102,15 @@ SECTIONS: list[dict[str, Any]] = [
                 "rows",
                 "Series",
                 [],
-                "With a showtime (like Mon 8:30pm), polls close when the movie starts.",
+                "With a showtime (like Mon 8:30pm), polls close when the movie starts. Franchise queue: the series "
+                "works through one franchise's movies in order, and polls pick the next franchise.",
                 columns=[
                     {"key": "name", "type": "text", "label": "Short name (e.g. MM)"},
                     {"key": "full_name", "type": "text", "label": "Full name (e.g. Movie Mondays)"},
                     {"key": "role", "type": "role", "label": "Role to ping"},
                     {"key": "channel", "type": "channel", "label": "Channel"},
                     {"key": "showtime", "type": "text", "label": "Showtime"},
+                    {"key": "franchises", "type": "toggle", "label": "Franchise queue"},
                 ],
             ),
             # ---- who can do what
@@ -212,6 +214,15 @@ SECTIONS: list[dict[str, Any]] = [
             ),
             F("multiple", "toggle", "Let people vote for more than one", False, group="Polls", half=True),
             F("mark_watched", "toggle", "Mark the winner watched", True, group="Polls", half=True),
+            F(
+                "queue_announce_hours",
+                "number",
+                "Announce a franchise's next part (hours before showtime)",
+                6,
+                min=0,
+                max=72,
+                group="Polls",
+            ),
             # ---- ratings
             F("rate", "toggle", "Post a Rate it button after each movie", True, group="Ratings", half=True),
             F(
@@ -495,6 +506,8 @@ def _parse_value(section: dict, field: dict, raw: Any) -> Any:
                     row[col["key"]] = tuple(str(x).strip() for x in (v or []) if str(x).strip())
                 elif col["type"] == "channel":
                     row[col["key"]] = _parse_value(section, {**field, "type": "channel", "default": None}, v)
+                elif col["type"] == "toggle":
+                    row[col["key"]] = v is True or str(v).strip().casefold() in ("true", "1", "yes", "on")
                 else:
                     row[col["key"]] = "" if v is None else str(v).strip()
             if any(row.values()):
@@ -553,6 +566,8 @@ class Features:
                                 cv = ", ".join(cv)
                             elif col["type"] == "channel":
                                 cv = str(cv) if cv else ""
+                            elif col["type"] == "toggle":
+                                cv = bool(cv)
                             row[col["key"]] = cv
                         rows.append(row)
                     values[field["key"]] = rows
@@ -608,10 +623,12 @@ def to_toml_value(field: dict[str, Any], value: Any) -> Any:
                     v = [p.strip() for p in str(v).split(",") if p.strip()]
                 elif col["type"] == "channel":
                     v = int(v) if str(v or "").strip().isdigit() else 0
+                elif col["type"] == "toggle":
+                    v = v is True or str(v).strip().casefold() in ("true", "1", "yes", "on")
                 else:
                     v = str(v or "").strip()
                 row[col["key"]] = v
-            if any(row.values()):
+            if any(v for k, v in row.items() if k != "franchises"):
                 rows.append(row)
         return rows
     return "" if value is None else str(value)

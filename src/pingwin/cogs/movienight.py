@@ -17,6 +17,7 @@ import asyncio
 import logging
 import math
 import random
+import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
@@ -28,7 +29,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import movieaccess, movies, store
+from .. import franchise, movieaccess, movies, store
 from ..features import slug
 from ..timeparse import next_weekly
 
@@ -238,6 +239,48 @@ class RateModal(discord.ui.Modal):
         )
         if cog:
             await cog.refresh_prompt(entry, lib)
+
+
+def is_franchise(s) -> bool:
+    return bool(getattr(s, "franchises", False))
+
+
+class FranchiseModal(discord.ui.Modal, title="Franchise queue"):
+    def __init__(self, cog: MovieNight, s) -> None:
+        super().__init__()
+        self.cog, self.s = cog, s
+        q = cog._data(store.load(STATE), s).get("queue") or {}
+        self.name = discord.ui.TextInput(label="Franchise", max_length=100, default=q.get("name") or None)
+        lines = [
+            ("✅ " if i.get("done") else "") + franchise.label(i) for i in q.get("items", []) if not i.get("skipped")
+        ]
+        self.items = discord.ui.TextInput(
+            label="Movies in order, one per line (✅ = watched)",
+            style=discord.TextStyle.paragraph,
+            max_length=4000,
+            default="\n".join(lines) or None,
+            placeholder="Alien (1979)\nAliens (1986)\nAlien 3 (1992)",
+        )
+        self.add_item(self.name)
+        self.add_item(self.items)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        items = franchise.parse_items(str(self.items.value))
+        if not items:
+            await interaction.response.send_message("I couldn't find any movies in that list.", ephemeral=True)
+            return
+        state = store.load(STATE)
+        data = self.cog._data(state, self.s)
+        old = data.get("queue") or {}
+        keep = {k: old[k] for k in ("announced_for", "logged_for", "postponed_for", "paused") if k in old}
+        data["queue"] = {**franchise.new_queue(str(self.name.value), items), **keep}
+        store.save(STATE, state)
+        nxt = franchise.next_part(data["queue"])
+        await interaction.response.send_message(
+            f"Saved **{data['queue']['name']}** ({len(items)} movies)."
+            + (f" Next up: **{franchise.label(nxt)}**." if nxt else ""),
+            ephemeral=True,
+        )
 
 
 def series_label(s) -> str:
@@ -469,15 +512,139 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         await self.bot.wait_until_ready()
         await asyncio.sleep(60)  # let startup settle first
 
+    # ------------------------------------------------------------ franchise queues
+    async def run_queues(self) -> None:
+        """Announce each franchise part before showtime, then log it and move on when the movie starts."""
+        hours = float(getattr(self.cfg, "queue_announce_hours", 6) or 0)
+        for s in self.all_series:
+            if not is_franchise(s) or not getattr(s, "showtime", ""):
+                continue
+            now = datetime.now(self.bot.features.tz)
+            show = next_weekly(s.showtime, now)
+            if show is None:
+                continue
+            state = store.load(STATE)
+            q = self._data(state, s).get("queue")
+            what = franchise.due(q, show, now, hours)
+            if what is None:
+                continue
+            item = franchise.next_part(q)
+            if what == "announce":
+                q["announced_for"] = show.date().isoformat()
+                store.save(STATE, state)
+                await self._queue_post(s, "franchise_next", q, item, when=show)
+            else:  # "log": the announced showing has started
+                last = show - timedelta(days=7)
+                item["done"] = last.date().isoformat()
+                q["logged_for"] = last.date().isoformat()
+                store.save(STATE, state)
+                await self.log_watched(s, item["title"], item.get("year"), when=last)
+                log.info("%s: logged %s from the %s queue", s.name, item["title"], q["name"])
+                if franchise.finished(q):
+                    await self._queue_post(s, "franchise_done", q, None, when=None)
+
+    async def suggest_franchise(self, name: str) -> list[tuple[str, int | None]]:
+        """A starting list for a franchise: OMDb movies whose titles match, oldest first (mods trim it)."""
+        key = self.bot.features.secret(movies.SECRET)
+        if not key or self._omdb_paused():
+            return []
+        found: dict[str, tuple[str, int | None]] = {}
+        spent = 0
+        try:
+            for page in (1, 2):
+                spent += 1
+                async with self._http().get(
+                    movies.OMDB, params={"apikey": key, "s": name, "type": "movie", "page": str(page)}
+                ) as r:
+                    d = await r.json(content_type=None)
+                for hit in d.get("Search") or []:
+                    year = re.match(r"\d{4}", hit.get("Year", "") or "")
+                    found.setdefault(hit["imdbID"], (hit["Title"], int(year[0]) if year else None))
+                if len(d.get("Search") or []) < 10:
+                    break
+        except (TimeoutError, aiohttp.ClientError) as e:
+            log.info("OMDb franchise search failed: %s", e)
+        finally:
+            lib = movies.load()
+            b = self._budget(lib)
+            b["used"] = b.get("used", 0) + spent
+            movies.save(lib)
+        return sorted(found.values(), key=lambda t: (t[1] or 9999, t[0]))
+
+    async def _queue_post(self, s, key: str, q: dict, item: dict | None, when: datetime | None) -> None:
+        channel = self.bot.text_channel(s.channel)
+        if channel is None:
+            log.warning("%s: no channel for franchise announcements", s.name)
+            return
+        role = self.bot.role_named(channel.guild, s.role)
+        values = {"series": series_label(s), "short": s.name, "franchise": q["name"]}
+        if item is not None:
+            part, total = franchise.part_number(q, item)
+            values.update(title=franchise.label(item), part=part, total=total)
+        if when is not None:
+            values["when"] = f"<t:{int(when.timestamp())}:t> (<t:{int(when.timestamp())}:R>)"
+        text = self.bot.persona.say(key, **values)
+        url = self.page_url()
+        if url and key == "franchise_done":
+            text += f"\nThe whole {q['name']} run, with everyone's ratings: <{self.view_url()}>"
+        try:
+            await channel.send(
+                ((role.mention + " ") if role and key == "franchise_next" else "") + text,
+                allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
+            )
+        except discord.HTTPException as e:
+            log.warning("Couldn't post the %s franchise update: %s", s.name, e)
+
+    def queue_embed(self, s) -> discord.Embed:
+        q = self._data(store.load(STATE), s).get("queue")
+        if not q or not q.get("items"):
+            name = (
+                f"**{q['name']}** is up next, but its movies aren't listed yet." if q else "No franchise in progress."
+            )
+            return discord.Embed(
+                title=f"🎬 {series_label(s)}",
+                description=name + " A mod can line them up on the movie pages or with `/pingwin movie franchise`.",
+                color=GOLD,
+            )
+        nxt = franchise.next_part(q)
+        lines = []
+        for item in franchise.counted(q):
+            part, total = franchise.part_number(q, item)
+            mark = "✅" if item.get("done") else ("👉" if item is nxt else "▫️")
+            lines.append(f"{mark} {part}. {franchise.label(item)}")
+        show = next_weekly(s.showtime, datetime.now(self.bot.features.tz)) if getattr(s, "showtime", "") else None
+        foot = (
+            "Finished! Time to pick the next franchise."
+            if nxt is None
+            else ("Paused." if q.get("paused") else (f"Next: <t:{int(show.timestamp())}:F>" if show else ""))
+        )
+        return discord.Embed(
+            title=f"🎬 {series_label(s)}: {q['name']}",
+            description="\n".join(lines)[:3900] + (f"\n\n{foot}" if foot else ""),
+            color=GOLD,
+        )
+
     def view_url(self) -> str | None:
         """The shared view-only link to the movie pages (no sign-in needed to browse)."""
         url = self.page_url()
         return f"{url}?view={movieaccess.share_token()}" if url else None
 
     def _share_text(self) -> str:
+        """The pinned post that explains the movie pages and how to get in."""
+        names = " and ".join(f"**{series_label(s)}**" for s in self.cfg.series if s.name) or "our movie nights"
+        days = [e["date"] for e in movies.load()["history"] if e.get("date")]
+        since = f" since {min(days)[:4]}" if days else ""
         return (
-            f"🎞️ **Movie nights** 🐧\nBrowse our history, reviews and watchlists, no sign-in needed: {self.view_url()}\n"
-            "Want to write a review or suggest a movie? Type `/pingwin movie page` for your own sign-in link."
+            "🎞️ **Our movie nights have their own website now!** 🐧\n"
+            f"Everything from {names}, in one place:\n"
+            f"• **History**: every movie night{since}, with our ratings next to IMDb's\n"
+            "• **Reviews**: everyone's scores and comments (and the question chain!)\n"
+            "• **Watchlists**: what's coming up, and the franchise we're working through\n"
+            "• **Stats**: favorites, hot takes vs IMDb, and who's reviewed the most\n\n"
+            f"👀 **Just browsing?** Open {self.view_url()} (no sign-in needed).\n"
+            "✍️ **Want to write a review or suggest a movie?** Type `/pingwin movie page` and I'll send you "
+            "your own sign-in link (only you can see it).\n"
+            "⭐ After each movie I'll still post a **Rate it** button right here."
         )
 
     async def post_share_link(self, channel_id: int) -> str:
@@ -1018,6 +1185,27 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             return
         await open_rating(interaction, open_[-1]["id"])
 
+    @app_commands.command(name="queue", description="Where a franchise series is up to")
+    @app_commands.autocomplete(series=series_autocomplete)
+    async def queue(self, interaction: discord.Interaction, series: str) -> None:
+        s = self.series(series)
+        if s is None:
+            await interaction.response.send_message("Pick a series from the list.", ephemeral=True)
+            return
+        await interaction.response.send_message(embed=self.queue_embed(s), ephemeral=True)
+
+    @app_commands.command(name="franchise", description="Line up a franchise's movies in order (mods)")
+    @app_commands.autocomplete(series=series_autocomplete)
+    async def set_franchise(self, interaction: discord.Interaction, series: str) -> None:
+        s = self.series(series)
+        if s is None:
+            await interaction.response.send_message("Pick a series from the list.", ephemeral=True)
+            return
+        if not self.bot.is_mod(interaction.user):
+            await interaction.response.send_message("Only mods can change the franchise queue.", ephemeral=True)
+            return
+        await interaction.response.send_modal(FranchiseModal(self, s))
+
     @app_commands.command(name="page", description="Link to the movie pages (history, ratings, watchlists)")
     async def page(self, interaction: discord.Interaction) -> None:
         url = self.page_url()
@@ -1179,6 +1367,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             ][-5:]
         if changed:
             store.save(STATE, state)
+        await self.run_queues()
         # Rate it buttons: post after the movie, close when the time is up.
         lib = movies.load()
         dirty = False
@@ -1238,8 +1427,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             votes = dict(counts)[pick]
             title = noms[pick]["title"] if pick in noms else "the winner"
             extra = " (picked at random from a tie)" if len(top) > 1 else ""
+            key = "franchise_poll_winner" if is_franchise(s) else "movie_poll_winner"
             text = self.bot.persona.say(
-                "movie_poll_winner", title=title, votes=f"{votes} vote{'s' if votes != 1 else ''}", extra=extra
+                key, title=title, votes=f"{votes} vote{'s' if votes != 1 else ''}", extra=extra, series=series_label(s)
             )
             if pick in noms:
                 winner = noms[pick]
@@ -1253,7 +1443,11 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         except discord.HTTPException as e:
             log.warning("Couldn't announce the %s winner: %s", s.name, e)
         p["status"] = "done"
-        if winner:
+        if winner and is_franchise(s):
+            # The winner is the next franchise: start its queue (a mod adds the movies), not a movie night.
+            data["queue"] = franchise.new_queue(winner["title"], paused=True)
+            log.info("%s: the next franchise is %s", s.name, winner["title"])
+        elif winner:
             when = discord.utils.parse_time(p["ends"]).astimezone(self.bot.features.tz)
             await self.log_watched(s, winner["title"], winner.get("year"), when=when)
         log.info("%s poll finished: %s", s.name, text)

@@ -68,6 +68,10 @@ def test_every_pingwin_line_fills_in():
         extra="",
         when="soon",
         event="Board games",
+        franchise="Alien",
+        part="2",
+        total="4",
+        short="FF",
     )
     for key in DEFAULT_MESSAGES:
         for template in p.messages[key]:

@@ -1060,7 +1060,7 @@ async def get_movies(request: web.Request) -> web.Response:
                     "poster": m.get("poster"),
                 }
             )
-        watchlists.append({"series": name, "items": items})
+        watchlists.append({"series": name, "items": items, "queue": _queue_json(state.get(slug(name), {}), lib)})
     pending = [
         {k: r.get(k) for k in ("id", "kind", "series", "data", "by_name", "at")}
         for r in lib["pending"].values()
@@ -1071,6 +1071,7 @@ async def get_movies(request: web.Request) -> web.Response:
             "viewer": viewer.as_json(),
             "series": series,
             "series_full": series_full,
+            "franchise_series": [s.name for s in all_series if getattr(s, "franchises", False)],
             "history": history,
             "watchlists": watchlists,
             "pending": pending,
@@ -1184,6 +1185,91 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
     raise ApiError("Unknown suggestion.")
 
 
+async def _queue_action(cog: Any, payload: dict[str, Any], viewer: Any) -> dict[str, Any]:
+    """Mods manage a series' franchise queue from the movie pages."""
+    from datetime import datetime as _dt
+
+    from .. import franchise
+    from ..cogs.movienight import STATE as WATCH
+    from ..timeparse import next_weekly
+
+    if cog is None:
+        raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+    s = cog.series(_str(payload, "series", 50))
+    if s is None:
+        raise ApiError("Pick a series.")
+    op = payload.get("op")
+    if op == "suggest":  # a starting list from OMDb (by title search, oldest first)
+        name = _str(payload, "name", 100)
+        if not name:
+            raise ApiError("Type the franchise's name first.")
+        if not os.environ.get(movies_secret()):
+            raise ApiError("Add an OMDb API key under Features → Movie night to get suggestions.")
+        found = await cog.suggest_franchise(name)
+        if not found:
+            raise ApiError(f"OMDb didn't find movies for {name!r}. Type them in instead.")
+        return {"ok": True, "text": "\n".join(f"{t} ({y})" if y else t for t, y in found)}
+    state = store.load(WATCH)
+    data = cog._data(state, s)
+    q = data.get("queue")
+    msg = "Saved."
+    if op == "set":
+        items = franchise.parse_items(str(payload.get("text") or ""))
+        name = _str(payload, "name", 100)
+        if not name:
+            raise ApiError("Type the franchise's name.")
+        if not items:
+            raise ApiError("List at least one movie, one per line.")
+        old = {i["title"].casefold(): i for i in (q or {}).get("items", [])}
+        for i in items:  # keep what's already watched when a list is edited
+            before = old.get(i["title"].casefold())
+            if before and before.get("done") and not i.get("done"):
+                i["done"] = before["done"]
+        keep = {k: q[k] for k in ("announced_for", "logged_for", "postponed_for", "paused") if q and k in q}
+        data["queue"] = {**franchise.new_queue(name, items), **keep}
+        msg = f"Saved {name} ({len(items)} movies)."
+    elif q is None:
+        raise ApiError("There's no franchise queue for that series yet.")
+    elif op == "pause":
+        q["paused"] = bool(payload.get("paused"))
+        msg = "Paused: no announcements until you resume." if q["paused"] else "Resumed."
+    elif op == "postpone":
+        show = next_weekly(s.showtime, _dt.now(cog.bot.features.tz)) if getattr(s, "showtime", "") else None
+        if show is None:
+            raise ApiError("This series has no showtime.")
+        day = show.date().isoformat()
+        q["postponed_for"] = None if q.get("postponed_for") == day else day
+        msg = (
+            "Skipping this week's showing; the same part is next time."
+            if q["postponed_for"]
+            else "Back on for this week."
+        )
+    elif op in ("skip", "done", "up", "down"):
+        item = next((i for i in q["items"] if i["id"] == payload.get("item")), None)
+        if item is None:
+            raise ApiError("That movie isn't in the queue anymore.")
+        if op == "skip":
+            item["skipped"] = not item.get("skipped")
+        elif op == "done":
+            item["done"] = None if item.get("done") else "earlier"
+        else:
+            franchise.move(q, item["id"], -1 if op == "up" else 1)
+    elif op == "end":
+        data.pop("queue", None)
+        msg = "Franchise queue cleared."
+    else:
+        raise ApiError("Unknown queue change.")
+    store.save(WATCH, state)
+    log.info("Franchise queue %s for %s (%s)", op, s.name, viewer.name)
+    return {"ok": True, "message": msg}
+
+
+def movies_secret() -> str:
+    from .. import movies
+
+    return movies.SECRET
+
+
 async def post_movie_review(request: web.Request) -> web.Response:
     """Add or change a review from the movie pages. Members review as themselves; admins can also
     enter one for a member (for someone who told them their score)."""
@@ -1239,6 +1325,45 @@ async def post_movie_review(request: web.Request) -> web.Response:
         except discord.HTTPException:
             pass
     return web.json_response({"ok": True, "message": "Review updated." if old else "Thanks! Review added. ⭐"})
+
+
+def _queue_json(data: dict[str, Any], lib: dict[str, Any]) -> dict[str, Any] | None:
+    """A series' franchise queue for the movie pages, with posters and runtimes where we have them."""
+    from .. import franchise
+
+    q = data.get("queue")
+    if not q:
+        return None
+    nxt = franchise.next_part(q)
+    items = []
+    for i in q.get("items", []):
+        m = movies_find(lib, i["title"], i.get("year"))
+        part = franchise.part_number(q, i) if not i.get("skipped") else (None, None)
+        items.append(
+            {
+                **{k: i.get(k) for k in ("id", "title", "year", "done", "skipped")},
+                "part": part[0],
+                "next": i is nxt,
+                "poster": (m or {}).get("poster"),
+                "runtime": (m or {}).get("runtime"),
+                "imdb_rating": (m or {}).get("imdb_rating"),
+            }
+        )
+    return {
+        "name": q.get("name"),
+        "paused": bool(q.get("paused")),
+        "postponed_for": q.get("postponed_for"),
+        "total": len(franchise.counted(q)),
+        "done": sum(1 for i in franchise.counted(q) if i.get("done")),
+        "finished": franchise.finished(q),
+        "items": items,
+    }
+
+
+def movies_find(lib: dict[str, Any], title: str, year: Any) -> dict[str, Any] | None:
+    from .. import movies
+
+    return movies.find_movie(lib, title, year)
 
 
 def _share_info(cog: Any) -> dict[str, Any]:
@@ -1338,6 +1463,8 @@ async def post_movie_admin(request: web.Request) -> web.Response:
         movies.save(lib)
         log.info("Movie history %s (%s)", action, viewer.name)
         return web.json_response({"ok": True, "message": msg})
+    if action == "queue":
+        return web.json_response(await _queue_action(cog, payload, viewer))
     if action in ("share_info", "share_reset", "share_post"):
         from .. import movieaccess
 

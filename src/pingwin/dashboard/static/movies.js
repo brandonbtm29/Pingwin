@@ -255,9 +255,11 @@ function renderWatchlists() {
     const lists = [...new Set(waiting.map((i) => i.list || "").filter(Boolean))].sort();
     const pick = listFilter[w.series] || "";
     const shown = waiting.filter((i) => !pick || (i.list || "") === pick);
+    const isFranchise = (data.franchise_series || []).includes(w.series);
     return el("div", { class: "panel" },
+      isFranchise || w.queue ? queueBlock(w) : null,
       el("div", { class: "w-head" },
-        el("h2", {}, `${evName(w.series)} watchlist`, el("span", { class: "hint" }, ` ${waiting.length} waiting`)),
+        el("h2", {}, isFranchise ? `${evName(w.series)}: franchises to choose from` : `${evName(w.series)} watchlist`, el("span", { class: "hint" }, ` ${waiting.length} waiting`)),
         lists.length ? el("div", { class: "chips", role: "group", "aria-label": "Lists" },
           ["", ...lists].map((l) => el("button", { class: "chip", "aria-pressed": String(pick === l), onclick: () => { listFilter[w.series] = l; renderWatchlists(); } },
             l || "All", el("span", { class: "n" }, l ? waiting.filter((i) => i.list === l).length : waiting.length)))) : null),
@@ -271,6 +273,69 @@ function renderWatchlists() {
         el("p", { class: "hint" }, "Nothing waiting. Suggest one above!"));
   }));
 }
+
+// ---------- franchise queues ----------
+async function queueOp(series, op, extra = {}) {
+  try { const r = await api("/api/movies/admin", { action: "queue", series, op, ...extra }); if (r.message) toast(r.message); await load(); return r; }
+  catch (e) { toast(e.message, true); return null; }
+}
+
+function queueBlock(w) {
+  const q = w.queue;
+  const admin = data.viewer.level === "admin";
+  if (!q) {
+    return el("div", { class: "queue empty" },
+      el("h3", {}, "🎬 Franchise queue"),
+      el("p", { class: "hint" }, "No franchise in progress. When a poll picks the next franchise, its queue starts here."),
+      admin ? el("button", { class: "btn small primary", onclick: () => editQueue(w.series, null) }, "Start a franchise") : null);
+  }
+  const pct = q.total ? Math.round((100 * q.done) / q.total) : 0;
+  const bar = el("div", { class: "q-bar" }, el("span", {}));
+  bar.firstChild.style.setProperty("--pct", `${pct}%`);
+  const status = q.finished ? "Finished! Time to poll for the next franchise." : q.paused ? "Paused: no announcements." :
+    q.postponed_for ? `Not this week (${fmtDate(q.postponed_for)}).` : !q.total ? "No movies listed yet." : "";
+  return el("div", { class: "queue" },
+    el("div", { class: "q-head" },
+      el("div", {}, el("h3", {}, `🎬 ${evName(w.series)}: ${q.name}`), el("div", { class: "hint" }, `${q.done} of ${q.total} watched`, status ? ` · ${status}` : "")),
+      admin ? el("div", { class: "row-btns" },
+        el("button", { class: "btn small", onclick: () => editQueue(w.series, q) }, "Edit list"),
+        q.finished ? null : el("button", { class: "btn small", onclick: () => queueOp(w.series, "pause", { paused: !q.paused }) }, q.paused ? "Resume" : "Pause"),
+        q.finished || q.paused ? null : el("button", { class: "btn small", onclick: () => queueOp(w.series, "postpone") }, q.postponed_for ? "Back on this week" : "Not this week"),
+        el("button", { class: "btn small danger", onclick: () => { if (window.confirm(`End the ${q.name} queue?`)) queueOp(w.series, "end"); } }, "End")) : null),
+    bar,
+    el("ol", { class: "q-strip" }, q.items.map((i) => el("li", { class: ["q-card", i.done ? "done" : "", i.next ? "next" : "", i.skipped ? "skipped" : ""].join(" ").trim() },
+      posterArt({ title: i.title, poster: i.poster }),
+      el("div", { class: "q-meta" },
+        el("span", { class: "q-part" }, i.skipped ? "skipped" : i.next ? `Up next · part ${i.part}` : `Part ${i.part}`),
+        el("strong", {}, i.title), i.year ? el("span", { class: "hint" }, ` ${i.year}`) : null,
+        i.done ? el("div", { class: "hint" }, i.done === "earlier" ? "✓ watched" : `✓ ${fmtDate(i.done)}`) : null,
+        admin ? el("div", { class: "q-btns" },
+          el("button", { class: "btn icon", title: "Earlier", "aria-label": "Move earlier", onclick: () => queueOp(w.series, "up", { item: i.id }) }, "↑"),
+          el("button", { class: "btn icon", title: "Later", "aria-label": "Move later", onclick: () => queueOp(w.series, "down", { item: i.id }) }, "↓"),
+          el("button", { class: "btn icon", title: i.done ? "Not watched" : "Mark watched", "aria-label": "Toggle watched", onclick: () => queueOp(w.series, "done", { item: i.id }) }, "✓"),
+          el("button", { class: "btn icon", title: i.skipped ? "Include again" : "Skip this one", "aria-label": "Toggle skip", onclick: () => queueOp(w.series, "skip", { item: i.id }) }, "⤼")) : null)))));
+}
+
+function editQueue(series, q) {
+  const d = $("d-queue");
+  const name = el("input", { value: q ? q.name : "", placeholder: "e.g. Alien", maxlength: "100" });
+  const text = el("textarea", { rows: "10", placeholder: "Alien (1979)\nAliens (1986)\nAlien 3 (1992)" },
+    q ? q.items.filter((i) => !i.skipped).map((i) => (i.done ? "✅ " : "") + (i.year ? `${i.title} (${i.year})` : i.title)).join("\n") : "");
+  put(d,
+    el("div", { class: "dialog-head" }, el("h2", {}, q ? `Edit ${q.name}` : `Start a franchise for ${evName(series)}`), el("button", { class: "btn icon", "aria-label": "Close", onclick: () => d.close() }, "✕")),
+    el("label", {}, "Franchise", name),
+    el("label", {}, "Movies in watching order, one per line (✅ in front = already watched)", text),
+    el("div", { class: "row-actions" },
+      el("button", { class: "btn primary", onclick: async () => { if (await queueOp(series, "set", { name: name.value, text: text.value })) d.close(); } }, "Save"),
+      el("button", { class: "btn", onclick: async (e) => {
+        e.target.disabled = true;
+        try { const r = await api("/api/movies/admin", { action: "queue", series, op: "suggest", name: name.value }); text.value = r.text; toast("Here's a start from OMDb. Trim it and fix the order."); }
+        catch (err) { toast(err.message, true); } finally { e.target.disabled = false; }
+      } }, "Suggest from OMDb"),
+      el("span", { class: "hint" }, "Pingwin announces each part before showtime and logs it when the movie starts.")));
+  d.showModal();
+}
+$("d-queue").addEventListener("click", (e) => { if (e.target === $("d-queue")) $("d-queue").close(); });
 
 $("w-add").addEventListener("click", async () => {
   const title = $("w-title").value.trim();

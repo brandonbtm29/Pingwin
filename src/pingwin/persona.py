@@ -36,6 +36,10 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "event_soon": "⏰ **{event}** starts {when}!",
     "event_starting": "▶️ **{event}** is starting now!",
     "checkin_open": "📍 **{event}** has started! Here? Tap to check in.",
+    "franchise_next": "🎬 {series}: **{title}**, part {part} of {total} of {franchise}. Starts {when}.",
+    "franchise_done": "🏁 That's all of **{franchise}**! Time to pick the next franchise: "
+    "`/pingwin movie poll {short}`.",
+    "franchise_poll_winner": "🍿 The next franchise is **{title}** ({votes}{extra}). A mod will line up its movies.",
 }
 
 

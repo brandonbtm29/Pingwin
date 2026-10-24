@@ -145,7 +145,9 @@ Passing `hours` still overrides it.
 | `/pingwin movie tonight series title [year]` | Set tonight's movie on a night without a poll |
 | `/pingwin movie history [search]` | What you've watched and how you rated it |
 | `/pingwin movie rate` | Rate the latest movie (if you missed the button) |
-| `/pingwin movie page` | Link to the movie pages |
+| `/pingwin movie page` | The movie pages: the view-only link and your own sign-in link |
+| `/pingwin movie queue series` | Where a franchise series is up to |
+| `/pingwin movie franchise series` | Line up a franchise's movies (mods) |
 | `/pingwin movie poll series [hours] [question]` | Start a poll and ping the series' role |
 | `/pingwin movie endpoll series` | End the running poll now |
 
@@ -161,6 +163,24 @@ What you control (all on the dashboard):
   tie** (announce it so a mod decides, or pick one at random).
 
 The **watchlist** panel on the Features tab lets you mark movies watched, unwatch them, or delete them.
+
+### Franchise queues
+
+Tick **Franchise queue** on a series (like *Franchise Fridays*) to work through one franchise's movies in
+order instead of polling every week:
+
+- **Each showtime**, Pingwin announces the next part a few hours before (*Announce a franchise's next part*,
+  6 hours by default), pinging the series' role: "**Alien 3 (1992)**, part 3 of 6 of Alien". When the movie
+  starts, it logs that part in the history (so the **Rate it** button still comes) and moves on.
+- **When the last part is done**, Pingwin says so, and a mod runs `/pingwin movie poll` for that series. Its
+  watchlist holds the *franchises* to choose from, and the winner becomes the next queue.
+- **Lining up the movies:** on the movie pages' **Watchlists** tab, mods click **Edit list** (or **Start a
+  franchise**) and paste the movies in watching order, one per line; a ✅ in front marks one already watched.
+  **Suggest from OMDb** gives a starting list to trim (with an OMDb key). `/pingwin movie franchise` does the
+  same from Discord.
+- **When plans change:** **Not this week** keeps the same part for next time, **Pause** stops the
+  announcements, and each movie has buttons to move it earlier or later, mark it watched, or skip it.
+  `/pingwin movie queue` shows where a series is up to.
 
 ### Approvals
 

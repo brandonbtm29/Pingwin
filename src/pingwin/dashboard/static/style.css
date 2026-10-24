@@ -643,3 +643,25 @@ nav.tabs:not(.pills) { overflow-x: auto; scrollbar-width: thin; }
 nav.tabs:not(.pills) button { white-space: nowrap; flex: none; }
 #f-sections, #tab-features { grid-template-columns: minmax(0, 1fr); }
 #f-sections > .feature { min-width: 0; }
+
+/* franchise queues */
+.queue { border: 1px solid color-mix(in srgb, var(--c2, #eb6834) 35%, var(--border)); border-radius: var(--mp-radius, 12px);
+  padding: 12px 14px; margin-bottom: 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--c2, #eb6834) 10%, var(--surface)), var(--surface) 70%); }
+.queue.empty { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.queue h3 { margin: 0; }
+.q-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+.q-bar { height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; margin: 10px 0 12px; }
+.q-bar span { display: block; height: 100%; width: var(--pct, 0%); background: linear-gradient(90deg, var(--c2, #eb6834), var(--c4, #6250d6)); }
+.q-strip { list-style: none; margin: 0; padding: 0 0 6px; display: grid; grid-auto-flow: column; grid-auto-columns: 130px; gap: 12px; overflow-x: auto; }
+.q-card { background: var(--surface); border-radius: 10px; overflow: hidden; border: 1px solid var(--border); display: flex; flex-direction: column; }
+.q-card .poster-art { aspect-ratio: 2 / 3; }
+.q-card.done .poster-art { filter: grayscale(.85) brightness(.75); }
+.q-card.skipped { opacity: .45; }
+.q-card.next { border: 2px solid var(--c2, #eb6834); box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--c2, #eb6834) 70%, transparent); }
+.q-meta { padding: 8px 9px 10px; display: grid; gap: 2px; font-size: .85rem; }
+.q-part { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; }
+.q-card.next .q-part { color: var(--c2, #eb6834); }
+.q-btns { display: flex; gap: 2px; margin-top: 4px; }
+.q-btns .btn.icon { padding: 2px 6px; font-size: .8rem; }
+#d-queue textarea { width: 100%; font-family: inherit; }
+.rows-table .cell-check { width: auto; margin: 0 auto; display: block; }

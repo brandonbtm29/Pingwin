@@ -686,6 +686,7 @@ function rowsInput(field, rows, onChange) {
         let inp;
         if (col.type === "role") { inp = el("select", { onchange: (e) => set(e.target.value) }, roleOptions(row[col.key])); inp.value = row[col.key] || ""; }
         else if (col.type === "channel") { inp = el("select", { onchange: (e) => set(e.target.value) }, channelOptions(row[col.key])); inp.value = row[col.key] || ""; }
+        else if (col.type === "toggle") inp = el("input", { type: "checkbox", class: "cell-check", checked: !!row[col.key], "aria-label": col.label, onchange: (e) => set(e.target.checked) });
         else inp = el("input", { value: row[col.key] || "", "aria-label": col.label, oninput: (e) => set(e.target.value) });
         return el("td", {}, inp);
       }),
@@ -696,7 +697,7 @@ function rowsInput(field, rows, onChange) {
       el("div", { class: "table-wrap" }, el("table", { class: "rows-table" },
         el("thead", {}, el("tr", {}, field.columns.map((c) => el("th", {}, c.label)), el("th", {}))),
         el("tbody", {}, body))),
-      el("div", { class: "row-actions" }, el("button", { class: "btn", onclick: () => { rows.push(Object.fromEntries(field.columns.map((c) => [c.key, ""]))); onChange(rows); draw(); } }, "+ Add row")),
+      el("div", { class: "row-actions" }, el("button", { class: "btn", onclick: () => { rows.push(Object.fromEntries(field.columns.map((c) => [c.key, c.type === "toggle" ? false : ""]))); onChange(rows); draw(); } }, "+ Add row")),
       field.help ? el("span", { class: "hint" }, field.help) : null,
     );
   };

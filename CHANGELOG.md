@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.0 (2026-10-24)
+- **Franchise queues:** a series can work through one franchise in order. Pingwin announces each showtime's
+  part ("part 7 of 10"), logs it when the movie starts (Rate it still comes), and when the franchise is done,
+  a poll picks the next one, whose queue starts automatically. Mods manage the list on the movie pages
+  (reorder, skip, mark watched, not this week, pause, suggest from OMDb) or with `/pingwin movie franchise`;
+  `/pingwin movie queue` shows progress.
+- The pinned movie pages post now explains what's on the site and how to get in.
+
 ## 0.15.0 (2026-10-24)
 - **Movie pages without the Discord sign-in screen:** a shared **view-only link** (copy it, or post and pin
   it from Features → Movie night; reset it any time), and **personal sign-in links** from `/pingwin movie page`

@@ -91,3 +91,18 @@ checkin_open = [
     "📍 **{event}** has started! Here? Tap to check in. 🐧",
     "📍 Roll call for **{event}**! Tap to check in, penguins. 🐧",
 ]
+
+# ---------------------------------------------------------------- franchise queues
+franchise_next = [
+    "🎬 {series} tonight: **{title}**, part {part} of {total} of {franchise}! Starts {when}. Grab a snack and waddle in. 🐧",
+    "🍿 Next stop on the {franchise} tour: **{title}** (part {part} of {total}). {series} starts {when}! 🐧",
+    "🎞️ Part {part} of {total}: **{title}**. The colony gathers {when} for {series}. 🐧",
+]
+franchise_done = [
+    "🏁 That's a wrap on **{franchise}**! 🐧 Time to pick the next franchise: a mod can start a poll with `/pingwin movie poll {short}`.",
+    "🏁 We made it through all of **{franchise}**! Flippers up! 🐧 Next franchise poll: `/pingwin movie poll {short}`.",
+]
+franchise_poll_winner = [
+    "🍿 The votes are in! Our next franchise is **{title}** ({votes}{extra}). A mod will line up the movies. 🐧",
+    "🎬 Noot noot! **{title}** wins with {votes}{extra}. New franchise, here we come!",
+]
