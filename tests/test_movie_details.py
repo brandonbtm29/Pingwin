@@ -230,3 +230,31 @@ def test_lookup_falls_back_to_a_year_off(monkeypatch):
     info = asyncio.run(movies.omdb_lookup(Http(), "k", "Kill List", 2012))
     assert info["imdb_id"] == "tt1788391" and len(asked) == 4
     assert movies.imdb_id_in("https://www.imdb.com/title/tt1788391/?ref_=x") == "tt1788391"
+
+
+def test_adding_a_past_movie_night(monkeypatch):
+    async def lookup(http, key, title, year=None, spent=None, imdb_id=None):
+        spent[0] += 1
+        return (
+            {"title": "Arrival", "year": 2016, "imdb_id": "tt2543164", "looked_up": 1} if title == "Arrival" else None
+        )
+
+    monkeypatch.setattr(movies, "omdb_lookup", lookup)
+
+    async def go():
+        seed()
+        cog = make_cog()
+        s = cog.series("MMM")
+        e, created = await cog.add_night(s, "Arrival", None, "tt2543164", "2025-12-01")
+        assert created and e["date"] == "2025-12-01" and e["series"] == "MMM"
+        lib = movies.load()
+        assert lib["movies"][e["movie_id"]]["imdb_id"] == "tt2543164"
+        assert [x["date"] for x in lib["history"]] == sorted(x["date"] for x in lib["history"])  # in date order
+        n = store.load(movienight.STATE)["mmm"]["nominations"][0]
+        assert n["watched"].startswith("2025-12-01")  # it came off the watchlist
+        again, created = await cog.add_night(s, "Arrival", 2016, None, "2025-12-01")
+        assert not created and again["id"] == e["id"]
+        other, created = await cog.add_night(s, "Some Indie Film", 2001, None, "2025-12-08")
+        assert created and movies.load()["movies"][other["movie_id"]]["title"] == "Some Indie Film"
+
+    asyncio.run(go())

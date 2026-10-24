@@ -48,7 +48,7 @@ Everything stays on the operator's computers (and any backup PCs they set up):
 | **Movie watchlists** (if on): each nominated title, who nominated it (user ID) and when, and running polls | Running movie night | Until the movie is removed |
 | **Movie history and ratings** (if on): which movie was watched when, and each rating: your user ID (or a name, from an imported ratings document or entered by a mod for a guest), score, comment and any question or answer you wrote | Showing the history, averages and stats on the movie pages | Until a mod deletes the rating or the movie night |
 | **Movie rater names** (if a mod sets them): which name each rater's ratings count as | Grouping someone's ratings on the movie pages | Until a mod clears it |
-| **Daily copies of the movie library**: the same data as above, as it was each day | Undoing a mistake | 14 days (`state/backups`) |
+| **Backup copy of the movie library**: the same data as above, as it was at the start of the day | Undoing a mistake | Replaced daily (`state/backups`) |
 | **Movie change requests** (if approvals are on): who asked for a nomination, removal or history fix, and whether a mod approved it | The approval cards | Until the operator deletes `state/movielib.json` |
 | **Game day sign-ups** (if on): the title, time, host and who answered In / Maybe / Can't (user IDs) | Reminders | About two days after the game |
 | **Welcome approvals** (if on): the new member's user ID and whether a mod approved or denied them | Keeping the buttons working | Until the operator deletes `state/approvals.json` |

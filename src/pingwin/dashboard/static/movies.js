@@ -108,6 +108,14 @@ async function load() {
   renderStats();
   renderImdb();
   if (admin) { renderImdbAdmin(); renderUnmatched(); renderBackups(); showAdminTab(store.get("pingwin-movies-admin-tab", "people")); }
+  $("n-box").hidden = !admin;
+  if (admin && !$("n-date").value) $("n-date").value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  // Guests are reviewers without a Discord account (their key is their name); list them for the review form.
+  const guests = new Map();
+  for (const h of data.history) for (const r of h.ratings) {
+    if (r.key.startsWith("name:") && !guests.has(r.key) && !(data.people[r.key] || "").startsWith("@")) guests.set(r.key, r.name);
+  }
+  put($("rv-guests"), [...guests.values()].sort((a, b) => a.localeCompare(b)).map((n) => el("option", { value: n })));
   renderPending();
 }
 
@@ -115,7 +123,7 @@ function fillSeries() {
   const keep = $("h-series").value;
   put($("h-series"), el("option", { value: "" }, "All events"), [...new Set(data.history.map((h) => h.series).filter(Boolean))].map((x) => el("option", { value: x }, evName(x))));
   $("h-series").value = keep;
-  for (const id of ["w-series", "l-series"]) {
+  for (const id of ["w-series", "l-series", "n-series"]) {
     const w = $(id).value;
     put($(id), data.series.map((x) => el("option", { value: x }, evName(x))));
     if (w) $(id).value = w;
@@ -410,77 +418,98 @@ function editQueue(series, q) {
 $("d-queue").addEventListener("click", (e) => { if (e.target === $("d-queue")) $("d-queue").close(); });
 
 // Title suggestions while typing: movies we know first, then OMDb's catalog (IMDb's movies).
-let picked = null;  // { title, year, imdb_id } once someone picks a suggestion
-let acTimer = 0, acSeq = 0, acActive = -1;
-function acClose() { $("w-ac").hidden = true; $("w-title").setAttribute("aria-expanded", "false"); acActive = -1; }
-function acPick(h) {
-  picked = h;
-  $("w-title").value = h.title;
-  $("w-year").value = h.year || "";
-  acClose();
-}
-function acRender(res) {
-  const rows = [];
-  const seen = new Set();
-  const item = (h, src) => {
-    const key = h.imdb_id || `${h.title}|${h.year}`;
-    if (seen.has(key)) return null;
-    seen.add(key);
-    return el("li", { role: "option", class: "ac-item", onmousedown: (e) => { e.preventDefault(); acPick(h); } },
-      posterArt(h, "ac-poster"),
-      el("span", { class: "ac-text" }, el("strong", {}, h.title), el("span", { class: "hint" }, [h.year, src].filter(Boolean).join(" · "))),
-      h.imdb_id ? el("a", { class: "ac-imdb", href: `https://www.imdb.com/title/${h.imdb_id}/`, target: "_blank", rel: "noopener", title: "Open on IMDb", onmousedown: (e) => e.stopPropagation() }, "IMDb ↗") : null);
+// Used by Suggest a movie and Add a movie night; each box remembers the IMDb entry picked.
+function titleSuggest(input, list, yearInput, onSubmit) {
+  const st = { picked: null, timer: 0, seq: 0, active: -1 };
+  const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); st.active = -1; };
+  const pick = (h) => { st.picked = h; input.value = h.title; yearInput.value = h.year || ""; close(); };
+  const render = (res) => {
+    const rows = [];
+    const seen = new Set();
+    const item = (h, src) => {
+      const key = h.imdb_id || `${h.title}|${h.year}`;
+      if (seen.has(key)) return null;
+      seen.add(key);
+      return el("li", { role: "option", class: "ac-item", onmousedown: (e) => { e.preventDefault(); pick(h); } },
+        posterArt(h, "ac-poster"),
+        el("span", { class: "ac-text" }, el("strong", {}, h.title), el("span", { class: "hint" }, [h.year, src].filter(Boolean).join(" · "))),
+        h.imdb_id ? el("a", { class: "ac-imdb", href: `https://www.imdb.com/title/${h.imdb_id}/`, target: "_blank", rel: "noopener", title: "Open on IMDb", onmousedown: (e) => e.stopPropagation() }, "IMDb ↗") : null);
+    };
+    const lib = res.library.map((h) => item(h, h.watched ? "watched before" : "in our library")).filter(Boolean);
+    const omdb = res.omdb.map((h) => item(h, "")).filter(Boolean);
+    if (lib.length) rows.push(el("li", { class: "ac-head", role: "presentation" }, "Already in our library"), lib);
+    if (omdb.length) rows.push(el("li", { class: "ac-head", role: "presentation" }, "From IMDb's catalog"), omdb);
+    if (res.note) rows.push(el("li", { class: "ac-note", role: "presentation" }, res.note));
+    if (res.warn) rows.unshift(el("li", { class: "ac-warn", role: "presentation" }, "⚠️ ", res.warn));
+    put(list, rows);
+    const open = rows.length > 0 && document.activeElement === input;
+    list.hidden = !open;
+    input.setAttribute("aria-expanded", String(open));
+    st.active = -1;
   };
-  const lib = res.library.map((h) => item(h, h.watched ? "watched before" : "in our library")).filter(Boolean);
-  const omdb = res.omdb.map((h) => item(h, "")).filter(Boolean);
-  if (lib.length) rows.push(el("li", { class: "ac-head", role: "presentation" }, "Already in our library"), lib);
-  if (omdb.length) rows.push(el("li", { class: "ac-head", role: "presentation" }, "From IMDb's catalog"), omdb);
-  if (res.note) rows.push(el("li", { class: "ac-note", role: "presentation" }, res.note));
-  if (res.warn) rows.unshift(el("li", { class: "ac-warn", role: "presentation" }, "⚠️ ", res.warn));
-  put($("w-ac"), rows);
-  const open = rows.length > 0 && document.activeElement === $("w-title");
-  $("w-ac").hidden = !open;
-  $("w-title").setAttribute("aria-expanded", String(open));
-  acActive = -1;
+  input.addEventListener("input", () => {
+    st.picked = null;
+    clearTimeout(st.timer);
+    const q = input.value.trim();
+    if (q.length < 2) return close();
+    st.timer = setTimeout(async () => {
+      const seq = ++st.seq;
+      try {
+        const res = await api(`/api/movies/search?q=${encodeURIComponent(q)}`);
+        if (seq === st.seq) render(res);
+      } catch { /* suggestions are optional */ }
+    }, 350);
+  });
+  input.addEventListener("keydown", (e) => {
+    const items = [...list.querySelectorAll(".ac-item")];
+    if (list.hidden || !items.length) { if (e.key === "Enter") onSubmit(); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      st.active = (st.active + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items.forEach((li, i) => li.setAttribute("aria-selected", String(i === st.active)));
+      items[st.active].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (st.active >= 0) items[st.active].dispatchEvent(new MouseEvent("mousedown")); else { close(); onSubmit(); }
+    } else if (e.key === "Escape") close();
+  });
+  input.addEventListener("blur", () => setTimeout(close, 120));
+  return {
+    imdb: () => (st.picked && st.picked.title === input.value.trim() ? st.picked.imdb_id || "" : ""),
+    reset: () => { st.picked = null; input.value = ""; yearInput.value = ""; },
+  };
 }
-$("w-title").addEventListener("input", () => {
-  picked = null;
-  clearTimeout(acTimer);
-  const q = $("w-title").value.trim();
-  if (q.length < 2) return acClose();
-  acTimer = setTimeout(async () => {
-    const seq = ++acSeq;
-    try {
-      const res = await api(`/api/movies/search?q=${encodeURIComponent(q)}`);
-      if (seq === acSeq) acRender(res);
-    } catch { /* suggestions are optional */ }
-  }, 350);
-});
-$("w-title").addEventListener("keydown", (e) => {
-  const items = [...$("w-ac").querySelectorAll(".ac-item")];
-  if ($("w-ac").hidden || !items.length) { if (e.key === "Enter") $("w-add").click(); return; }
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-    e.preventDefault();
-    acActive = (acActive + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-    items.forEach((li, i) => li.setAttribute("aria-selected", String(i === acActive)));
-    items[acActive].scrollIntoView({ block: "nearest" });
-  } else if (e.key === "Enter") {
-    e.preventDefault();
-    if (acActive >= 0) items[acActive].dispatchEvent(new MouseEvent("mousedown")); else { acClose(); $("w-add").click(); }
-  } else if (e.key === "Escape") acClose();
-});
-$("w-title").addEventListener("blur", () => setTimeout(acClose, 120));
 
+const suggestBox = titleSuggest($("w-title"), $("w-ac"), $("w-year"), () => $("w-add").click());
 $("w-add").addEventListener("click", async () => {
   const title = $("w-title").value.trim();
   if (!title) return toast("Type a title first.", true);
-  const imdb = picked && picked.title === title ? picked.imdb_id : null;
   try {
-    const res = await api("/api/movies/suggest", { kind: "nominate", series: $("w-series").value, title, year: $("w-year").value.trim(), imdb_id: imdb || "" });
+    const res = await api("/api/movies/suggest", { kind: "nominate", series: $("w-series").value, title, year: $("w-year").value.trim(), imdb_id: suggestBox.imdb() });
     toast(res.message.replace(/\*\*/g, ""));
-    $("w-title").value = ""; $("w-year").value = ""; picked = null;
+    suggestBox.reset();
     await load();
   } catch (e) { toast(e.message, true); }
+});
+
+// Add a movie night we already watched (admins): it joins the history, then anyone can review it.
+const nightBox = titleSuggest($("n-title"), $("n-ac"), $("n-year"), () => $("n-go").click());
+$("n-go").addEventListener("click", async () => {
+  const title = $("n-title").value.trim();
+  if (!title) return toast("Type the movie's title.", true);
+  if (!$("n-date").value) return toast("Pick the date you watched it.", true);
+  const btn = $("n-go");
+  btn.disabled = true;
+  try {
+    const res = await api("/api/movies/admin", { action: "add_night", title, year: $("n-year").value.trim(), imdb_id: nightBox.imdb(),
+      date: $("n-date").value, series: $("n-series").value, rate: $("n-rate").checked });
+    toast(res.message);
+    nightBox.reset();
+    await load();
+    const h = data.history.find((x) => x.id === res.hid);
+    if (h) showMovie(h);
+  } catch (e) { toast(e.message, true); }
+  finally { btn.disabled = false; }
 });
 
 // ---------- stats ----------
@@ -855,7 +884,7 @@ document.querySelectorAll("#a-tabs button").forEach((b) => b.addEventListener("c
 function renderBackups() {
   const b = data.backups || [];
   put($("b-list"), b.length ? b.map((x) => el("li", {}, el("strong", {}, fmtDate(x.day)), el("span", { class: "hint" }, ` · ${x.file} · ${Math.max(1, Math.round(x.bytes / 1024)).toLocaleString()} KB`)))
-    : el("li", { class: "hint" }, "The first copy is made with the next change to the movie pages."));
+    : el("li", { class: "hint" }, "The backup is made with the next change to the movie pages."));
 }
 
 // Who a rater key counts as right now: a member ("@id"), a typed name, or nobody yet.

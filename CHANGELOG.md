@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.20.0 (2026-10-24)
+- **Add a movie we watched:** on History, admins add a movie night that already happened (title with IMDb
+  suggestions, year, date, event). It's taken off that event's watchlist, opens so anyone can review it, and can
+  also post a Rate it button in Discord.
+- **Guests:** the guest name box lists the guests who have reviewed before, so picking a name adds to that
+  guest's reviews and a new name makes a new guest.
+- **Backups:** one backup copy of the movie library instead of 14, refreshed before the first change each day.
+
 ## 0.19.0 (2026-10-24)
 - **Guests without Discord:** mods can enter a review for someone who watched along without a Discord
   account (Write a review → *A guest without Discord…*). It's saved under their name, like imported ratings.

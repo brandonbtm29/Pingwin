@@ -47,6 +47,27 @@
     </div>
 
     <section id="tab-history" class="tab">
+      <details class="panel write-review add-night" id="n-box" hidden>
+        <summary><span class="wr-title">➕ Add a movie we watched</span><span class="hint">for a night that isn't in the history yet</span></summary>
+        <div class="rv-form">
+          <div class="n-grid">
+            <label class="n-title">Movie
+              <div class="ac-wrap">
+                <input id="n-title" placeholder="Start typing a title…" maxlength="100" autocomplete="off" role="combobox"
+                  aria-autocomplete="list" aria-expanded="false" aria-controls="n-ac">
+                <ul id="n-ac" class="ac-list" role="listbox" hidden></ul>
+              </div>
+            </label>
+            <label>Year<input id="n-year" maxlength="4" inputmode="numeric" placeholder="Optional"></label>
+            <label>Date watched<input id="n-date" type="date"></label>
+            <label>Event<select id="n-series"></select></label>
+          </div>
+          <label class="check"><input type="checkbox" id="n-rate"> Also post a <strong>Rate it</strong> button in Discord</label>
+          <p class="hint">Picking a suggestion pins down the exact movie on IMDb. Once it's added, it opens so you (or
+            anyone) can write reviews for it.</p>
+          <div class="row-actions"><button class="btn primary" id="n-go">Add to the history</button></div>
+        </div>
+      </details>
       <div class="panel">
         <div class="row-actions filters">
           <input id="h-search" type="search" placeholder="Search titles, directors, stars, years…" aria-label="Search">
@@ -82,7 +103,9 @@
         <div class="rv-form">
           <div id="rv-who-wrap" class="grid2" hidden>
             <label>Review from<select id="rv-who"></select></label>
-            <label id="rv-guest-wrap" hidden>Guest's name<input id="rv-guest" maxlength="40" list="p-names" placeholder="Like Mrs. Smith"></label>
+            <label id="rv-guest-wrap" hidden>Guest's name<input id="rv-guest" maxlength="40" list="rv-guests" placeholder="Like Mrs. Smith">
+              <span class="hint">Each name is its own guest. Pick a name from the list to add to that guest's reviews.</span></label>
+            <datalist id="rv-guests"></datalist>
           </div>
           <label>Movie<select id="rv-movie"></select></label>
           <div class="rv-score">
@@ -313,15 +336,16 @@
           <h2>Where reviews are kept</h2>
           <p class="hint">Everything on these pages (the history, every review, People, watchlists' movie details and
             IMDb lists) is in <code>state\movielib.json</code> in the shared SyncThing folder, so every PC has it.
-            Pingwin also keeps a dated copy from before each day's first change, for 14 days, in
-            <code>state\backups</code>. To roll back, stop Pingwin and copy one over <code>movielib.json</code>.</p>
+            Pingwin also keeps <strong>one backup copy</strong> in <code>state\backups</code>, refreshed before the
+            first change each day (a damaged file never replaces it). To roll back, stop Pingwin and copy it over
+            <code>movielib.json</code>.</p>
           <div class="row-actions">
             <a class="btn primary" href="/api/movies/export?what=reviews" download>⬇️ Reviews (.csv)</a>
             <a class="btn" href="/api/movies/export?what=library" download>⬇️ Everything (.json)</a>
           </div>
           <p class="hint">The spreadsheet has one row per review: date, movie, event, person, score, comment and the
             question chain. It opens in Excel or Google Sheets.</p>
-          <h3>Daily copies</h3>
+          <h3>Backup copy</h3>
           <ul class="b-list" id="b-list"></ul>
         </div>
       </div>

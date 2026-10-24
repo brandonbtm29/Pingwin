@@ -1001,6 +1001,42 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         movies.save(lib)
         return "History updated."
 
+    async def add_night(
+        self, s, title: str, year: int | None, imdb_id: str | None, day: str, rate: bool = False
+    ) -> tuple[dict[str, Any], bool]:
+        """Add a movie night that already happened (from the movie pages). Returns (entry, newly added).
+
+        It joins the history on its date, is marked watched on the series' watchlist, and, if asked,
+        gets a Rate it button in Discord right away."""
+        found = await self.details(title, year, imdb_id)
+        lib = movies.load()
+        m = lib["movies"].get(found["id"]) if found else None
+        if m is None:
+            m = movies.upsert_movie(lib, {"title": title.strip(), "year": year})
+        e = next((x for x in lib["history"] if x.get("date") == day and x["movie_id"] == m["id"]), None)
+        created = e is None
+        if created:
+            e = movies.new_entry(m, day, s.name, source="pages")
+            lib["history"].append(e)
+            lib["history"].sort(key=lambda x: (x.get("date") or "9999", x.get("created", 0)))
+        if rate and self.cfg.rate and not e.get("prompt") and getattr(s, "channel", None):
+            e["rate_at"] = time.time()
+            e["rate_channel"] = s.channel
+        movies.save(lib)
+        state = store.load(STATE)
+        noms = self._data(state, s)["nominations"]
+        when = datetime.fromisoformat(day).replace(hour=20, tzinfo=UTC).isoformat()
+        hit = False
+        for n in noms:
+            if not n.get("watched") and (
+                n.get("movie_id") == m["id"] or movies.norm(n["title"]) == movies.norm(m["title"])
+            ):
+                n["watched"] = when
+                hit = True
+        if hit:
+            store.save(STATE, state)
+        return e, created
+
     async def log_watched(self, s, title: str, year: Any, when: datetime) -> dict[str, Any] | None:
         """Add a movie night to the history and schedule its Rate it button."""
         m = await self.details(title, year)

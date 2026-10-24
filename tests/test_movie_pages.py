@@ -280,7 +280,7 @@ def test_guests_without_discord_and_the_reviews_download(tmp_path, data):  # noq
     run(scenario, tmp_path)
 
 
-def test_daily_snapshots_keep_two_weeks(data):  # noqa: F811
+def test_one_backup_copy_refreshed_daily(data):  # noqa: F811
     from datetime import date
 
     from pingwin import movies, store
@@ -292,8 +292,7 @@ def test_daily_snapshots_keep_two_weeks(data):  # noqa: F811
     movies.save(lib)  # copies the file as it was before today's change
     (b,) = store.backups(movies.STATE)
     assert b["day"] == date.today().isoformat()
-    for d in range(1, 20):
-        (store.backups_dir() / f"movielib-2020-01-{d:02d}.json").write_text("{}", encoding="utf-8")
+    (store.backups_dir() / "movielib-2020-01-01.json").write_text("{}", encoding="utf-8")
     (store.backups_dir() / f"movielib-{date.today().isoformat()}.json").unlink()
     movies.save(lib)
-    assert len(store.backups(movies.STATE)) == 14
+    assert [x["day"] for x in store.backups(movies.STATE)] == [date.today().isoformat()]  # just one copy

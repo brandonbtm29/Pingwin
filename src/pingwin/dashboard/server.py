@@ -1550,6 +1550,32 @@ async def post_movie_admin(request: web.Request) -> web.Response:
             raise ApiError("Add an OMDb API key under Features → Movie night first.")
         res = await cog.fill_details(int(payload.get("requests", 120)))
         return web.json_response({"ok": True, "message": res["message"]})
+    if action == "add_night":
+        if cog is None:
+            raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+        title = _str(payload, "title", 100)
+        if not title:
+            raise ApiError("Type the movie's title.")
+        day = _str(payload, "date", 10)
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            raise ApiError("Pick the date you watched it.")
+        s = cog.series(_str(payload, "series", 50))
+        if s is None:
+            raise ApiError("Pick the event.")
+        y = _str(payload, "year", 4)
+        e, created = await cog.add_night(
+            s,
+            title,
+            int(y) if y.isdigit() else None,
+            movies.imdb_id_in(_str(payload, "imdb_id", 20)),
+            day,
+            rate=bool(payload.get("rate")),
+        )
+        m = movies.load()["movies"].get(e["movie_id"], {"title": title})
+        label = f"{m['title']} ({m['year']})" if m.get("year") else m["title"]
+        log.info("Movie night added from the movie pages (%s): %s on %s", viewer.name, label, day)
+        msg = f"Added {label} on {day}." if created else f"{label} on {day} was already in the history."
+        return web.json_response({"ok": True, "message": msg, "hid": e["id"]})
     if action in ("imdb_find", "imdb_match", "imdb_retry"):
         if cog is None or not os.environ.get(movies.SECRET):
             raise ApiError("Add an OMDb API key under Features → Movie night first.")

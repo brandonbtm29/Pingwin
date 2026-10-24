@@ -43,7 +43,7 @@ def load() -> dict[str, Any]:
 
 
 def save(lib: dict[str, Any]) -> None:
-    store.snapshot(STATE)  # a dated copy before the day's first change (state/backups, 14 days)
+    store.snapshot(STATE, keep=1)  # one backup copy, refreshed before the day's first change (state/backups)
     store.save(STATE, lib)
 
 

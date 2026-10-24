@@ -248,7 +248,10 @@ Members (with the member role, like **Friend**) see:
 - **Reviews:** **Write a review** for any movie night: a score, what you thought, an answer to the last
   person's question and one for the next. Reviewing the same movie again updates yours. Admins can also
   enter a review for a member, or for a guest without Discord (saved under their name, like imported
-  ratings, so **People** can group it). Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
+  ratings, so **People** can group it). Each guest name is a separate guest; the box lists earlier guests.
+- **Add a movie we watched** (admins, on History): for a movie night that isn't in the history yet. Pick the
+  title (with IMDb suggestions), the date and the event. It comes off that event's watchlist, opens so people
+  can review it, and can also post a **Rate it** button in Discord. Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
   them, or click someone's card for their average, how they compare with the group, and their favorites.
 - **Watchlists:** each series' list as poster cards, with filters for named lists (like *Horror*), and a
   form to suggest a movie. Typing a title suggests matches from our library and from IMDb's catalog (via
@@ -300,9 +303,9 @@ details** (OMDb progress and movies not matched to IMDb) and **Backups**.
 ### Where reviews are kept
 
 Everything on the movie pages (history, reviews, People, movie details, IMDb lists) is in
-`state/movielib.json` in the shared settings folder, so SyncThing copies it to every PC. Before the first
-change each day, Pingwin saves a dated copy in `state/backups` and keeps 14 of them. To roll back, stop
-Pingwin and copy a backup over `movielib.json`. The **Backups** tab lists the copies and downloads the reviews
+`state/movielib.json` in the shared settings folder, so SyncThing copies it to every PC. Pingwin keeps one
+backup copy in `state/backups`, refreshed before the first change each day (a damaged file never replaces it).
+To roll back, stop Pingwin and copy the backup over `movielib.json`. The **Backups** tab shows it and downloads the reviews
 as a spreadsheet (one row per review, with the question chain) or the whole library as JSON.
 
 ### IMDb lists
