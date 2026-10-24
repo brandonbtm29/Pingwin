@@ -52,8 +52,9 @@ Every change made from the dashboard is logged with the name of whoever made it.
 
 The same link also serves the **movie pages** at `/movies` (history, ratings, watchlists, stats; see
 [movie night](FEATURES.md#movie-pages)). Anyone with the member role (`required_role`, like **Friend**)
-can sign in with Discord there, and only sees the movie pages: the rest of the dashboard says no. Members
-who sign in from the main link are sent to the movie pages. `/pingwin movie page` posts the link.
+can sign in there, and only sees the movie pages: the rest of the dashboard says no. Members who sign in
+from the main link are sent to the movie pages. There's also a shared **view-only link** (browse without
+signing in) and **personal sign-in links** from `/pingwin movie page`; see [movie pages](FEATURES.md#movie-pages).
 
 Suggestions made on the movie pages go to the mods' approval channel, the same as in Discord.
 

@@ -269,3 +269,18 @@ def test_polls_close_at_showtime():
 def test_bad_showtime_is_explained():
     with pytest.raises(ConfigError, match="showtime"):
         parse_features({"movienight": {"series": [{"name": "MMM", "showtime": "whenever"}]}})
+
+
+def test_show_if_and_groups_point_at_real_fields():
+    from pingwin.features import SECTIONS
+
+    for section in SECTIONS:
+        keys = {f["key"] for f in section["fields"]}
+        for f in section["fields"]:
+            for other, allowed in (f.get("show_if") or {}).items():
+                assert other in keys and isinstance(allowed, list), (section["key"], f["key"])
+            if f.get("create"):
+                assert f["type"] == "channel"
+    movie = next(s for s in SECTIONS if s["key"] == "movienight")
+    assert {f.get("group") for f in movie["fields"]} >= {"Who can do what", "Polls", "Ratings", "Movie details"}
+    assert all(f["key"] != "text_commands" for s in SECTIONS for f in s["fields"])

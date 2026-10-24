@@ -129,7 +129,7 @@ textarea { resize: vertical; }
 .save-zone { display: flex; align-items: center; gap: .75rem; }
 .dirty { color: var(--warn); font-size: .85rem; }
 
-.table-wrap { overflow-x: auto; margin: .25rem -.25rem 0; }
+.table-wrap { overflow-x: auto; margin: .25rem 0 0; max-width: 100%; }
 table.roles { width: 100%; border-collapse: collapse; min-width: 620px; }
 table.roles th { text-align: left; font-size: .78rem; color: var(--muted); font-weight: 500; padding: .25rem; }
 table.roles td { padding: .25rem; vertical-align: middle; border-top: 1px solid var(--border); }
@@ -617,3 +617,29 @@ body.movies-page {
 .fix-form .span2 { grid-column: 1 / -1; }
 .posted-list { list-style: none; padding: 0; display: grid; gap: .4rem; }
 .posted-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .45rem .6rem; border: 1px solid var(--border); border-radius: var(--radius); }
+.guest-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  border-color: color-mix(in srgb, var(--c1, var(--accent)) 35%, var(--border)); background: color-mix(in srgb, var(--c1, var(--accent)) 8%, var(--surface)); }
+
+/* compact feature settings: groups, side-by-side fields, conditional fields */
+.is-hidden { display: none !important; }
+.fgroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; margin: .5rem 0 1rem; }
+.fgroup { border: 1px solid var(--border); border-radius: var(--radius); padding: .8rem .9rem .3rem; background: var(--surface-2); }
+.fgroup > h3 { margin: 0 0 .6rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.fgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: .75rem; }
+.fgrid > .field { grid-column: 1 / -1; margin-bottom: .6rem; }
+.fgrid > .field.half { grid-column: auto; }
+.fgrid label { font-size: .85rem; margin-bottom: 0; }
+.fgrid .hint { font-size: .78rem; }
+.movie-links { margin: 0 0 1rem; }
+.linkbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .5rem; }
+.with-action { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.with-action select { flex: 1 1 12rem; width: auto; }
+.ok-note { color: var(--ok); font-size: .85rem; margin: 0 0 .75rem; }
+@media (max-width: 760px) { .fgroups { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .fgrid { grid-template-columns: minmax(0, 1fr); } }
+.fgroups select, .fgroups input:not([type="checkbox"]) { min-width: 0; max-width: 100%; }
+/* the main tab bar scrolls sideways on narrow screens instead of spilling off the page */
+nav.tabs:not(.pills) { overflow-x: auto; scrollbar-width: thin; }
+nav.tabs:not(.pills) button { white-space: nowrap; flex: none; }
+#f-sections, #tab-features { grid-template-columns: minmax(0, 1fr); }
+#f-sections > .feature { min-width: 0; }

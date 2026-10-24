@@ -35,6 +35,11 @@
   </nav>
 
   <main>
+    <div class="panel guest-note" id="m-guest" hidden>
+      <span>👀 You're browsing with the shared link. To <strong>write reviews</strong> or <strong>suggest movies</strong>,
+        type <code>/pingwin movie page</code> in Discord for your own sign-in link.</span>
+      <a class="btn small" href="/auth/login?next=/movies">Sign in with Discord</a>
+    </div>
     <div class="panel" id="m-pending" hidden>
       <h2>Waiting for a mod</h2>
       <ul class="pending-list" id="m-pending-list"></ul>
@@ -118,7 +123,7 @@
     </section>
 
     <section id="tab-watchlists" class="tab" hidden>
-      <div class="panel">
+      <div class="panel" id="w-suggest">
         <h2>Suggest a movie</h2>
         <p class="hint" id="w-note"></p>
         <div class="row-actions">

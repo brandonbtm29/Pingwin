@@ -24,11 +24,11 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="setup" aria-selected="true">Setup</button>
-    <button role="tab" data-tab="status">Status</button>
+    <button role="tab" data-tab="status" aria-selected="true">Status</button>
     <button role="tab" data-tab="roles">Role menu</button>
     <button role="tab" data-tab="features">Features</button>
     <button role="tab" data-tab="pcs">PCs &amp; failover</button>
+    <button role="tab" data-tab="setup">Setup</button>
     <button role="tab" data-tab="logs">Logs</button>
   </nav>
 
@@ -47,7 +47,7 @@
     </div>
 
     <!-- SETUP & ABOUT -->
-    <section id="tab-setup" class="tab">
+    <section id="tab-setup" class="tab" hidden>
       <div class="panel">
         <div class="panel-head">
           <h2>Getting Pingwin going</h2>
@@ -90,7 +90,7 @@
     </section>
 
     <!-- STATUS -->
-    <section id="tab-status" class="tab" hidden>
+    <section id="tab-status" class="tab">
       <div class="banner" id="standby-banner" hidden></div>
       <div class="cards">
         <div class="card"><div class="label">This PC</div><div class="value" id="s-node">–</div><div class="hint" id="s-node-role"></div></div>
@@ -110,6 +110,14 @@
         <p class="hint" id="s-update">Settings also reload on their own within a minute of changing.</p>
       </div>
 
+      <div class="panel">
+        <h2>Where things live</h2>
+        <dl class="kv">
+          <dt>Settings folder</dt><dd id="s-folder" class="mono">–</dd>
+          <dt>Personality</dt><dd id="s-persona">–</dd>
+        </dl>
+      </div>
+
       <div class="panel" id="remote-panel">
         <div class="panel-head">
           <h2>Remote access</h2>
@@ -121,13 +129,6 @@
         <div id="rm-body"><p class="hint">Checking Tailscale…</p></div>
       </div>
 
-      <div class="panel">
-        <h2>Where things live</h2>
-        <dl class="kv">
-          <dt>Settings folder</dt><dd id="s-folder" class="mono">–</dd>
-          <dt>Personality</dt><dd id="s-persona">–</dd>
-        </dl>
-      </div>
     </section>
 
     <!-- ROLE MENU -->

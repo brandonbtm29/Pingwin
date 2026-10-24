@@ -32,10 +32,6 @@ Two optional features change this, and only when the operator turns them on:
   message said. It posts that to a channel the operator chooses (meant to be mod-only) and doesn't keep its
   own copy beyond Discord's usual short-lived memory of recent messages.
 
-If the operator turns on **typed commands** (`-pingwin ...`), Pingwin also uses the *Message Content*
-intent so it can see messages that start with `-pingwin`. It ignores every other message and doesn't keep
-any of them.
-
 **Stream alerts** check public Twitch and YouTube pages of the streamers the operator lists. They don't
 involve any Discord member's data.
 

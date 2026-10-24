@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0 (2026-10-24)
+- **Movie pages without the Discord sign-in screen:** a shared **view-only link** (copy it, or post and pin
+  it from Features → Movie night; reset it any time), and **personal sign-in links** from `/pingwin movie page`
+  that sign a member in for reviews (single use, 15 minutes).
+- **Movie night settings** are grouped into compact cards (Who can do what, Polls, Ratings, Movie details),
+  with side-by-side fields, shorter wording, and the movie pages link and sharing tools at the top.
+- **Settings only show when they apply** (e.g. *Which role* appears only for *Members with a role*), and role
+  pickers leave out bot roles, @everyone and time zone roles.
+- **Mod log and Welcome:** a **Create a private #mod-log** (or #approvals) button when no channel is picked.
+  The Discord intents note only warns when an intent is actually missing.
+- **Dashboard:** tabs reordered (Status, Role menu, Features, PCs & failover, Setup, Logs); *Where things
+  live* moved under Controls; the tab bar scrolls on phones.
+- Typed `-pingwin` commands were removed; everything is under `/pingwin`.
+
 ## 0.14.0 (2026-10-24)
 - **Features tab:** one feature at a time, picked from a row of sub-tabs with on/off dots.
 - **Role menus:** remove posted menus from the dashboard; **Add every time zone** (about 20, US and abroad);

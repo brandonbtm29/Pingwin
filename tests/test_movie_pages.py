@@ -7,7 +7,6 @@ from pathlib import Path
 from aiohttp.test_utils import TestClient, TestServer
 from test_remote import ORIGIN, PUBLIC, data, fake_bot, remote  # noqa: F401  (data is an autouse fixture)
 
-from pingwin.cogs.text import PREFIX, title_and_year
 from pingwin.dashboard.auth import SESSION_COOKIE, Sessions
 from pingwin.dashboard.server import SESSIONS, create_app
 
@@ -101,16 +100,6 @@ def test_every_command_is_under_pingwin(data):  # noqa: F811
     asyncio.run(go())
 
 
-def test_typed_commands():
-    assert PREFIX.match("-pingwin movie list MMM")
-    assert PREFIX.match("  -Pingwin help")
-    assert not PREFIX.match("-pingwinx")
-    assert not PREFIX.match("hey -pingwin")
-    assert title_and_year(["The", "Thing", "1982"]) == ("The Thing", 1982)
-    assert title_and_year(["1917"]) == ("1917", None)
-    assert title_and_year(["Alien", "(1979)"]) == ("Alien", 1979)
-
-
 def test_admins_set_who_ratings_count_as(tmp_path, data):  # noqa: F811
     async def scenario(client, app):
         hdr = headers(app, "admin")
@@ -161,5 +150,46 @@ def test_general_watchlist_is_always_there(tmp_path, data):  # noqa: F811
     async def scenario(client, app):
         body = await (await client.get("/api/movies", headers=headers(app, "member"))).json()
         assert body["series"][-1] == "General" and body["series_full"]["General"] == "General"
+
+    run(scenario, tmp_path)
+
+
+def test_view_only_link_and_personal_sign_in(tmp_path, data, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+
+    from pingwin import movieaccess
+    from pingwin.dashboard import server
+
+    async def as_member(bot, uid):
+        return "member", "", SimpleNamespace(display_name="Riley")
+
+    monkeypatch.setattr(server, "check_member", as_member)
+
+    async def scenario(client, app):
+        token = movieaccess.share_token()
+        r = await client.get("/movies?view=wrong", headers=PUBLIC, allow_redirects=False)
+        assert r.status == 401  # the sign-in page, not the movie pages
+        r = await client.get(f"/movies?view={token}", headers=PUBLIC, allow_redirects=False)
+        assert r.status == 302 and r.headers["Location"] == "/movies"  # secret leaves the address bar
+        cookie = r.cookies["pingwin_view"].value
+        guest = {**PUBLIC, "Cookie": f"pingwin_view={cookie}", "X-Pingwin": "1", "Origin": ORIGIN}
+        body = await (await client.get("/api/movies", headers=guest)).json()
+        assert body["viewer"]["level"] == "viewer"
+        r = await client.post("/api/movies/review", json={"hid": "x", "score": "8"}, headers=guest)
+        assert r.status == 403 and "shared link" in (await r.json())["error"]
+        r = await client.get("/api/logs", headers=guest)
+        assert r.status == 401
+        movieaccess.reset_share()  # old link stops working
+        r = await client.get("/api/movies", headers=guest)
+        assert r.status == 401
+        code = movieaccess.new_login_code(42, "Riley")
+        r = await client.get(f"/movies/login?code={code}", headers=PUBLIC)
+        assert r.status == 200 and "Signed in" in await r.text()
+        session = r.cookies["pingwin_session"].value
+        me = {**PUBLIC, "Cookie": f"pingwin_session={session}", "X-Pingwin": "1", "Origin": ORIGIN}
+        body = await (await client.get("/api/movies", headers=me)).json()
+        assert body["viewer"]["level"] == "member" and body["viewer"]["user_id"] == "42"
+        r = await client.get(f"/movies/login?code={code}", headers=PUBLIC)  # used up
+        assert r.status == 403
 
     run(scenario, tmp_path)

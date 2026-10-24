@@ -630,8 +630,10 @@ function channelOptions(current) {
 }
 
 function roleOptions(current) {
+  // Bot roles, @everyone and time zone roles are never the right answer in a feature's role setting.
+  const tz = new Set((state?.config?.roles?.menus || []).filter((m) => m.timezone).flatMap((m) => m.roles.map((r) => r.name.toLowerCase())));
   const opts = [el("option", { value: "" }, "None")];
-  for (const r of (state?.roles || []).filter((r) => !r.managed)) opts.push(el("option", { value: r.name }, r.name));
+  for (const r of (state?.roles || []).filter((r) => !r.managed && r.name !== "@everyone" && !tz.has(r.name.toLowerCase()))) opts.push(el("option", { value: r.name }, r.name));
   if (current && !(state?.roles || []).some((r) => r.name.toLowerCase() === current.toLowerCase())) opts.push(el("option", { value: current }, `${current} (doesn't exist yet)`));
   return opts;
 }
@@ -642,6 +644,7 @@ function fieldInput(field, value, onChange) {
     return el("label", { class: "switch" }, el("input", { type: "checkbox", checked: !!value, onchange: (e) => onChange(e.target.checked) }), el("span", {}, field.label));
   }
   let input;
+  if (t === "channel" && field.create) return channelWithCreate(field, value, onChange);
   if (t === "channel") { input = el("select", { onchange: (e) => onChange(e.target.value) }, channelOptions(value)); input.value = value || ""; }
   else if (t === "role") { input = el("select", { onchange: (e) => onChange(e.target.value) }, roleOptions(value)); input.value = value || ""; }
   else if (t === "number") input = el("input", { type: "number", min: field.min, max: field.max, value: value ?? "", oninput: (e) => onChange(e.target.value) });
@@ -651,6 +654,27 @@ function fieldInput(field, value, onChange) {
   else if (t === "rows") return rowsInput(field, value || [], onChange);
   else input = el("input", { value: value ?? "", oninput: (e) => onChange(e.target.value) });
   return el("label", {}, field.label, input);
+}
+
+// A channel picker with a button that makes a private mod-only channel when none is picked.
+function channelWithCreate(field, value, onChange) {
+  const select = el("select", {}, channelOptions(value));
+  select.value = value || "";
+  const btn = el("button", { class: "btn small", type: "button", hidden: !!value, onclick: async () => {
+    btn.disabled = true;
+    try {
+      const res = await api("/api/action", { action: "create_channel", name: field.create, purpose: field.label });
+      await loadState();
+      select.replaceChildren(...channelOptions(res.id));
+      select.value = res.id;
+      onChange(res.id);
+      btn.hidden = true;
+      toast(`${res.message} Click Save to use it.`);
+    } catch (e) { toast(e.message, true); }
+    finally { btn.disabled = false; }
+  } }, `＋ Create a private #${field.create}`);
+  select.addEventListener("change", (e) => { onChange(e.target.value); btn.hidden = !!e.target.value; });
+  return el("label", {}, field.label, el("div", { class: "with-action" }, select, btn));
 }
 
 function rowsInput(field, rows, onChange) {
@@ -688,6 +712,44 @@ const GUIDE_ANCHORS = {
 function guideUrl(anchor) {
   const repo = state?.repo || "https://github.com/brandonbtm29/Pingwin";
   return `${repo}/blob/main/docs/FEATURES.md${anchor ? "#" + anchor : ""}`;
+}
+
+// Movie night: open the movie pages, and share a view-only link (copy, post & pin, reset).
+function moviePagesBar() {
+  const status = el("span", { class: "hint" }, "");
+  const chan = el("select", { "aria-label": "Channel to post the link in" }, channelOptions(""));
+  chan.options[0].textContent = "Pick a channel…";
+  const bar = el("div", { class: "linkbar" },
+    el("a", { class: "btn small", href: "/movies", target: "_blank", rel: "noreferrer" }, "🎞️ Open movie pages ↗"),
+    el("button", { class: "btn small", type: "button", onclick: async () => {
+      const info = await share("share_info");
+      if (!info?.view_url) return;
+      try { await navigator.clipboard.writeText(info.view_url); toast("View-only link copied."); }
+      catch { window.prompt("Copy the view-only link:", info.view_url); }
+    } }, "Copy view-only link"),
+    el("span", { class: "with-action" }, chan, el("button", { class: "btn small", type: "button", onclick: async () => {
+      if (!chan.value) return toast("Pick a channel first.", true);
+      const info = await share("share_post", { channel_id: chan.value });
+      if (info) toast(info.message);
+    } }, "Post & pin")),
+    el("button", { class: "btn small danger", type: "button", onclick: async () => {
+      if (!window.confirm("Make a new view-only link? The old one stops working (the pinned post is updated).")) return;
+      const info = await share("share_reset");
+      if (info) toast(info.message);
+    } }, "Reset link"),
+    status);
+  async function share(action, extra = {}) {
+    try {
+      const info = await api("/api/movies/admin", { action, ...extra });
+      status.textContent = info.view_url ? (info.posted_channel ? "Pinned in Discord." : "") : "Put the dashboard online (Status → Remote access) to share the link.";
+      if (info.posted_channel) chan.value = info.posted_channel;
+      return info;
+    } catch (e) { toast(e.message, true); return null; }
+  }
+  share("share_info");
+  return el("div", { class: "fgroup movie-links" }, el("h3", {}, "Movie pages"),
+    el("p", { class: "hint" }, "Anyone with the view-only link can browse without signing in (no reviews). Members get their own sign-in link with /pingwin movie page."),
+    bar);
 }
 
 // The Features tab shows one feature at a time, picked from a row of sub-tabs.
@@ -732,10 +794,26 @@ function renderFeatures() {
       draft.dirty = true; saveBtn.disabled = false; dirtyNote.hidden = false;
       if (first) renderSubtabs();
     };
-    const fields = section.fields.map((field) => {
-      const node = fieldInput(field, values[field.key], (v) => { values[field.key] = v; mark(); });
-      return el("div", { class: "field" }, node, field.help && field.type !== "rows" ? el("span", { class: "hint" }, field.help) : null);
-    });
+    // Fields can sit in compact groups ("group"), side by side ("half"), and only show when they apply ("show_if").
+    const nodes = {};
+    const applies = (field) => !field.show_if || Object.entries(field.show_if).every(([k, ok]) => ok.some((v) => v === values[k] || (v === true && values[k] === true)));
+    const refreshShown = () => { for (const f of section.fields) nodes[f.key]?.classList.toggle("is-hidden", !applies(f)); };
+    const fields = [];
+    const groups = {};
+    let groupBox = null;
+    for (const field of section.fields) {
+      const node = fieldInput(field, values[field.key], (v) => { values[field.key] = v; mark(); refreshShown(); });
+      const wrap = el("div", { class: "field" + (field.half ? " half" : "") }, node, field.help && field.type !== "rows" ? el("span", { class: "hint" }, field.help) : null);
+      nodes[field.key] = wrap;
+      if (!field.group) { fields.push(wrap); continue; }
+      if (!groups[field.group]) {
+        if (!groupBox) { groupBox = el("div", { class: "fgroups" }); fields.push(groupBox); }
+        groups[field.group] = el("div", { class: "fgrid" });
+        groupBox.append(el("section", { class: "fgroup" }, el("h3", {}, field.group), groups[field.group]));
+      }
+      groups[field.group].append(wrap);
+    }
+    refreshShown();
     saveBtn.addEventListener("click", async () => {
       saveBtn.disabled = true;
       try {
@@ -746,16 +824,20 @@ function renderFeatures() {
       } catch (e) { saveBtn.disabled = false; toast(e.message, true); }
     });
     const enabled = "enabled" in values ? values.enabled : null;
-    const needs = section.needs ? el("div", { class: "needs" },
-      "Needs the ", el("strong", {}, section.key === "modlog" ? "Server Members and Message Content intents" : "Server Members intent"),
-      " turned on: Discord Developer Portal → your app → Bot → Privileged Gateway Intents. Restart Pingwin after saving.") : null;
+    // Only warn about Discord intents when Pingwin is actually missing one this feature needs.
+    const missing = (featureData.missing_intents || []).filter((m) => section.key === "modlog" || m.startsWith("Server Members"));
+    const needs = !section.needs ? null : missing.length ? el("div", { class: "needs" },
+      "Paused: Discord hasn't allowed the ", el("strong", {}, missing.join(" and ")),
+      " for Pingwin. Turn it on in the Discord Developer Portal → your app → Bot → Privileged Gateway Intents, then restart Pingwin.")
+      : el("p", { class: "ok-note" }, "✓ The Discord intents this needs are on.");
+    const extra = section.key === "movienight" ? moviePagesBar() : null;
     const details = el("div", { class: "feature", "data-key": section.key },
       el("div", { class: "feature-head" }, el("h2", {}, el("span", { "aria-hidden": "true" }, (FEATURE_ICONS[section.key] || "") + " "), section.key === "bot" ? "General" : section.title),
         enabled === null ? null : el("span", { class: enabled ? "status-on" : "status-off" }, enabled ? "On" : "Off")),
       el("div", { class: "feature-body" },
         el("p", { class: "desc" }, section.description,
           GUIDE_ANCHORS[section.key] ? [" ", el("a", { href: guideUrl(GUIDE_ANCHORS[section.key]), target: "_blank", rel: "noreferrer" }, "Guide ↗")] : null),
-        needs, ...fields,
+        needs, extra, ...fields,
         el("div", { class: "row-actions" }, saveBtn, dirtyNote)),
     );
     return details;
@@ -1236,7 +1318,7 @@ function renderAbout() {
 }
 
 // ---------- tabs & refresh -------------------------------------------------
-let currentTab = "setup";
+let currentTab = "status";
 function switchTab(name) {
   currentTab = name;
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
@@ -1258,7 +1340,7 @@ window.addEventListener("beforeunload", (e) => {
 
 let savedTab = null;
 try { savedTab = localStorage.getItem("pingwin-tab"); } catch { /* ignore */ }
-switchTab(savedTab && document.getElementById(`tab-${savedTab}`) ? savedTab : "setup");
+switchTab(savedTab && document.getElementById(`tab-${savedTab}`) ? savedTab : "status");
 loadState().then(() => { pingPresence(); if (currentTab === "status") loadRemote(); });
 setInterval(() => { loadState(); if (currentTab === "setup") loadSetup(); }, 10000);
 setInterval(pingPresence, 15000);

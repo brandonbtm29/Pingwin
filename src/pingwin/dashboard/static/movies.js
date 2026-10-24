@@ -79,6 +79,11 @@ async function load() {
       el("button", { class: "btn small", onclick: async () => { try { await api("/api/signout", {}); } catch { /* ignore */ } window.location.reload(); } }, "Sign out"));
   }
   const admin = v && v.level === "admin";
+  const guest = v && v.level === "viewer";
+  $("m-guest").hidden = !guest;
+  $("rv-box").hidden = guest;
+  $("w-suggest").hidden = guest;
+  document.body.classList.toggle("guest", !!guest);
   $("m-dashboard").hidden = !admin;
   $("m-admin-tab").hidden = !admin;
   $("o-note").textContent = data.omdb
@@ -228,7 +233,7 @@ function showMovie(h) {
         m.genre ? [el("dt", {}, "Genre"), el("dd", {}, m.genre)] : null),
       m.plot ? el("p", { class: "plot" }, m.plot) : null),
     el("div", { class: "dialog-sub" }, el("h3", {}, h.ratings.length ? `Ratings (${h.ratings.length})` : "No ratings yet"),
-      el("button", { class: "btn small primary", onclick: () => { d.close(); openReview(h.id); } }, "✍️ Write a review")),
+      data.viewer.level === "viewer" ? null : el("button", { class: "btn small primary", onclick: () => { d.close(); openReview(h.id); } }, "✍️ Write a review")),
     el("ul", { class: "ratings" }, h.ratings.map((r) => el("li", {},
       el("div", { class: "r-head" }, avatar(r.who), el("strong", {}, r.who), r.who !== r.name ? el("span", { class: "hint" }, `as ${r.name}`) : null, el("span", { class: "score" }, scoreBadge(r.score)),
         admin ? el("button", { class: "btn icon", title: "Remove this rating", "aria-label": "Remove rating", onclick: async () => {
@@ -238,7 +243,7 @@ function showMovie(h) {
       r.comment ? el("p", {}, r.comment) : null,
       r.answered ? el("p", { class: "qa" }, el("em", {}, r.answered), r.answer ? ` → ${r.answer}` : "") : null,
       r.ask ? el("p", { class: "qa ask" }, "Asked the next person: ", el("em", {}, r.ask)) : null))),
-    fix);
+    data.viewer.level === "viewer" ? null : fix);
   d.showModal();
 }
 

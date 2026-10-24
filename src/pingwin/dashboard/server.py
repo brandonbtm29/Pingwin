@@ -76,7 +76,9 @@ KEY: web.AppKey[str] = web.AppKey("key", str)
 REMOTE: web.AppKey[Any] = web.AppKey("remote", object)
 SESSIONS: web.AppKey[Any] = web.AppKey("sessions", object)
 PRESENCE: web.AppKey[Any] = web.AppKey("presence", object)
-OPEN_PATHS = {"/login", "/auth/login", "/auth/callback"}
+OPEN_PATHS = {"/login", "/auth/login", "/auth/callback", "/movies/login"}
+VIEW_COOKIE = "pingwin_view"  # the shared view-only movie link
+VIEW_PATHS = {"/movies", "/api/movies"}  # all a view-only visitor can open
 MEMBER_PATHS = {"/movies", "/api/movies", "/api/movies/suggest", "/api/movies/review", "/api/signout", "/api/presence"}
 DASHBOARDS = "dashboards"  # shared: each PC's public dashboard link, for /pingwin dashboard
 PUBLIC: web.RequestKey[bool] = web.RequestKey("public", bool)
@@ -162,7 +164,7 @@ async def identify(request: web.Request) -> Viewer | None:
     token = request.cookies.get(SESSION_COOKIE)
     item = app[SESSIONS].get(token)
     if item is None:
-        return None
+        return _view_only(request)
     if time.time() - item["checked"] > 300:
         level, reason, member = await check_member(bot, int(item["user_id"]))
         if level is None:
@@ -184,6 +186,24 @@ async def identify(request: web.Request) -> Viewer | None:
         level=item.get("level", "admin"),
         full_access=bool(cfg and cfg.remote_full_access) and item.get("level", "admin") == "admin",
     )
+
+
+def _view_only(request: web.Request) -> Viewer | None:
+    """Someone with the shared view-only movie link (in the address or remembered in a cookie)."""
+    from .. import movieaccess
+
+    if request.path not in VIEW_PATHS | MEMBER_PATHS:
+        return None  # (the guard then limits them to VIEW_PATHS, with a friendly message)
+    token = request.query.get("view") or request.cookies.get(VIEW_COOKIE)
+    if not movieaccess.is_share_token(token):
+        return None
+    return Viewer("guest", "Guest", sid=f"view-{_hash_short(token or '')}", level="viewer")
+
+
+def _hash_short(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode()).hexdigest()[:8]
 
 
 # --------------------------------------------------------------------- guard
@@ -211,7 +231,32 @@ async def guard(request: web.Request, handler):
                 return _secure(request, signin_page(request, next_path=request.path))
             return web.Response(text=LOCKED_PAGE, content_type="text/html", status=401)
         request[VIEWER] = viewer
-        if not viewer.is_admin and request.path not in MEMBER_PATHS:
+        if viewer.level == "viewer":
+            if request.method not in ("GET", "HEAD") or request.path not in VIEW_PATHS:
+                return _secure(
+                    request,
+                    web.json_response(
+                        {
+                            "error": "You're viewing with the shared link. Sign in to do that "
+                            "(or use /pingwin movie page)."
+                        },
+                        status=403,
+                    ),
+                )
+            if request.path == "/movies" and "view" in request.query:
+                # Remember the link in a cookie and take the secret out of the address bar.
+                response = web.HTTPFound("/movies")
+                response.set_cookie(
+                    VIEW_COOKIE,
+                    request.query["view"],
+                    httponly=True,
+                    secure=bool(request[PUBLIC]),
+                    samesite="Lax",
+                    path="/",
+                    max_age=180 * 86400,
+                )
+                return _secure(request, response)
+        elif not viewer.is_admin and request.path not in MEMBER_PATHS:
             if request.path.startswith("/api/"):
                 return _secure(request, web.json_response({"error": "That's for admins."}, status=403))
             raise web.HTTPFound("/movies")
@@ -358,6 +403,40 @@ async def auth_callback(request: web.Request) -> web.StreamResponse:
         SESSION_COOKIE, token, httponly=True, secure=True, samesite="Lax", path="/", max_age=SESSION_SECONDS
     )
     response.del_cookie(STATE_COOKIE, path="/auth")
+    return response
+
+
+async def movies_login(request: web.Request) -> web.StreamResponse:
+    """A personal sign-in link from /pingwin movie page: signs one member in, no Discord screen."""
+    from .. import movieaccess
+
+    bot = request.app[BOT]
+    found = movieaccess.take_login_code(request.query.get("code"))
+    if found is None:
+        return signin_page(
+            request, "That sign-in link was already used or has expired. Run /pingwin movie page again.", 403
+        )
+    level, reason, member = await check_member(bot, int(found["id"]))
+    if level is None:
+        return signin_page(request, reason, 403, next_path="/movies")
+    user = {
+        "id": found["id"],
+        "name": member.display_name if member else found["name"],
+        "avatar": found.get("avatar"),
+        "level": level,
+    }
+    token = request.app[SESSIONS].create(user)
+    log.info("%s signed in to the movie pages with a personal link (%s)", user["name"], level)
+    response = _page('<p>Signed in. Opening the movie pages…</p><meta http-equiv="refresh" content="0;url=/movies">')
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        secure=bool(request[PUBLIC]),
+        samesite="Lax",
+        path="/",
+        max_age=SESSION_SECONDS,
+    )
     return response
 
 
@@ -1162,6 +1241,14 @@ async def post_movie_review(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "message": "Review updated." if old else "Thanks! Review added. ⭐"})
 
 
+def _share_info(cog: Any) -> dict[str, Any]:
+    from .. import movieaccess
+
+    url = cog.view_url() if cog is not None else None
+    post = movieaccess.posted()
+    return {"view_url": url, "posted_channel": str(post[0]) if post else None}
+
+
 def _export_url(url: str, kind: str) -> str:
     m = re.search(r"/(spreadsheets|document)/d/([A-Za-z0-9_-]+)", url)
     if not m:
@@ -1251,6 +1338,25 @@ async def post_movie_admin(request: web.Request) -> web.Response:
         movies.save(lib)
         log.info("Movie history %s (%s)", action, viewer.name)
         return web.json_response({"ok": True, "message": msg})
+    if action in ("share_info", "share_reset", "share_post"):
+        from .. import movieaccess
+
+        if action == "share_reset":
+            movieaccess.reset_share()
+            log.info("Movie pages view link reset (%s)", viewer.name)
+        if action == "share_post":
+            if cog is None:
+                raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+            cid = str(payload.get("channel_id") or "")
+            if not cid.isdigit():
+                raise ApiError("Pick a channel.")
+            msg = await cog.post_share_link(int(cid))
+            return web.json_response({"ok": True, "message": msg, **_share_info(cog)})
+        if action == "share_reset" and cog is not None:
+            await cog.refresh_share_post()
+        return web.json_response(
+            {"ok": True, "message": "New view link made." if action == "share_reset" else "", **_share_info(cog)}
+        )
     if action == "import_list":
         if cog is None:
             raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
@@ -1472,6 +1578,36 @@ async def post_action(request: web.Request) -> web.Response:
             return web.json_response({"message": f"Menu posted in #{channel.name}.", "url": message.jump_url})
         if action == "refresh_menus":
             return web.json_response({"lines": await refresh_menus(bot)})
+        if action == "create_channel":
+            g = need_guild()
+            name = re.sub(r"[^a-z0-9-]+", "-", _str(payload, "name", 40).casefold()).strip("-") or "mod-log"
+            if not g.me.guild_permissions.manage_channels:
+                raise ApiError("Pingwin needs the Manage Channels permission to make channels.")
+            existing = discord.utils.get(g.text_channels, name=name)
+            if existing is not None:
+                return web.json_response(
+                    {"message": f"#{name} already exists, so I picked it.", "id": str(existing.id)}
+                )
+            # Private: hidden from everyone except admins/mods (Manage Server) and Pingwin.
+            overwrites: dict[Any, discord.PermissionOverwrite] = {
+                g.default_role: discord.PermissionOverwrite(view_channel=False),
+                g.me: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, embed_links=True, read_message_history=True
+                ),
+            }
+            for role in g.roles:
+                if not role.managed and (role.permissions.manage_guild or role.permissions.administrator):
+                    overwrites[role] = discord.PermissionOverwrite(view_channel=True, read_message_history=True)
+            status = g.get_channel(bot.config.failover.status_channel_id or 0)
+            category = getattr(status, "category", None)
+            channel = await g.create_text_channel(
+                name,
+                overwrites=overwrites,
+                category=category,
+                reason=f"Pingwin: made by {viewer.name} on the dashboard",
+            )
+            log.info("Created #%s for %s (%s)", name, _str(payload, "purpose", 40) or "the dashboard", viewer.name)
+            return web.json_response({"message": f"Made a private #{name}.", "id": str(channel.id)})
         if action == "remove_menu":
             mid = str(payload.get("message_id", ""))
             if not mid.isdigit():
@@ -1537,6 +1673,7 @@ def create_app(
     app[PRESENCE] = editing.Presence(_pc(bot))
     app.router.add_get("/", index)
     app.router.add_get("/movies", movies_page)
+    app.router.add_get("/movies/login", movies_login)
     app.router.add_get("/api/movies", get_movies)
     app.router.add_post("/api/movies/suggest", post_movie_suggest)
     app.router.add_post("/api/movies/review", post_movie_review)

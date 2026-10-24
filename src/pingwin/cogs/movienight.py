@@ -28,7 +28,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import movies, store
+from .. import movieaccess, movies, store
 from ..features import slug
 from ..timeparse import next_weekly
 
@@ -469,6 +469,57 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         await self.bot.wait_until_ready()
         await asyncio.sleep(60)  # let startup settle first
 
+    def view_url(self) -> str | None:
+        """The shared view-only link to the movie pages (no sign-in needed to browse)."""
+        url = self.page_url()
+        return f"{url}?view={movieaccess.share_token()}" if url else None
+
+    def _share_text(self) -> str:
+        return (
+            f"🎞️ **Movie nights** 🐧\nBrowse our history, reviews and watchlists, no sign-in needed: {self.view_url()}\n"
+            "Want to write a review or suggest a movie? Type `/pingwin movie page` for your own sign-in link."
+        )
+
+    async def post_share_link(self, channel_id: int) -> str:
+        """Post the view link in a channel and pin it (replacing an earlier pinned post)."""
+        if not self.view_url():
+            return "Put the dashboard online first (Status → Remote access), so the link works outside this PC."
+        channel = self.bot.text_channel(channel_id)
+        if channel is None:
+            return "Pingwin can't post in that channel."
+        old = movieaccess.posted()
+        msg = await channel.send(self._share_text(), allowed_mentions=discord.AllowedMentions.none())
+        pinned = True
+        try:
+            await msg.pin(reason="Pingwin: movie pages link")
+        except discord.HTTPException:
+            pinned = False
+        movieaccess.remember_post(channel.id, msg.id)
+        if old and old[1] != msg.id:
+            try:
+                prev = self.bot.get_channel(old[0])
+                if prev is not None:
+                    await prev.get_partial_message(old[1]).delete()
+            except discord.HTTPException:
+                pass
+        return f"Posted in #{channel.name}" + (" and pinned it." if pinned else " (couldn't pin it).")
+
+    async def refresh_share_post(self) -> None:
+        """After the link is reset, update the pinned post so it shows the new link."""
+        post = movieaccess.posted()
+        url = self.view_url()
+        if not post or not url:
+            return
+        channel = self.bot.get_channel(post[0])
+        if channel is None:
+            return
+        try:
+            await channel.get_partial_message(post[1]).edit(content=self._share_text())
+        except discord.NotFound:
+            movieaccess.remember_post(None, None)
+        except discord.HTTPException as e:
+            log.warning("Couldn't update the pinned movie pages link: %s", e)
+
     def page_url(self) -> str | None:
         links = store.load("dashboards")
         if not links:
@@ -771,7 +822,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             diff = avg - movie["imdb_rating"]
             verdict = "kinder" if diff > 0 else "harsher" if diff < 0 else "spot on"
             text += f" (IMDb {movie['imdb_rating']:g}, we were {verdict})"
-        url = self.page_url()
+        url = self.view_url()
         if url:
             text += f"\nAll the comments: <{url}>"
         try:
@@ -818,7 +869,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         await interaction.followup.send(await self.nominate_text(interaction.user, s, title, year), ephemeral=True)
 
     async def nominate_text(self, member: discord.abc.User, s, title: str, year: int | None = None) -> str:
-        """Shared by /pingwin movie nominate and -pingwin movie nominate."""
+        """Used by /pingwin movie nominate and the movie pages."""
         if not self._allowed(member, self.cfg.nominate, self.cfg.nominate_role):
             return "You can't nominate movies here."
         title = title.strip()
@@ -970,10 +1021,18 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     @app_commands.command(name="page", description="Link to the movie pages (history, ratings, watchlists)")
     async def page(self, interaction: discord.Interaction) -> None:
         url = self.page_url()
+        if not url:
+            await interaction.response.send_message(
+                "The movie pages aren't online yet. A mod can turn on remote access in the dashboard.", ephemeral=True
+            )
+            return
+        user = interaction.user
+        code = movieaccess.new_login_code(user.id, user.display_name, user.display_avatar.with_size(64).url)
+        base = url.rsplit("/movies", 1)[0]
         await interaction.response.send_message(
-            f"🎞️ Movie history, ratings and watchlists: {url}\n-# Sign in with Discord."
-            if url
-            else "The movie pages aren't online yet. A mod can turn on remote access in the dashboard.",
+            f"🎞️ **Browse** the history, reviews and watchlists: {self.view_url()}\n"
+            f"✍️ **Your personal sign-in link** (to write reviews and suggest movies): {base}/movies/login?code={code}\n"
+            "-# Only you can see this. The sign-in link works once, for 15 minutes.",
             ephemeral=True,
         )
 

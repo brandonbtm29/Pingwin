@@ -32,8 +32,7 @@ The short version, on a Windows PC that stays on:
 
 ## Commands
 
-Every command lives under **/pingwin**, so it doesn't get mixed up with other bots' commands. Pingwin can also
-answer typed `-pingwin` commands (like `-pingwin movie history`; see [typed commands](docs/FEATURES.md#typed-commands)).
+Every command lives under **/pingwin**, so it doesn't get mixed up with other bots' commands.
 
 | Command | Who | What |
 |---|---|---|

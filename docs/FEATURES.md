@@ -195,9 +195,19 @@ progress, and **Look up missing details** does a bigger batch right away.
 
 ### Movie pages
 
-`/pingwin movie page` links to **/movies** on the dashboard's web address (see
-[remote access](REMOTE-DASHBOARD.md)). Anyone with the member role (**Friend**) signs in with Discord and
-sees:
+The movie pages live at **/movies** on the dashboard's web address (see [remote access](REMOTE-DASHBOARD.md)).
+There are three ways in, and nobody has to type a Discord password:
+
+- **The view-only link.** On **Features → Movie night → Movie pages**, *Copy view-only link* or *Post & pin*
+  it in a channel. Anyone who opens it can browse everything below without signing in, but can't write a
+  review or suggest anything. *Reset link* makes a new one: the old link stops working and the pinned post
+  is updated.
+- **A personal sign-in link.** `/pingwin movie page` replies (only to that person) with the view link and
+  their own sign-in link. It signs them in with no Discord screen, so they can write reviews and suggest
+  movies. Each one works once, for 15 minutes.
+- **Sign in with Discord**, as before.
+
+Members (with the member role, like **Friend**) see:
 
 - **History:** every movie night with date, series, our average and IMDb's, searchable and sortable. Open
   one for the poster, details, everyone's ratings and the question chain. **Suggest a fix** sends a
@@ -250,13 +260,6 @@ If your club keeps a list in a pinned message (✅ for watched, 🇽 or ❌ for 
 **Import a watchlist from Discord** adds it in one go: right-click the message → **Copy Message Link**, paste
 it, pick the series and an optional list name (like *Horror*). Watched lines, movies already in the history
 and ones already on the list are skipped. You can paste the list's text instead of a link.
-
-### Typed commands
-
-Several bots share most servers, so every Pingwin command starts with `/pingwin`. Pingwin can also answer
-typed commands that start with `-pingwin`, like `-pingwin movie nominate MMM The Thing 1982`, `-pingwin
-movie history`, `-pingwin birthday set 9 3` or `-pingwin timezone set Mountain` (`-pingwin help` lists
-them). Turn on **General → Also answer typed -pingwin commands**; it needs the **Message Content** intent.
 
 ## Game day sign-ups
 

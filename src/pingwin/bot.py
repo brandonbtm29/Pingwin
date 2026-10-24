@@ -37,7 +37,6 @@ EXTENSIONS = (
     "pingwin.cogs.welcome",
     "pingwin.cogs.modlog",
     "pingwin.cogs.attendance",
-    "pingwin.cogs.text",
 )
 
 SYNC_STATE = PROJECT_ROOT / ".synced-commands.json"  # per PC; remembers what Discord already has
