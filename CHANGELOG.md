@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.0 (2026-10-24)
+- **Features tab:** one feature at a time, picked from a row of sub-tabs with on/off dots.
+- **Role menus:** remove posted menus from the dashboard; **Add every time zone** (about 20, US and abroad);
+  menus with more than 10 roles show as a dropdown in Discord; *Who can use the menus* only lists roles that
+  existed before the first menu.
+- **Backup check-ins:** standby PCs check in every 30 minutes in the status channel; the answering PC alerts
+  once if a PC goes quiet for over an hour, and the PCs & failover tab shows each PC's last check-in.
+- **More personality:** movie night, game day, event and check-in announcements now come from the persona,
+  and Pingwin's are penguin-flavored, with several versions of each.
+- The dashboard's access check now flags channels where Pingwin can't read message history, and the invite
+  link asks for exactly what Pingwin uses.
+- **History cleanup:** friends' names were removed from the repository's history. PCs on an old version
+  switch over on their next update (see `.github/rewritten-commits.txt`).
+
 ## 0.13.0 (2026-10-23)
 - **Write a review on the movie pages:** score, comment, the question chain; again to update. Admins can
   enter one for a member. Reviews show up in the open Rate it message in Discord too.

@@ -33,7 +33,15 @@ log = logging.getLogger("pingwin.failover")
 
 HEADER = "🐧 **Pingwin status**"
 _LEASE_LINE = re.compile(r"^-# lease:(\{.*\})\s*$", re.MULTILINE)
-HISTORY_SCAN = 25
+HISTORY_SCAN = 50
+
+# Standby PCs check in every 30 minutes with their own message, so admins can see the backups are alive.
+CHECKIN_HEADER = "🛟 **Pingwin backup check-in**"
+_CHECKIN_LINE = re.compile(r"^-# backup:(\{.*\})\s*$", re.MULTILINE)
+ALERT_HEADER = "⚠️ **Pingwin backup alert**"
+_ALERT_LINE = re.compile(r"^-# alert:(\{.*\})\s*$", re.MULTILINE)
+CHECKIN_EVERY = 30 * 60
+QUIET_AFTER = 65 * 60  # two missed check-ins (plus a little slack) before an alert
 
 
 @dataclass(frozen=True)
@@ -66,6 +74,53 @@ def parse_lease(content: str, renewed_at: datetime) -> Lease | None:
         return None
 
 
+def render_checkin(node: Node, version: str, now: datetime) -> str:
+    payload = json.dumps({"node": node.name}, separators=(",", ":"))
+    return (
+        f"{CHECKIN_HEADER}\n"
+        f"**{node.name}** is on standby and ready to take over (Pingwin {version}).\n"
+        f"Last check-in <t:{int(now.timestamp())}:R>. It checks in every 30 minutes.\n"
+        f"-# backup:{payload}"
+    )
+
+
+def parse_tagged(content: str, line: re.Pattern) -> str | None:
+    """The PC name in a check-in or alert message's hidden tag line."""
+    match = line.search(content or "")
+    if not match:
+        return None
+    try:
+        return str(json.loads(match.group(1))["node"])
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def render_alert(pc: str, last: datetime | None, back: datetime | None = None) -> str:
+    payload = json.dumps({"node": pc}, separators=(",", ":"))
+    if back is not None:
+        body = f"✅ **{pc}** checked in again <t:{int(back.timestamp())}:R>. The backup is ready."
+    elif last is None:
+        body = f"**{pc}** hasn't checked in. If that PC is off or Pingwin isn't running on it, there's no backup."
+    else:
+        body = (
+            f"**{pc}** hasn't checked in since <t:{int(last.timestamp())}:R>. If that PC is off or asleep, "
+            "or Pingwin isn't running on it, there's no backup right now."
+        )
+    return f"{ALERT_HEADER}\n{body}\n-# alert:{payload}"
+
+
+def quiet_pcs(pcs: list[str], me: str, checkins: dict[str, datetime], now: datetime) -> list[str]:
+    """Listed PCs (other than this one) whose last check-in is missing or too old."""
+    out = []
+    for pc in pcs:
+        if pc.casefold() == me.casefold():
+            continue
+        last = next((t for name, t in checkins.items() if name.casefold() == pc.casefold()), None)
+        if last is None or (now - last).total_seconds() > QUIET_AFTER:
+            out.append(pc)
+    return out
+
+
 def should_lead(lease: Lease | None, me: Node, now: datetime, cfg: FailoverConfig) -> bool:
     """Decide whether this PC should be the active one."""
     if lease is None:
@@ -87,6 +142,11 @@ class Coordinator:
         self.last_lease: Lease | None = None  # the most recent check-in we saw (ours or another PC's)
         self._warned_channel = False
         self._announced = False  # log the first decision even if it matches the starting state
+        self._checked_in: float | None = None  # time.monotonic() of our last standby check-in
+        self._active_from: float | None = None  # time.monotonic() when we became active (alerts wait a bit)
+        self._last_watch: float = 0.0
+        self.checkins: dict[str, datetime] = {}  # other PCs' latest check-ins (Discord's timestamps)
+        self.quiet: list[str] = []  # PCs that haven't checked in lately
 
     async def tick(self) -> None:
         cfg = self.bot.config.failover
@@ -104,7 +164,7 @@ class Coordinator:
             self._set_active(True, "status channel unavailable")
             return
 
-        messages = await self._status_messages(channel)
+        messages, checkins, alerts = await self._scan(channel)
         current = messages[0] if messages else None
         lease = parse_lease(current.content, current.edited_at or current.created_at) if current else None
         now = discord.utils.utcnow()
@@ -129,11 +189,58 @@ class Coordinator:
             else:
                 reason = f"took over from {lease.node} (this PC is earlier in the list)"
             self._set_active(True, reason)
+            await self._watch_backups(channel, checkins, alerts, now)
         else:
             assert lease is not None
             self.leader = lease.node
             self.last_lease = lease
             self._set_active(False, f"{lease.node} is active")
+            await self._check_in(channel, checkins, now)
+
+    async def _check_in(self, channel, checkins: dict[str, discord.Message], now: datetime) -> None:
+        """On standby: refresh this PC's check-in message every 30 minutes."""
+        if self._checked_in is not None and time.monotonic() - self._checked_in < CHECKIN_EVERY:
+            return
+        from . import __version__
+
+        content = render_checkin(self.bot.node, __version__, now)
+        mine = next((m for name, m in checkins.items() if name.casefold() == self.bot.node.name.casefold()), None)
+        try:
+            if mine is None:
+                await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await mine.edit(content=content)
+            self._checked_in = time.monotonic()
+            log.info("Backup check-in from %s", self.bot.node.name)
+        except discord.HTTPException as e:
+            log.warning("Couldn't post this PC's backup check-in: %s", e)
+
+    async def _watch_backups(self, channel, checkins: dict[str, discord.Message], alerts, now: datetime) -> None:
+        """On the answering PC: alert (once) when a listed PC stops checking in, and say when it's back."""
+        cfg = self.bot.config.failover
+        self.checkins = {name: m.edited_at or m.created_at for name, m in checkins.items()}
+        if self._active_from is None:
+            self._active_from = time.monotonic()
+        if time.monotonic() - self._active_from < CHECKIN_EVERY + 300:
+            return  # give the backups a full round to check in after we take over
+        if time.monotonic() - self._last_watch < 300:
+            return
+        self._last_watch = time.monotonic()
+        self.quiet = quiet_pcs(list(cfg.pcs), self.bot.node.name, self.checkins, now)
+        try:
+            for pc in self.quiet:
+                if pc.casefold() not in alerts:
+                    last = next((t for n, t in self.checkins.items() if n.casefold() == pc.casefold()), None)
+                    await channel.send(render_alert(pc, last), allowed_mentions=discord.AllowedMentions.none())
+                    log.warning("Backup %s hasn't checked in", pc)
+            for pc, msg in alerts.items():
+                if pc not in {q.casefold() for q in self.quiet} and "✅" not in msg.content:
+                    back = next((t for n, t in self.checkins.items() if n.casefold() == pc), now)
+                    name = parse_tagged(msg.content, _ALERT_LINE) or pc
+                    await msg.edit(content=render_alert(name, None, back))
+                    log.info("Backup %s checked in again", name)
+        except discord.HTTPException as e:
+            log.warning("Couldn't post a backup alert: %s", e)
 
     def _check_stale(self) -> None:
         """Step down if we haven't been able to check in for too long."""
@@ -164,14 +271,29 @@ class Coordinator:
         self._warned_channel = False
         return channel
 
+    async def _scan(self, channel: discord.abc.Messageable):
+        """Pingwin's messages in the status channel: lease messages (oldest first; the oldest is the
+        real one), each PC's check-in message, and open alerts (newest per PC, by lowercase name)."""
+        status: list[discord.Message] = []
+        checkins: dict[str, discord.Message] = {}
+        alerts: dict[str, discord.Message] = {}
+        async for m in channel.history(limit=HISTORY_SCAN):  # newest first
+            if not (self.bot.user and m.author.id == self.bot.user.id):
+                continue
+            if m.content.startswith(HEADER):
+                status.append(m)
+            elif m.content.startswith(CHECKIN_HEADER):
+                name = parse_tagged(m.content, _CHECKIN_LINE)
+                if name and name not in checkins:
+                    checkins[name] = m
+            elif m.content.startswith(ALERT_HEADER):
+                name = parse_tagged(m.content, _ALERT_LINE)
+                if name and name.casefold() not in alerts:
+                    alerts[name.casefold()] = m
+        return sorted(status, key=lambda m: m.id), checkins, alerts
+
     async def _status_messages(self, channel: discord.abc.Messageable) -> list[discord.Message]:
-        """All of Pingwin's status messages in the channel, oldest first (the oldest is the real one)."""
-        found = [
-            m
-            async for m in channel.history(limit=HISTORY_SCAN)
-            if self.bot.user and m.author.id == self.bot.user.id and m.content.startswith(HEADER)
-        ]
-        return sorted(found, key=lambda m: m.id)
+        return (await self._scan(channel))[0]
 
     def _set_active(self, value: bool, reason: str) -> None:
         if value == self.active and self._announced:
@@ -185,6 +307,7 @@ class Coordinator:
                 self.bot.dispatch("pingwin_active")
         else:
             self.active_since = None
+            self._active_from = None
             log.info("STANDBY on %s: %s", self.bot.node.name, reason)
             if changed:
                 self.bot.dispatch("pingwin_standby")

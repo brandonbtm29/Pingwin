@@ -54,6 +54,12 @@ class FakeChannel:
             yield m
 
 
+def status(channel):
+    from pingwin.failover import HEADER
+
+    return [m for m in channel.messages if m.content.startswith(HEADER)]
+
+
 def make_pc(name, channel):
     bot = SimpleNamespace(
         config=SimpleNamespace(failover=FailoverConfig(True, 99, 30, 120, pcs=("BTM-NOVA", "FRIEND-PC"))),
@@ -115,7 +121,7 @@ def test_main_preferred_backup_covers_outage(world):
 
     run(main.tick(), backup.tick())  # main is back
     assert main.active and not backup.active
-    assert len(channel.messages) == 1
+    assert len(status(channel)) == 1
 
 
 def test_simultaneous_start_converges_to_one(world):
@@ -126,10 +132,40 @@ def test_simultaneous_start_converges_to_one(world):
         await asyncio.gather(main.tick(), backup.tick())
 
     asyncio.run(both())
-    assert len(channel.messages) == 2
+    assert len(status(channel)) == 2
     clock.advance(30)
     run(main.tick(), backup.tick())
     clock.advance(30)
     run(main.tick(), backup.tick())
     assert main.active and not backup.active
-    assert len(channel.messages) == 1
+    assert len(status(channel)) == 1
+
+
+def test_backups_check_in_and_quiet_ones_raise_one_alert(world, monkeypatch):
+    from pingwin import failover
+
+    clock, channel, main, backup = world
+    start = clock.now
+    monkeypatch.setattr(failover.time, "monotonic", lambda: (clock.now - start).total_seconds() + 1000)
+
+    async def run(minutes, pcs):
+        for _ in range(int(minutes * 2)):
+            for pc in pcs:
+                await pc.tick()
+            clock.advance(30)
+
+    async def go():
+        await run(1, [main, backup])
+        checkins = [m for m in channel.messages if m.content.startswith(failover.CHECKIN_HEADER)]
+        assert len(checkins) == 1 and "FRIEND-PC" in checkins[0].content
+        await run(40, [main, backup])  # still checking in: no alert
+        assert main.checkins and not any(m.content.startswith(failover.ALERT_HEADER) for m in channel.messages)
+        await run(80, [main])  # the backup PC goes quiet
+        alerts = [m for m in channel.messages if m.content.startswith(failover.ALERT_HEADER)]
+        assert len(alerts) == 1 and "FRIEND-PC" in alerts[0].content and main.quiet == ["FRIEND-PC"]
+        backup._checked_in = None  # it comes back (restarted)
+        await run(10, [main, backup])
+        alerts = [m for m in channel.messages if m.content.startswith(failover.ALERT_HEADER)]
+        assert len(alerts) == 1 and "✅" in alerts[0].content and main.quiet == []
+
+    asyncio.run(go())

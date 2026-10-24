@@ -345,7 +345,7 @@ class Attendance(commands.GroupCog, group_name="attendance", group_description="
         view.add_item(CheckInButton(key))
         extra = " You'll need the code the host announces." if s.get("code") else ""
         try:
-            msg = await channel.send(f"📍 **{event.name}** has started! Here? Tap to check in.{extra}", view=view)
+            msg = await channel.send(self.bot.persona.say("checkin_open", event=event.name) + extra, view=view)
             s["checkin_message"] = [channel.id, msg.id]
         except discord.HTTPException as e:
             log.warning("Attendance: couldn't post the check-in button: %s", e)

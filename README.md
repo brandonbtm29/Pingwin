@@ -9,7 +9,7 @@ A friendly Discord bot for a friends' server. Right now it does **opt-in ping ro
 members tap buttons in `#roles` to choose which pings they get (movie nights,
 streams, game days…), so the server can stop using `@everyone` for everything.
 
-- **Swappable personality:** every message comes from a persona file, so you can rename it or change its voice without touching code.
+- **Swappable personality:** announcements and replies come from a persona file, so you can rename it or change its voice without touching code. The default, Pingwin, is a playful penguin: puns in announcements, plain words in mod tools and errors.
 - **Runs on several PCs:** one answers, the others wait on standby and take over if it goes offline.
 - **Updates itself** from GitHub.
 - **Dashboard** in your browser for settings, status and logs.

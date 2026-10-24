@@ -160,6 +160,8 @@
         </div>
         <label>Description<textarea id="r-desc" rows="2" maxlength="2000"></textarea></label>
         <label class="switch" id="r-tz-wrap"><input type="checkbox" id="r-tz"><span>Time zone menu: each role also sets the member's time zone (same as <code>/pingwin timezone set</code>)</span></label>
+          <div class="row-actions tight" id="r-tz-all-wrap" hidden><button class="btn" id="r-tz-all" type="button">＋ Add every time zone</button>
+            <span class="hint">About 20: all US zones plus common ones abroad. Menus with more than 10 roles show as a dropdown in Discord.</span></div>
 
         <div class="table-wrap">
           <table class="roles">
@@ -199,13 +201,14 @@
       <div class="banner warn-banner" id="f-intents" hidden></div>
       <div class="banner" id="f-restart" hidden>A change needs Pingwin to restart (Discord intents changed).
         <button class="btn" data-action="restart">Restart Pingwin</button></div>
+      <nav class="subtabs" id="f-subtabs" role="tablist" aria-label="Features"></nav>
       <div id="f-sections"></div>
-      <div class="panel" id="f-attendance" hidden>
+      <div class="panel" id="f-attendance" data-feature="attendance" hidden>
         <h2>Event attendance</h2>
         <p class="hint">Recent events and who came. Add or remove people, and retry Frumples that didn't go through.</p>
         <div id="a-list"></div>
       </div>
-      <div class="panel" id="f-birthdays">
+      <div class="panel" id="f-birthdays" data-feature="birthdays">
         <h2>Birthday list</h2>
         <p class="hint">Members add their own with <code>/pingwin birthday set</code>. Add or fix anyone's here (month and day only).</p>
         <div class="row-actions bday-add">
@@ -219,7 +222,7 @@
         </div>
         <div class="table-wrap"><table class="rows-table" id="b-table"></table></div>
       </div>
-      <div class="panel" id="f-watchlist" hidden>
+      <div class="panel" id="f-watchlist" data-feature="movienight" hidden>
         <h2>Movie watchlists</h2>
         <div id="f-watchlist-body"></div>
       </div>

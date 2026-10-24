@@ -23,6 +23,19 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "menu_footer": "Tap again to opt out",
     "about": "I'm {name}.",
     "reloaded": "Settings reloaded.",
+    "movie_nominated": "🎬 **{title}** joined the {series} watchlist (suggested by {by}).",
+    "movie_rated": "Thanks! You gave it **{score}/10**. ⭐",
+    "movie_rate_prompt": "How was it? Rate it out of 10 and say what you thought. Ratings close {closes}.",
+    "movie_summary": "📊 **{title}**: {count}, group average **{avg}/10**",
+    "movie_poll_none": "🍿 The {series} poll closed with no votes.",
+    "movie_poll_tie": "🍿 It's a tie between {names}! A mod will pick (`/pingwin movie tonight`).",
+    "movie_poll_winner": "🍿 The votes are in! **{title}** wins with {votes}{extra}.",
+    "gameday_reminder": "⏰ **{title}** starts {when}!",
+    "gameday_starting": "🎮 **{title}** is starting now!",
+    "event_new": "📅 **New event: {event}**\n{when}",
+    "event_soon": "⏰ **{event}** starts {when}!",
+    "event_starting": "▶️ **{event}** is starting now!",
+    "checkin_open": "📍 **{event}** has started! Here? Tap to check in.",
 }
 
 

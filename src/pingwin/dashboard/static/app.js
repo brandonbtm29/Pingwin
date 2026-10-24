@@ -147,6 +147,19 @@ const TZ_PRESET = {
     { name: "Pacific Time", emoji: "🌊", description: "", zone: "America/Los_Angeles" },
   ],
 };
+function addAllZones() {
+  const m = currentMenu();
+  const have = new Set(m.roles.map((r) => r.zone));
+  let added = 0;
+  for (const z of state.tz_preset || []) {
+    if (have.has(z.zone)) continue;
+    m.roles.push({ name: z.name, emoji: z.emoji, description: "", zone: z.zone });
+    added++;
+  }
+  if (!added) return toast("Every time zone is already in this menu.");
+  markRolesDirty(); buildMenuPicker(); buildRoleRows();
+  toast(`Added ${added} time zones. Save, then use Create missing roles and Refresh posted menus.`);
+}
 
 function currentMenu() {
   menuIndex = Math.max(0, Math.min(menuIndex, rolesDraft.menus.length - 1));
@@ -213,6 +226,7 @@ function buildMenuEditor() {
   $("r-tz-wrap").hidden = main;
   $("r-tz").checked = !!m.timezone;
   $("r-zone-head").hidden = !m.timezone;
+  $("r-tz-all-wrap").hidden = !m.timezone;
   buildRoleRows();
 }
 
@@ -228,9 +242,14 @@ function renderRoles() {
 
   const gate = $("r-gate");
   const current = d.required_role;
+  // Only roles that aren't in a menu and existed before the first menu was posted (IDs grow with time).
+  const menuRoles = new Set(d.menus.flatMap((m) => m.roles.map((r) => r.name.trim().toLowerCase())));
+  const firstMenu = (state.menus || []).map((m) => m.message_id).filter(Boolean).sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1))[0];
+  const gateRoles = state.roles.filter((r) => !r.managed && !menuRoles.has(r.name.toLowerCase())
+    && (!firstMenu || BigInt(r.id) < BigInt(firstMenu) || r.name === current));
   gate.replaceChildren(
     el("option", { value: "" }, "Everyone in the server"),
-    ...state.roles.filter((r) => !r.managed).map((r) => el("option", { value: r.name }, `Only members with ${r.name}`)),
+    ...gateRoles.map((r) => el("option", { value: r.name }, `Only members with ${r.name}`)),
   );
   if (current && !roleByName(current)) gate.append(el("option", { value: current }, `Only members with ${current} (missing!)`));
   gate.value = current;
@@ -255,9 +274,15 @@ function renderRoles() {
   posted.replaceChildren();
   if (state.menus.length) {
     posted.append(el("h3", {}, "Posted menus"));
-    posted.append(el("ul", {}, state.menus.map((m) =>
-      el("li", {}, el("strong", {}, m.menu_title || "A removed menu"), " in ",
-        el("a", { href: m.url, target: "_blank", rel: "noreferrer" }, m.channel ? `#${m.channel}` : "a channel")))));
+    posted.append(el("ul", { class: "posted-list" }, state.menus.map((m) =>
+      el("li", {}, el("span", {}, el("strong", {}, m.menu_title || "A removed menu"), " in ",
+        el("a", { href: m.url, target: "_blank", rel: "noreferrer" }, m.channel ? `#${m.channel}` : "a channel")),
+        el("button", { class: "btn small danger", onclick: async (e) => {
+          if (!window.confirm(`Remove the “${m.menu_title || "old"}” menu from ${m.channel ? "#" + m.channel : "Discord"}? This deletes Pingwin's message there; nobody loses their roles.`)) return;
+          e.target.disabled = true;
+          try { toast((await api("/api/action", { action: "remove_menu", message_id: m.message_id })).message); await loadState(); }
+          catch (err) { e.target.disabled = false; toast(err.message, true); }
+        } }, "Remove")))));
   }
 }
 
@@ -324,6 +349,7 @@ $("r-tz").addEventListener("change", (e) => {
   buildMenuEditor();
   buildMenuPicker();
 });
+$("r-tz-all").addEventListener("click", addAllZones);
 $("r-gate").addEventListener("change", (e) => { rolesDraft.required_role = e.target.value; markRolesDirty(); });
 $("r-add").addEventListener("click", () => {
   currentMenu().roles.push({ name: "", emoji: "", description: "", zone: "" });
@@ -434,6 +460,7 @@ function buildPcList() {
       i === 0 ? el("span", { class: "tag" }, "main") : el("span", { class: "tag" }, `backup ${i}`),
       name.toLowerCase() === me ? el("span", { class: "tag" }, "this PC") : null,
       state.config.failover.enabled && name.toLowerCase() === leader ? el("span", { class: "tag live" }, "answering") : null,
+      checkinTag(name, leader, me),
       el("button", { class: "btn icon", "aria-label": "Move up", disabled: i === 0, onclick: move(-1) }, "↑"),
       el("button", { class: "btn icon", "aria-label": "Move down", disabled: i === pcsDraft.pcs.length - 1, onclick: move(1) }, "↓"),
       el("button", { class: "btn icon", "aria-label": "Remove", onclick: () => { pcsDraft.pcs.splice(i, 1); markPcsDirty(); buildPcList(); } }, "✕"),
@@ -443,6 +470,18 @@ function buildPcList() {
   const listed = pcsDraft.pcs.some((p) => p.toLowerCase() === me);
   $("p-add-me").hidden = listed;
   $("p-add-me").textContent = `Add this PC (${state.node})`;
+}
+
+// Standby PCs check in every 30 minutes; the answering PC sees those check-ins.
+function checkinTag(name, leader, me) {
+  const f = state.config.failover;
+  const key = name.toLowerCase();
+  if (!f.enabled || key === leader || !state.active) return null;
+  const seen = Object.entries(f.checkins || {}).find(([n]) => n.toLowerCase() === key);
+  const quiet = (f.quiet || []).some((n) => n.toLowerCase() === key);
+  if (!seen) return el("span", { class: `tag ${quiet ? "bad" : ""}`, title: "Standby PCs check in every 30 minutes" }, quiet ? "⚠️ not checking in" : "no check-in yet");
+  return el("span", { class: `tag ${quiet ? "bad" : "ok"}`, title: "Standby PCs check in every 30 minutes" },
+    `${quiet ? "⚠️ quiet, last check-in" : "standing by, checked in"} ${ago(seen[1])}`);
 }
 
 function addPc(name) {
@@ -566,7 +605,6 @@ $("pair-accept").addEventListener("click", async () => {
 // ---------- features -------------------------------------------------------
 let featureData = null;
 const featureDrafts = {};
-const openSections = new Set();
 
 async function loadFeatures(force = false) {
   if (featureData && !force && Object.values(featureDrafts).some((d) => d.dirty)) return;
@@ -652,15 +690,48 @@ function guideUrl(anchor) {
   return `${repo}/blob/main/docs/FEATURES.md${anchor ? "#" + anchor : ""}`;
 }
 
+// The Features tab shows one feature at a time, picked from a row of sub-tabs.
+const FEATURE_ICONS = { bot: "⚙️", events: "📅", birthdays: "🎂", movienight: "🎬", gameday: "🎮", attendance: "🎫", streams: "📺", welcome: "👋", modlog: "🛡️" };
+let featureTab = null;
+try { featureTab = localStorage.getItem("pingwin-feature-tab"); } catch { /* private window */ }
+
+function showFeatureTab(key) {
+  featureTab = key;
+  try { localStorage.setItem("pingwin-feature-tab", key); } catch { /* fine */ }
+  document.querySelectorAll("#f-subtabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.key === key)));
+  document.querySelectorAll("#f-sections > .feature").forEach((d) => d.classList.toggle("off-tab", d.dataset.key !== key));
+  document.querySelectorAll("#tab-features [data-feature]").forEach((p) => p.classList.toggle("off-tab", p.dataset.feature !== key));
+}
+
+function renderSubtabs() {
+  const keys = featureData.sections.map((x) => x.key);
+  if (!keys.includes(featureTab)) featureTab = keys[0];
+  $("f-subtabs").replaceChildren(...featureData.sections.map((section) => {
+    const v = featureData.values[section.key] || {};
+    const on = "enabled" in v ? !!v.enabled : null;
+    const dirty = featureDrafts[section.key]?.dirty;
+    return el("button", { role: "tab", "data-key": section.key, "aria-selected": String(section.key === featureTab), onclick: () => showFeatureTab(section.key) },
+      el("span", { class: "st-icon", "aria-hidden": "true" }, FEATURE_ICONS[section.key] || "•"),
+      section.key === "bot" ? "General" : section.title,
+      on === null ? null : el("span", { class: `st-dot ${on ? "on" : "off"}`, title: on ? "On" : "Off", "aria-label": on ? "on" : "off" }),
+      dirty ? el("span", { class: "st-dirty", title: "Unsaved changes" }, "•") : null);
+  }));
+}
+
 function renderFeatures() {
   $("f-guide").href = guideUrl("");
   const box = $("f-sections");
+  renderSubtabs();
   box.replaceChildren(...featureData.sections.map((section) => {
     const values = JSON.parse(JSON.stringify(featureData.values[section.key]));
     const draft = featureDrafts[section.key] = { values, dirty: false, base: featureData.versions?.[section.key] };
     const saveBtn = el("button", { class: "btn primary", disabled: true }, "Save");
     const dirtyNote = el("span", { class: "dirty", hidden: true }, "Unsaved changes");
-    const mark = () => { draft.dirty = true; saveBtn.disabled = false; dirtyNote.hidden = false; };
+    const mark = () => {
+      const first = !draft.dirty;
+      draft.dirty = true; saveBtn.disabled = false; dirtyNote.hidden = false;
+      if (first) renderSubtabs();
+    };
     const fields = section.fields.map((field) => {
       const node = fieldInput(field, values[field.key], (v) => { values[field.key] = v; mark(); });
       return el("div", { class: "field" }, node, field.help && field.type !== "rows" ? el("span", { class: "hint" }, field.help) : null);
@@ -678,8 +749,8 @@ function renderFeatures() {
     const needs = section.needs ? el("div", { class: "needs" },
       "Needs the ", el("strong", {}, section.key === "modlog" ? "Server Members and Message Content intents" : "Server Members intent"),
       " turned on: Discord Developer Portal → your app → Bot → Privileged Gateway Intents. Restart Pingwin after saving.") : null;
-    const details = el("details", { class: "feature", open: openSections.has(section.key) },
-      el("summary", {}, el("h2", {}, section.title),
+    const details = el("div", { class: "feature", "data-key": section.key },
+      el("div", { class: "feature-head" }, el("h2", {}, el("span", { "aria-hidden": "true" }, (FEATURE_ICONS[section.key] || "") + " "), section.key === "bot" ? "General" : section.title),
         enabled === null ? null : el("span", { class: enabled ? "status-on" : "status-off" }, enabled ? "On" : "Off")),
       el("div", { class: "feature-body" },
         el("p", { class: "desc" }, section.description,
@@ -687,9 +758,9 @@ function renderFeatures() {
         needs, ...fields,
         el("div", { class: "row-actions" }, saveBtn, dirtyNote)),
     );
-    details.addEventListener("toggle", () => { details.open ? openSections.add(section.key) : openSections.delete(section.key); });
     return details;
   }));
+  showFeatureTab(featureTab);
 }
 
 async function loadWatchlist() {

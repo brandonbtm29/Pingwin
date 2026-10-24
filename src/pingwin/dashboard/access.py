@@ -59,7 +59,13 @@ def configured_channels(bot: Pingwin) -> list[tuple[str, int, set[str]]]:
     return out
 
 
-NEEDED = {"view_channel": "View Channel", "send_messages": "Send Messages", "embed_links": "Embed Links"}
+NEEDED = {
+    "view_channel": "View Channel",
+    "send_messages": "Send Messages",
+    "embed_links": "Embed Links",
+    # To find its own messages again: polls, Rate it buttons, role menus, check-ins.
+    "read_message_history": "Read Message History",
+}
 EXTRA = {"send_polls": "Create Polls"}
 
 

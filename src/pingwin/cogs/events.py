@@ -119,11 +119,11 @@ class EventReminders(commands.Cog):
             mentions += [u.mention for u in users]
         start = int(event.start_time.timestamp())
         if kind == "announced":
-            text = f"📅 **New event: {event.name}**\n<t:{start}:F> (<t:{start}:R>)"
+            text = self.bot.persona.say("event_new", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
         elif kind == "reminded":
-            text = f"⏰ **{event.name}** starts <t:{start}:R>!"
+            text = self.bot.persona.say("event_soon", event=event.name, when=f"<t:{start}:R>")
         else:
-            text = f"▶️ **{event.name}** is starting now!"
+            text = self.bot.persona.say("event_starting", event=event.name)
         content = (" ".join(mentions) + "\n" if mentions else "") + f"{text}\n{event.url}"
         try:
             await channel.send(

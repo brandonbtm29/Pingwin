@@ -24,9 +24,44 @@ COMMON: list[tuple[str, str]] = [
     ("Pacific", "America/Los_Angeles"),
     ("Alaska", "America/Anchorage"),
     ("Hawaii", "Pacific/Honolulu"),
+    ("Atlantic", "America/Halifax"),
+    ("Mexico City", "America/Mexico_City"),
+    ("Brazil (São Paulo)", "America/Sao_Paulo"),
     ("UK", "Europe/London"),
     ("Central Europe", "Europe/Berlin"),
+    ("Eastern Europe", "Europe/Athens"),
+    ("Gulf (Dubai)", "Asia/Dubai"),
+    ("India", "Asia/Kolkata"),
+    ("China & Singapore", "Asia/Singapore"),
+    ("Philippines", "Asia/Manila"),
+    ("Japan & Korea", "Asia/Tokyo"),
+    ("Australia (Sydney)", "Australia/Sydney"),
+    ("New Zealand", "Pacific/Auckland"),
     ("UTC", "UTC"),
+]
+
+# The time zone role menu's preset: (role name, emoji, zone). US zones first, then east to west.
+MENU_PRESET: list[tuple[str, str, str]] = [
+    ("Eastern Time", "🌅", "America/New_York"),
+    ("Central Time", "🌾", "America/Chicago"),
+    ("Mountain Time", "⛰️", "America/Denver"),
+    ("Arizona Time", "🌵", "America/Phoenix"),
+    ("Pacific Time", "🌊", "America/Los_Angeles"),
+    ("Alaska Time", "🏔️", "America/Anchorage"),
+    ("Hawaii Time", "🌺", "Pacific/Honolulu"),
+    ("Atlantic Time", "⚓", "America/Halifax"),
+    ("Mexico City Time", "🇲🇽", "America/Mexico_City"),
+    ("Brazil Time", "🇧🇷", "America/Sao_Paulo"),
+    ("UK Time", "🇬🇧", "Europe/London"),
+    ("Central Europe Time", "🇪🇺", "Europe/Berlin"),
+    ("Eastern Europe Time", "🏛️", "Europe/Athens"),
+    ("Gulf Time", "🇦🇪", "Asia/Dubai"),
+    ("India Time", "🇮🇳", "Asia/Kolkata"),
+    ("China & Singapore Time", "🇸🇬", "Asia/Singapore"),
+    ("Philippines Time", "🇵🇭", "Asia/Manila"),
+    ("Japan & Korea Time", "🇯🇵", "Asia/Tokyo"),
+    ("Australia East Time", "🇦🇺", "Australia/Sydney"),
+    ("New Zealand Time", "🇳🇿", "Pacific/Auckland"),
 ]
 
 # Words people put after a time: "8pm MT", "7:30pm eastern".
@@ -38,6 +73,13 @@ ABBREVIATIONS: dict[str, str] = {
     **{w: "America/Phoenix" for w in ("az", "arizona")},
     **{w: "America/Anchorage" for w in ("akt", "akst", "akdt", "alaska")},
     **{w: "Pacific/Honolulu" for w in ("hst", "hawaii")},
+    **{w: "America/Halifax" for w in ("ast", "adt", "atlantic")},
+    **{w: "Europe/London" for w in ("bst", "uk")},
+    **{w: "Europe/Berlin" for w in ("cet", "cest")},
+    **{w: "Asia/Kolkata" for w in ("ist",)},
+    **{w: "Asia/Tokyo" for w in ("jst", "kst")},
+    **{w: "Australia/Sydney" for w in ("aest", "aedt")},
+    **{w: "Pacific/Auckland" for w in ("nzst", "nzdt")},
     **{w: "UTC" for w in ("utc", "gmt", "z")},
 }
 

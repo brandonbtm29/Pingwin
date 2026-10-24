@@ -433,6 +433,7 @@ def build_state(bot: Pingwin) -> dict[str, Any]:
         posted.append(
             {
                 "url": m.url,
+                "message_id": str(m.message_id),
                 "channel": ch.name if ch else None,
                 "menu": m.menu,
                 "menu_title": menu.title if menu else None,
@@ -481,10 +482,16 @@ def build_state(bot: Pingwin) -> dict[str, Any]:
                 "takeover_after_seconds": cfg.failover.takeover_after_seconds,
                 "this_pc_rank": cfg.failover.rank(bot.node.name),
                 "this_pc_role": cfg.failover.describe(bot.node.name),
+                # Other PCs' latest backup check-ins (seconds ago), as seen by the answering PC.
+                "checkins": {
+                    name: round((now - at).total_seconds()) for name, at in getattr(coord, "checkins", {}).items()
+                },
+                "quiet": list(getattr(coord, "quiet", [])),
             },
         },
         "menus": posted,
         "zones": [{"label": label, "zone": zone} for label, zone in _zones.COMMON],
+        "tz_preset": [{"name": n, "emoji": e, "zone": z} for n, e, z in _zones.MENU_PRESET],
     }
 
 
@@ -1409,7 +1416,7 @@ async def post_failover(request: web.Request) -> web.Response:
 
 # --------------------------------------------------------------------- actions
 async def post_action(request: web.Request) -> web.Response:
-    from ..cogs.roles import MenuError, post_menu, refresh_menus, role_report
+    from ..cogs.roles import MenuError, post_menu, refresh_menus, remove_menu, role_report
     from ..pairing import PairingError
 
     bot = request.app[BOT]
@@ -1465,6 +1472,11 @@ async def post_action(request: web.Request) -> web.Response:
             return web.json_response({"message": f"Menu posted in #{channel.name}.", "url": message.jump_url})
         if action == "refresh_menus":
             return web.json_response({"lines": await refresh_menus(bot)})
+        if action == "remove_menu":
+            mid = str(payload.get("message_id", ""))
+            if not mid.isdigit():
+                raise ApiError("Which menu?")
+            return web.json_response({"message": await remove_menu(bot, int(mid))})
         if action == "pair_invite":
             from ..pairing import Syncthing, create_invite
 

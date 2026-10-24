@@ -44,3 +44,32 @@ def test_shared_folder_persona_wins(monkeypatch, tmp_path):
     monkeypatch.setenv("PINGWIN_DATA", str(tmp_path))
     assert load_persona("pingwin").name == "Custom"
     assert load_persona("deadpan").name == "Pingwin"  # falls back to the bundled one
+
+
+def test_every_pingwin_line_fills_in():
+    import re
+
+    from pingwin.persona import DEFAULT_MESSAGES, load_persona
+
+    p = load_persona("pingwin")
+    values = dict(
+        role="Gamer",
+        user="Sam",
+        required="Friend",
+        title="Alien",
+        series="Movie Mondays",
+        by="@sam",
+        score="8",
+        closes="soon",
+        count="3 ratings",
+        avg="7.5",
+        names="**A** and **B**",
+        votes="3 votes",
+        extra="",
+        when="soon",
+        event="Board games",
+    )
+    for key in DEFAULT_MESSAGES:
+        for template in p.messages[key]:
+            text = template.format_map({**values, "name": "Pingwin"})
+            assert not re.search(r"\{\w+\}", text), (key, text)

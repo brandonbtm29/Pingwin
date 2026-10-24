@@ -82,6 +82,80 @@ class RoleToggleButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pin
         await interaction.followup.send(msg, ephemeral=True)
 
 
+SELECT_AFTER = 10  # menus with more roles than this show as a dropdown instead of buttons
+
+
+class RoleSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"pingwin:rsel:(?P<menu>[A-Za-z0-9_-]{1,40})"):
+    """A dropdown for big menus (like the time zone menu). Options carry role IDs."""
+
+    def __init__(self, menu_key: str, options: list[discord.SelectOption] | None = None, *, many: bool = False) -> None:
+        options = options or [discord.SelectOption(label="…", value="0")]
+        super().__init__(
+            discord.ui.Select(
+                custom_id=f"pingwin:rsel:{menu_key}",
+                placeholder="Pick from the list…",
+                min_values=0 if many else 1,
+                max_values=len(options) if many else 1,
+                options=options,
+            )
+        )
+        self.menu_key = menu_key
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Select, match) -> RoleSelect:
+        return cls(match["menu"], list(item.options) or None, many=item.max_values > 1)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return getattr(interaction.client, "is_active", True)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        bot: Pingwin = interaction.client  # type: ignore[assignment]
+        guild, member = interaction.guild, interaction.user
+        if guild is None or not isinstance(member, discord.Member):
+            return
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        except discord.HTTPException:
+            return
+        cfg = bot.config.roles
+        menu = cfg.get_menu(self.menu_key)
+        picked = {int(v) for v in (interaction.data or {}).get("values", []) if str(v).isdigit()}
+        if menu is None:
+            msg = bot.persona.say("role_missing")
+        elif cfg.required_role and not has_role_named(member, cfg.required_role):
+            msg = bot.persona.say("not_allowed", required=cfg.required_role, user=member.display_name)
+        else:
+            try:
+                msg = await apply_picks(member, menu, picked, bot.persona)
+            except discord.Forbidden:
+                log.warning("Forbidden updating %s menu roles for %s", menu.key, member)
+                msg = bot.persona.say("no_permission", role=menu.title)
+        await interaction.followup.send(msg, ephemeral=True)
+
+
+async def apply_picks(member: discord.Member, menu: MenuConfig, picked: set[int], persona) -> str:
+    """A dropdown answer: the member ends up with exactly the picked roles from this menu."""
+    pairs = [(entry, role) for entry, role in resolve_menu(member.guild, menu) if role is not None]
+    if menu.mode == "one":
+        picked = set(list(picked)[:1])
+    add = [role for entry, role in pairs if role.id in picked and role not in member.roles]
+    drop = [role for entry, role in pairs if role.id not in picked and role in member.roles]
+    if drop:
+        await member.remove_roles(*drop, reason="Pingwin role menu: changed picks")
+    if add:
+        await member.add_roles(*add, reason="Pingwin role menu: picked from the list")
+    chosen = [(entry, role) for entry, role in pairs if role.id in picked]
+    zone_entry = next((entry for entry, role in chosen if entry.zone), None)
+    if menu.is_timezone:
+        zones.set_for(member.id, zone_entry.zone if zone_entry else None)
+    if not chosen:
+        return persona.say("role_removed", role=menu.title, user=member.display_name)
+    msg = persona.say("role_added", role=", ".join(role.name for _, role in chosen), user=member.display_name)
+    if zone_entry:
+        msg += f" Times you type now mean {zones.label(zones.zone(zone_entry.zone))} time."
+    return msg
+
+
 async def toggle(member: discord.Member, role: discord.Role, menu: MenuConfig, entry: MenuRole, persona) -> str:
     """Add or remove `role` for `member` following the menu's rules. Returns the reply."""
     if role in member.roles:
@@ -156,6 +230,12 @@ def role_problems(guild: discord.Guild, role: discord.Role, *, pingable: bool = 
 
 
 def menu_footer(menu: MenuConfig, persona) -> str:
+    if uses_dropdown(menu):
+        return (
+            "Pick one from the list. Pick again any time to change it."
+            if menu.mode == "one"
+            else persona.say("menu_footer")
+        )
     if menu.mode == "one":
         return "Pick one. Tap it again to clear it."
     return persona.say("menu_footer")
@@ -165,6 +245,11 @@ def build_menu_embed(menu: MenuConfig | RolesConfig, footer: str) -> discord.Emb
     if isinstance(menu, RolesConfig):
         menu = menu.menus[0]
     lines = [menu.description] if menu.description else []
+    if uses_dropdown(menu):
+        lines += ["", "Pick yours from the list below."]
+        embed = discord.Embed(title=menu.title, description="\n".join(lines), color=MENU_COLOR)
+        embed.set_footer(text=footer)
+        return embed
     if lines:
         lines.append("")
     for m in menu.roles:
@@ -180,8 +265,25 @@ class MenuError(Exception):
     """A problem posting or refreshing a menu, worded for the person who asked."""
 
 
-def menu_view(resolved: list[tuple[MenuRole, discord.Role | None]]) -> discord.ui.View:
+def uses_dropdown(menu: MenuConfig) -> bool:
+    return len(menu.roles) > SELECT_AFTER
+
+
+def menu_view(resolved: list[tuple[MenuRole, discord.Role | None]], menu: MenuConfig | None = None) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
+    if menu is not None and uses_dropdown(menu):
+        options = [
+            discord.SelectOption(
+                label=m.name[:100],
+                value=str(role.id),
+                emoji=m.emoji or None,
+                description=(m.description or (zones.label(zones.zone(m.zone)) if m.zone else ""))[:100] or None,
+            )
+            for m, role in resolved[:25]
+            if role is not None
+        ]
+        view.add_item(RoleSelect(menu.key, options, many=menu.mode != "one"))
+        return view
     for m, role in resolved:
         assert role is not None
         view.add_item(RoleToggleButton(role.id, label=m.name, emoji=m.emoji))
@@ -258,7 +360,7 @@ async def post_menu(
     resolved = _ready_menu(bot, channel.guild, menu)
     embed = build_menu_embed(menu, menu_footer(menu, bot.persona))
     try:
-        message = await channel.send(embed=embed, view=menu_view(resolved))
+        message = await channel.send(embed=embed, view=menu_view(resolved, menu))
     except discord.Forbidden as e:
         raise MenuError(
             f"I can't post in #{channel.name}. I need View Channel, Send Messages and Embed Links there."
@@ -292,7 +394,9 @@ async def refresh_menus(bot: Pingwin) -> list[str]:
         try:
             resolved = _ready_menu(bot, guild, menu)
             message = channel.get_partial_message(pm.message_id)
-            await message.edit(embed=build_menu_embed(menu, menu_footer(menu, bot.persona)), view=menu_view(resolved))
+            await message.edit(
+                embed=build_menu_embed(menu, menu_footer(menu, bot.persona)), view=menu_view(resolved, menu)
+            )
             lines.append(f"✅ Updated “{menu.title}” in #{channel.name}")
         except discord.NotFound:
             gone.add(pm.message_id)
@@ -303,6 +407,26 @@ async def refresh_menus(bot: Pingwin) -> list[str]:
             lines.append(f"❌ #{channel.name}: {e.text or e}")
     menus.forget(gone)
     return lines
+
+
+async def remove_menu(bot: Pingwin, message_id: int) -> str:
+    """Delete a posted menu message (Pingwin's own, so no extra permission) and forget it."""
+    pm = next((m for m in menus.load_menus() if m.message_id == message_id), None)
+    if pm is None:
+        return "That menu isn't on record anymore."
+    guild = bot.get_guild(pm.guild_id)
+    channel = guild.get_channel_or_thread(pm.channel_id) if guild else None
+    where = f"#{channel.name}" if channel else "its channel"
+    if isinstance(channel, (discord.TextChannel, discord.Thread)):
+        try:
+            await channel.get_partial_message(pm.message_id).delete()
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as e:
+            raise MenuError(f"Couldn't delete the menu in {where}: {e.text or e}") from e
+    menus.forget({pm.message_id})
+    log.info("Removed the %r menu from %s", pm.menu, where)
+    return f"Removed the menu from {where}."
 
 
 class RoleMenu(commands.GroupCog, group_name="rolemenu", group_description="Set up the opt-in role menus"):
@@ -366,5 +490,5 @@ class RoleMenu(commands.GroupCog, group_name="rolemenu", group_description="Set 
 
 
 async def setup(bot: Pingwin) -> None:
-    bot.add_dynamic_items(RoleToggleButton)
+    bot.add_dynamic_items(RoleToggleButton, RoleSelect)
     await bot.add_cog(RoleMenu(bot))

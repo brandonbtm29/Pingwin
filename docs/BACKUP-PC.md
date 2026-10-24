@@ -170,6 +170,14 @@ next to its own name and *on standby* in the summary.
 - **Each PC has its own dashboard and log.** The Status tab and the header pill (*Answering* / *Standby*)
   show what that PC is doing.
 - **Updates reach every PC** automatically from GitHub.
+- **Backups check in every 30 minutes.** Each PC on standby keeps a *🛟 Pingwin backup check-in* message in
+  the status channel up to date. If a listed PC hasn't checked in for over an hour, the answering PC posts
+  one *⚠️ Pingwin backup alert* there, and edits it to ✅ when the PC is back. The **PCs & failover** tab
+  shows each PC's last check-in too.
+- **Tailscale isn't needed on backup PCs.** Pingwin itself only needs the internet and SyncThing. Tailscale
+  is only for reaching a PC's dashboard from elsewhere: if the main PC is off, Pingwin keeps answering in
+  Discord from a backup, and only the main PC's dashboard link is down. Install Tailscale on a backup only
+  if you want that backup to have a dashboard link of its own.
 - **More PCs:** add more names to the list. Each one waits its turn.
 - **Removing a backup:**
   - On the backup: double-click **`Uninstall-Pingwin.cmd`** in its Pingwin folder. It takes the PC off the

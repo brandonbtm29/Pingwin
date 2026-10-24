@@ -2,8 +2,8 @@
 
 Besides the ping menu, Pingwin has eight optional features. They're all **off** until you turn them on.
 
-The easiest way to set them up is the dashboard's **Features** tab (`scripts\open_dashboard.cmd`). Each
-feature is a section you can open, switch on, and fill in. Changes save to the shared `config.toml`, so
+The easiest way to set them up is the dashboard's **Features** tab (`scripts\open_dashboard.cmd`). Pick a
+feature from the row of sub-tabs (a green dot means it's on), switch it on, and fill it in. Changes save to the shared `config.toml`, so
 every PC gets them. You can also edit `config.toml` by hand: each feature is its own `[section]`.
 
 | Feature | What it does | Needs |
@@ -39,9 +39,16 @@ the hour birthday shout-outs go out.
 | `/pingwin timezone remove` | Go back to the server's |
 
 **Time zone menu.** On the dashboard's **Role menu** tab, click **+ Time zone menu**. It makes a second
-button menu (Eastern, Central, Mountain, Pacific; change them as you like) where picking a role also sets
-that person's time zone, and picking another swaps it. `/pingwin timezone set` gives the matching role too, so the
-two always agree. Click **Create missing roles**, then post it with **Post it**.
+menu (Eastern, Central, Mountain, Pacific; change them as you like) where picking a role also sets that
+person's time zone, and picking another swaps it. **＋ Add every time zone** adds about 20 more: Arizona,
+Alaska, Hawaii, Atlantic and common zones abroad (UK, Central Europe, India, Japan & Korea, Australia and
+more). A menu with more than 10 roles shows as a dropdown in Discord instead of a wall of buttons.
+`/pingwin timezone set` gives the matching role too, so the two always agree. Click **Create missing roles**,
+then post it with **Post it** (or **Refresh posted menus** if it's already posted).
+
+**Posted menus** are listed on the Role menu tab, each with a **Remove** button that deletes Pingwin's
+message in Discord (nobody loses their roles). **Who can use the menus** only lists roles that existed before
+the first menu was posted, so the menu roles themselves (and later ones, like a birthday role) aren't offered.
 
 - `/pingwin gameday create when:fri 8pm` means 8 pm in the creator's zone. Anyone can also add a zone to the
   time: `sat 7pm CT`, `8:30pm MT`, `tomorrow 6pm eastern`. Pingwin replies with how it read the time.

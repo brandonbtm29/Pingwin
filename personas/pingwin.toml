@@ -3,7 +3,10 @@
 #
 # Each message can be one string or a list of strings (Pingwin picks one at random).
 # Placeholders: {role} role name, {user} member's display name, {name} bot name,
-# {required} the gate role (e.g. Friend).
+# {required} the gate role (e.g. Friend). Movie, game day and event messages have their own
+# (like {title}, {series}, {when}); leave out any message to use the plain default.
+#
+# Style: a penguin pun or emoji in announcements, never in mod tools or error messages.
 
 name = "Pingwin"
 # Nickname Pingwin gives itself in each server. "" = keep the account name.
@@ -23,5 +26,68 @@ not_allowed = "You'll need the **{required}** role first. Ask a mod to let you i
 role_missing = "Hmm, I can't find that role anymore. Ask a mod to repost the menu."
 no_permission = "My flippers can't reach **{role}**. A mod needs to move my role higher in the list."
 menu_footer = "Pingwin 🐧 · tap again to opt out"
-about = "I'm {name}, the clubhouse penguin. I hand out ping roles, and soon I'll run polls and game days too. 🐧"
+about = [
+    "I'm {name}, the clubhouse penguin. 🐧 I hand out roles, wish happy birthdays, run movie nights (polls, ratings and the history), game days, event reminders and stream alerts. Try `/pingwin` or `-pingwin help`.",
+    "Noot noot! I'm {name}. 🐧 Roles, birthdays, movie nights, game days, event reminders, stream alerts: if it happens in the clubhouse, I've probably got a flipper in it. Try `/pingwin` or `-pingwin help`.",
+]
 reloaded = "Fresh fish! Settings and personality reloaded. 🐟"
+
+# ---------------------------------------------------------------- movie nights
+movie_nominated = [
+    "🎬 **{title}** just slid onto the {series} watchlist, courtesy of {by}. 🐧",
+    "🍿 Noot noot! {by} added **{title}** to the {series} watchlist.",
+    "🎬 Fresh catch for {series}: **{title}** (thanks, {by}!) 🐟",
+]
+movie_rated = [
+    "Thanks! **{score}/10** is safely tucked into the igloo. ⭐",
+    "Got it: **{score}/10**. Every flipper counts! 🐧",
+    "**{score}/10**, noted. The colony thanks you. 🐧",
+]
+movie_rate_prompt = [
+    "How was it? Rate it out of 10 and tell the colony what you thought. Ratings close {closes}. 🐧",
+    "Lights up! 🎞️ Score it out of 10 and leave a comment. Ratings close {closes}.",
+    "The credits have rolled. 🐧 Give it a score out of 10 and a few words before {closes}.",
+]
+movie_summary = [
+    "📊 **{title}**: {count}, colony average **{avg}/10**",
+    "🐧 The flippers have spoken on **{title}**: {count}, average **{avg}/10**",
+]
+movie_poll_none = [
+    "🍿 The {series} poll closed with no votes. Even the penguins dozed off. 💤",
+    "🍿 The {series} poll closed to total silence. Brr. 🧊",
+]
+movie_poll_tie = [
+    "🍿 It's a tie between {names}! A mod gets the deciding flipper (`/pingwin movie tonight`).",
+    "🍿 Neck and neck (flipper and flipper?) between {names}! A mod will break the tie with `/pingwin movie tonight`.",
+]
+movie_poll_winner = [
+    "🍿 The votes are in! **{title}** wins with {votes}{extra}. Grab your snacks and waddle on over! 🐧",
+    "🎬 Noot noot! **{title}** takes it with {votes}{extra}. See you on the ice!",
+    "🍿 And the winner is... **{title}**, with {votes}{extra}! 🐧🎉",
+]
+
+# ---------------------------------------------------------------- game days and events
+gameday_reminder = [
+    "⏰ **{title}** starts {when}! Warm up those flippers. 🎮",
+    "⏰ Heads up, players: **{title}** starts {when}! 🐧",
+]
+gameday_starting = [
+    "🎮 **{title}** is starting now! Waddle in! 🐧",
+    "🎮 Game on! **{title}** is starting now.",
+]
+event_new = [
+    "📅 **New event: {event}**\n{when} 🐧",
+    "📅 Something's happening at the clubhouse! **{event}**\n{when}",
+]
+event_soon = [
+    "⏰ **{event}** starts {when}! Time to waddle over. 🐧",
+    "⏰ **{event}** starts {when}! Don't leave the colony waiting. 🐧",
+]
+event_starting = [
+    "▶️ **{event}** is starting now! 🐧",
+    "▶️ The huddle is forming: **{event}** is starting now!",
+]
+checkin_open = [
+    "📍 **{event}** has started! Here? Tap to check in. 🐧",
+    "📍 Roll call for **{event}**! Tap to check in, penguins. 🐧",
+]

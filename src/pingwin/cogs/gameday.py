@@ -233,9 +233,12 @@ class GameDay(commands.GroupCog, group_name="gameday", group_description="Game d
                 and self.cfg.remind_minutes
                 and timedelta(0) < start - now <= timedelta(minutes=self.cfg.remind_minutes)
             ):
-                kind, text = "reminded", f"⏰ **{g['title']}** starts <t:{int(start.timestamp())}:R>!"
+                kind = "reminded"
+                text = self.bot.persona.say(
+                    "gameday_reminder", title=g["title"], when=f"<t:{int(start.timestamp())}:R>"
+                )
             elif not g["started"] and timedelta(0) <= now - start < timedelta(minutes=30):
-                kind, text = "started", f"🎮 **{g['title']}** is starting now!"
+                kind, text = "started", self.bot.persona.say("gameday_starting", title=g["title"])
             if kind is None:
                 continue
             g[kind] = True

@@ -233,9 +233,16 @@ class RateModal(discord.ui.Modal):
             ask=str(self.ask.value or ""),
         )
         movies.save(lib)
-        await interaction.response.send_message(f"Thanks! You gave it **{score:g}/10**. ⭐", ephemeral=True)
+        await interaction.response.send_message(
+            interaction.client.persona.say("movie_rated", score=f"{score:g}"), ephemeral=True
+        )
         if cog:
             await cog.refresh_prompt(entry, lib)
+
+
+def series_label(s) -> str:
+    """A series' full name for announcements ('Movie Mondays'), else its short name."""
+    return getattr(s, "full_name", "") or s.name
 
 
 # A watchlist for anything that isn't for a particular series. No role, channel or showtime of its own:
@@ -605,7 +612,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             if channel:
                 try:
                     await channel.send(
-                        f"🎬 **{data['title']}** joined the {s.name} watchlist (suggested by <@{by}>).",
+                        self.bot.persona.say(
+                            "movie_nominated", title=data["title"], series=series_label(s), by=f"<@{by}>"
+                        ),
                         allowed_mentions=discord.AllowedMentions.none(),
                     )
                 except discord.HTTPException:
@@ -697,7 +706,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         desc = (
             "Ratings are closed."
             if closed
-            else f"How was it? Rate it out of 10 and say what you thought. Ratings close <t:{int(closes)}:R>."
+            else self.bot.persona.say("movie_rate_prompt", closes=f"<t:{int(closes)}:R>")
         )
         if lines:
             desc += "\n\n" + "\n".join(lines)
@@ -755,7 +764,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         n = sum(1 for r in entry.get("ratings", {}).values() if isinstance(r.get("score"), (int, float)))
         if not isinstance(channel, discord.TextChannel) or not n:
             return
-        text = f"📊 **{movies.label(movie)}**: {n} rating{'s' if n != 1 else ''}, group average **{avg:g}/10**"
+        text = self.bot.persona.say(
+            "movie_summary", title=movies.label(movie), count=f"{n} rating{'s' if n != 1 else ''}", avg=f"{avg:g}"
+        )
         if movie.get("imdb_rating"):
             diff = avg - movie["imdb_rating"]
             verdict = "kinder" if diff > 0 else "harsher" if diff < 0 else "spot on"
@@ -1159,16 +1170,18 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         role = self.bot.role_named(channel.guild, s.role)
         winner = None
         if not top:
-            text = f"🍿 The {s.name} poll closed with no votes."
+            text = self.bot.persona.say("movie_poll_none", series=series_label(s))
         elif len(top) > 1 and self.cfg.tie == "mods":
             names = " and ".join(f"**{noms[i]['title']}**" for i in top if i in noms)
-            text = f"🍿 It's a tie between {names}! A mod will pick (`/pingwin movie tonight`)."
+            text = self.bot.persona.say("movie_poll_tie", names=names)
         else:
             pick = random.choice(top) if len(top) > 1 else top[0]
             votes = dict(counts)[pick]
             title = noms[pick]["title"] if pick in noms else "the winner"
             extra = " (picked at random from a tie)" if len(top) > 1 else ""
-            text = f"🍿 The votes are in! **{title}** wins with {votes} vote{'s' if votes != 1 else ''}{extra}."
+            text = self.bot.persona.say(
+                "movie_poll_winner", title=title, votes=f"{votes} vote{'s' if votes != 1 else ''}", extra=extra
+            )
             if pick in noms:
                 winner = noms[pick]
                 if self.cfg.mark_watched:
