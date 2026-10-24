@@ -258,3 +258,26 @@ def test_adding_a_past_movie_night(monkeypatch):
         assert created and movies.load()["movies"][other["movie_id"]]["title"] == "Some Indie Film"
 
     asyncio.run(go())
+
+
+def test_movie_night_requests_and_the_movie_mod_role(monkeypatch):
+    async def lookup(http, key, title, year=None, spent=None, imdb_id=None):
+        return None
+
+    monkeypatch.setattr(movies, "omdb_lookup", lookup)
+
+    async def go():
+        seed()
+        cog = make_cog()
+        req = {"kind": "night", "series": "MMM", "data": {"title": "Blade Runner", "year": 1982, "date": "2026-10-12"}}
+        assert movienight.describe_request(req) == "Add **Blade Runner** (1982) to the MMM history, watched 2026-10-12"
+        msg = await cog.apply("night", "MMM", req["data"], 1)
+        assert "Added **Blade Runner (1982)**" in msg
+        assert "already in the history" in await cog.apply("night", "MMM", req["data"], 1)
+        # The movie mods role counts as a mod for movie night only.
+        cog.cfg.mod_role = "Movie Mod"
+        seen = []
+        cog.bot.is_mod = lambda member, role=None: seen.append(role) or False
+        assert cog.is_movie_mod(object()) is False and seen == ["Movie Mod"]
+
+    asyncio.run(go())

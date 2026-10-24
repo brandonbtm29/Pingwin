@@ -96,6 +96,9 @@ def describe_request(req: dict[str, Any]) -> str:
     if kind == "edit":
         changes = ", ".join(f"{k}: {v}" for k, v in d.get("changes", {}).items())
         return f"Fix **{d.get('label', 'a movie night')}** in the history: {changes}"
+    if kind == "night":
+        imdb = f" · <https://www.imdb.com/title/{d['imdb_id']}/>" if d.get("imdb_id") else ""
+        return f"Add **{d['title']}**{_yr(d)} to the {req['series']} history, watched {d['date']}{imdb}"
     return kind
 
 
@@ -125,8 +128,8 @@ class RequestButton(
         cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
         if cog is None:
             return
-        if not cog.bot.is_mod(interaction.user):
-            await interaction.response.send_message("Only mods can approve these.", ephemeral=True)
+        if not cog.is_movie_mod(interaction.user):
+            await interaction.response.send_message("Only movie mods can approve these.", ephemeral=True)
             return
         await interaction.response.defer()
         msg = await cog.decide(self.rid, self.act == "ok", interaction.user)
@@ -338,10 +341,14 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             None,
         )
 
+    def is_movie_mod(self, member: discord.abc.User) -> bool:
+        """Server mods, or members with the movie mods role: they approve movie requests."""
+        return self.bot.is_mod(member, getattr(self.cfg, "mod_role", "") or None)
+
     def _allowed(self, member: discord.abc.User, mode: str, role: str) -> bool:
         if mode == "everyone":
             return True
-        if self.bot.is_mod(member):
+        if self.is_movie_mod(member):
             return True
         if mode == "role" and isinstance(member, discord.Member) and role:
             return any(r.name.casefold() == role.casefold() for r in member.roles)
@@ -816,7 +823,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     # ------------------------------------------------------------ changes (with approvals)
     async def submit(self, kind: str, series: str, data: dict[str, Any], who: discord.abc.User) -> str:
         """Apply a change now (mods, or approvals off) or send it to the mods. Returns a reply."""
-        if not self.cfg.approvals or self.bot.is_mod(who):
+        if not self.cfg.approvals or self.is_movie_mod(who):
             return await self.apply(kind, series, data, who.id)
         channel = self.approval_channel()
         if channel is None:
@@ -922,6 +929,15 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             return self._apply_edit(data)
         if s is None:
             return f"There's no {series} series anymore."
+        if kind == "night":
+            e, created = await self.add_night(
+                s, data["title"], data.get("year"), data.get("imdb_id"), data["date"], rate=bool(data.get("rate"))
+            )
+            m = movies.load()["movies"].get(e["movie_id"], {"title": data["title"]})
+            label = f"{m['title']} ({m['year']})" if m.get("year") else m["title"]
+            if not created:
+                return f"{label} on {data['date']} was already in the history."
+            return f"Added **{label}** to the {s.name} history ({data['date']})."
         state = store.load(STATE)
         noms = self._data(state, s)["nominations"]
         if kind == "nominate":
@@ -1230,7 +1246,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if any(movies.norm(n["title"]) == movies.norm(title) and not n.get("watched") for n in noms):
             return f"**{title}** is already on the {s.name} watchlist."
         mine = [n for n in noms if n["by"] == member.id and not n.get("watched")]
-        if self.cfg.max_per_person and len(mine) >= self.cfg.max_per_person and not self.bot.is_mod(member):
+        if self.cfg.max_per_person and len(mine) >= self.cfg.max_per_person and not self.is_movie_mod(member):
             return (
                 f"You already have {len(mine)} nominations waiting (the limit is {self.cfg.max_per_person}). "
                 "Remove one with `/pingwin movie remove` first."
@@ -1387,8 +1403,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if s is None:
             await interaction.response.send_message("Pick a series from the list.", ephemeral=True)
             return
-        if not self.bot.is_mod(interaction.user):
-            await interaction.response.send_message("Only mods can change the franchise queue.", ephemeral=True)
+        if not self.is_movie_mod(interaction.user):
+            await interaction.response.send_message("Only movie mods can change the franchise queue.", ephemeral=True)
             return
         await interaction.response.send_modal(FranchiseModal(self, s))
 

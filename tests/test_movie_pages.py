@@ -296,3 +296,32 @@ def test_one_backup_copy_refreshed_daily(data):  # noqa: F811
     (store.backups_dir() / f"movielib-{date.today().isoformat()}.json").unlink()
     movies.save(lib)
     assert [x["day"] for x in store.backups(movies.STATE)] == [date.today().isoformat()]  # just one copy
+
+
+def test_movie_mods_get_the_movie_tools_but_not_the_dashboard(tmp_path, data, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace as NS
+
+    from pingwin.dashboard import server
+
+    roles = {"42": [NS(name="Movie Mod")], "43": [NS(name="Friend")]}
+    guild = NS(get_member=lambda uid: NS(roles=roles.get(str(uid), [])), members=[])
+    monkeypatch.setattr(server, "_guild", lambda bot: guild)
+
+    async def scenario(client, app):
+        bot = app[server.BOT]
+        bot.config.features = NS(movienight=NS(mod_role="movie mod", series=[], approvals=True))
+        mod = headers(app, "member")  # user 42, who has the role
+        r = await client.post("/api/movies/admin", json={"action": "import", "sheet_csv": SHEET}, headers=mod)
+        assert r.status == 200, await r.text()
+        body = await (await client.get("/api/movies", headers=mod)).json()
+        assert body["viewer"]["movie_mod"] is True and body["viewer"]["level"] == "member"
+        assert (await client.get("/api/movies/export", headers=mod)).status == 200
+        assert (await client.get("/api/logs", headers=mod)).status == 403  # still not the dashboard
+        token = app[SESSIONS].create({"id": "43", "name": "Pat", "avatar": None, "level": "member"})
+        friend = {**PUBLIC, "Cookie": f"{SESSION_COOKIE}={token}", "X-Pingwin": "1", "Origin": ORIGIN}
+        r = await client.post("/api/movies/admin", json={"action": "import", "sheet_csv": SHEET}, headers=friend)
+        assert r.status == 403
+        body = await (await client.get("/api/movies", headers=friend)).json()
+        assert body["viewer"]["movie_mod"] is False
+
+    run(scenario, tmp_path)

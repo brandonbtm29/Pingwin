@@ -87,6 +87,8 @@ MEMBER_PATHS = {
     "/api/movies/suggest",
     "/api/movies/search",
     "/api/movies/review",
+    "/api/movies/admin",  # movie mods only (checked in the handler)
+    "/api/movies/export",  # movie mods only (checked in the handler)
     "/api/signout",
     "/api/presence",
 }
@@ -1023,6 +1025,22 @@ def _movie_cog(bot: Any):
     return bot.get_cog("MovieNight") if hasattr(bot, "get_cog") else None
 
 
+def is_movie_mod(request: web.Request) -> bool:
+    """Admins, or a member with the movie mods role (Features → Movie night → Movie mods)."""
+    viewer = viewer_of(request)
+    if viewer.is_admin:
+        return True
+    if viewer.level != "member" or not viewer.user_id:
+        return False
+    bot = request.app[BOT]
+    role = ""
+    if hasattr(bot, "config"):
+        role = getattr(bot.config.features.movienight, "mod_role", "") or ""
+    guild = _guild(bot) if role else None
+    member = guild.get_member(int(viewer.user_id)) if guild is not None else None
+    return bool(member and any(r.name.casefold() == role.casefold() for r in member.roles))
+
+
 def _series_names(bot: Any) -> list[str]:
     cog = _movie_cog(bot)
     if cog is not None and hasattr(cog, "all_series"):
@@ -1046,6 +1064,7 @@ async def get_movies(request: web.Request) -> web.Response:
         members = {str(m.id): m.display_name for m in guild.members if not m.bot}
     names = movies.rater_names(lib, members)
     links = movies.rater_links(lib)
+    mod = is_movie_mod(request)
     history = []
     for e in reversed(lib["history"]):
         m = lib["movies"].get(e["movie_id"], {"title": "?"})
@@ -1122,26 +1141,26 @@ async def get_movies(request: web.Request) -> web.Response:
     pending = [
         {k: r.get(k) for k in ("id", "kind", "series", "data", "by_name", "at")}
         for r in lib["pending"].values()
-        if r.get("status") == "pending" and (viewer.is_admin or str(r.get("by")) == str(viewer.user_id))
+        if r.get("status") == "pending" and (mod or str(r.get("by")) == str(viewer.user_id))
     ]
     return web.json_response(
         {
-            "viewer": viewer.as_json(),
+            "viewer": {**viewer.as_json(), "movie_mod": mod},
             "series": series,
             "series_full": series_full,
             "franchise_series": [s.name for s in all_series if getattr(s, "franchises", False)],
             "history": history,
             "watchlists": watchlists,
             "imdb_lists": imdb,
-            "unmatched": movies.unmatched(lib, state) if viewer.is_admin else [],
-            "backups": store.backups(movies.STATE) if viewer.is_admin else [],
+            "unmatched": movies.unmatched(lib, state) if mod else [],
+            "backups": store.backups(movies.STATE) if mod else [],
             "search_budget": cog.search_budget() if cog is not None and hasattr(cog, "search_budget") else None,
             "pending": pending,
             "people": lib.get("people", {}),
             "members": sorted(
                 (
                     {"id": str(m.id), "name": m.display_name, "username": m.name, "global": m.global_name or ""}
-                    for m in (guild.members if guild is not None and viewer.is_admin else [])
+                    for m in (guild.members if guild is not None and mod else [])
                     if not m.bot
                 ),
                 key=lambda x: x["name"].casefold(),
@@ -1187,6 +1206,8 @@ async def get_movie_export(request: web.Request) -> web.Response:
     """Admins: download the reviews as a spreadsheet, or the whole movie library (everything Pingwin keeps)."""
     from .. import movies
 
+    if not is_movie_mod(request):
+        raise ApiError("That's for movie mods.", 403)
     bot = request.app[BOT]
     lib = movies.load()
     day = time.strftime("%Y-%m-%d")
@@ -1271,13 +1292,50 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
             raise ApiError("Nothing to change.")
         m = lib["movies"].get(e["movie_id"], {})
         data = {"hid": hid, "changes": changes, "label": f"{m.get('title', '?')} ({e.get('date') or 'no date'})"}
-        if viewer.is_admin:
+        if is_movie_mod(request):
             log.info("History fix from the movie pages (%s): %s", viewer.name, data)
             return web.json_response({"ok": True, "message": cog._apply_edit(data)})
         who = await _who(request)
         if who is None:
             raise ApiError("Couldn't find you in the server.", 403)
         return web.json_response({"ok": True, "message": await cog.submit("edit", e.get("series") or "", data, who)})
+    if kind == "night":  # a movie night that already happened; movie mods add it, others ask them
+        from .. import movies
+
+        s = cog.series(_str(payload, "series", 50))
+        if s is None:
+            raise ApiError("Pick the event.")
+        title = _str(payload, "title", 100)
+        if not title:
+            raise ApiError("Type the movie's title.")
+        day = _str(payload, "date", 10)
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            raise ApiError("Pick the date you watched it.")
+        if day > time.strftime("%Y-%m-%d", time.localtime(time.time() + 86400)):
+            raise ApiError("That date hasn't happened yet.")
+        y = _str(payload, "year", 4)
+        data = {
+            "title": title,
+            "year": int(y) if y.isdigit() else None,
+            "imdb_id": movies.imdb_id_in(_str(payload, "imdb_id", 20)),
+            "date": day,
+            "rate": bool(payload.get("rate")),
+        }
+        lib = movies.load()
+        hit = movies.find_movie(lib, title, data["year"])
+        if hit and any(e["movie_id"] == hit["id"] and e.get("date") == day for e in lib["history"]):
+            raise ApiError(f"{title} on {day} is already in the history.")
+        who = await _who(request)
+        if who is not None and not is_movie_mod(request):
+            return web.json_response({"ok": True, "message": await cog.submit("night", s.name, data, who)})
+        log.info("Movie night added from the movie pages (%s): %s on %s", viewer.name, title, day)
+        msg = await cog.apply("night", s.name, data, int(viewer.user_id or 0))
+        lib = movies.load()
+        ids = {m["id"] for m in lib["movies"].values() if data["imdb_id"] and m.get("imdb_id") == data["imdb_id"]}
+        found = movies.find_movie(lib, title, data["year"])
+        ids |= {found["id"]} if found else set()
+        e = next((x for x in lib["history"] if x.get("date") == day and x["movie_id"] in ids), None)
+        return web.json_response({"ok": True, "message": msg, "hid": e["id"] if e else None})
     raise ApiError("Unknown suggestion.")
 
 
@@ -1379,12 +1437,13 @@ async def post_movie_review(request: web.Request) -> web.Response:
     uid = str(viewer.user_id) if viewer.user_id else ""
     as_user = str(payload.get("as_user") or "").strip()
     guest = re.sub(r"\s+", " ", str(payload.get("guest") or "")).strip()[:40]
-    if guest and not viewer.is_admin:
+    mod = is_movie_mod(request)
+    if guest and not mod:
         raise ApiError("Only mods can enter a review for someone else.", 403)
     if guest and (len(guest) < 2 or guest.startswith("@")):
         raise ApiError("Type the guest's name.")
     if as_user and as_user != uid and not guest:
-        if not viewer.is_admin:
+        if not mod:
             raise ApiError("You can only review as yourself.", 403)
         if not as_user.isdigit():
             raise ApiError("Pick who the review is from.")
@@ -1509,8 +1568,8 @@ async def post_movie_admin(request: web.Request) -> web.Response:
 
     bot = request.app[BOT]
     viewer = viewer_of(request)
-    if not viewer.is_admin:
-        raise ApiError("That's for admins.", 403)
+    if not is_movie_mod(request):
+        raise ApiError("That's for movie mods.", 403)
     payload = await request.json()
     action = payload.get("action")
     cog = _movie_cog(bot)

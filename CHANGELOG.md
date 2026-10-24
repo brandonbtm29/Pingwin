@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.21.0 (2026-10-24)
+- **Movie mods:** a new *Movie mods* role setting (Features → Movie night → Who can do what). Members with it
+  approve movie requests (Discord cards or the movie pages) and get the movie pages' Admin tools, without the rest
+  of the dashboard. Server admins always can.
+- **Friends can add a movie we watched:** the History form is open to everyone signed in. With approvals on, a
+  member's request goes to the movie mods as an approval card in Discord and under *Waiting for a mod* on the
+  movie pages; movie mods add it straight away.
+
 ## 0.20.0 (2026-10-24)
 - **Add a movie we watched:** on History, admins add a movie night that already happened (title with IMDb
   suggestions, year, date, event). It's taken off that event's watchlist, opens so anyone can review it, and can

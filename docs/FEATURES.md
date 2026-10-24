@@ -249,9 +249,10 @@ Members (with the member role, like **Friend**) see:
   person's question and one for the next. Reviewing the same movie again updates yours. Admins can also
   enter a review for a member, or for a guest without Discord (saved under their name, like imported
   ratings, so **People** can group it). Each guest name is a separate guest; the box lists earlier guests.
-- **Add a movie we watched** (admins, on History): for a movie night that isn't in the history yet. Pick the
-  title (with IMDb suggestions), the date and the event. It comes off that event's watchlist, opens so people
-  can review it, and can also post a **Rate it** button in Discord. Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
+- **Add a movie we watched** (on History): for a movie night that isn't in the history yet. Pick the title
+  (with IMDb suggestions), the date and the event. It comes off that event's watchlist, opens so people can
+  review it, and can also post a **Rate it** button in Discord. Movie mods add it straight away; with approvals
+  on, everyone else's goes to the movie mods first. Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
   them, or click someone's card for their average, how they compare with the group, and their favorites.
 - **Watchlists:** each series' list as poster cards, with filters for named lists (like *Horror*), and a
   form to suggest a movie. Typing a title suggests matches from our library and from IMDb's catalog (via
@@ -299,6 +300,14 @@ all count as.
 
 The **Admin** tab is split into **People**, **Imports** (history, Discord watchlists, IMDb lists), **Movie
 details** (OMDb progress and movies not matched to IMDb) and **Backups**.
+
+### Movie mods
+
+**Features → Movie night → Movie mods** names a role (like `Movie Mod`) for people who run movie night without
+needing the rest of the dashboard. They can approve requests (the Approve/Deny card in the approvals channel, or
+*Waiting for a mod* on the movie pages), use the movie pages' **Admin** tab (People, Imports, Movie details,
+Backups), edit the history and franchise queues, and enter reviews for others. Server admins can always do all of
+this. Make sure movie mods can see the approvals channel.
 
 ### Where reviews are kept
 

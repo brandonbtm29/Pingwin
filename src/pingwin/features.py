@@ -115,6 +115,16 @@ SECTIONS: list[dict[str, Any]] = [
             ),
             # ---- who can do what
             F(
+                "mod_role",
+                "role",
+                "Movie mods",
+                "",
+                "Members with this role run movie night without the rest of the dashboard: they approve movie "
+                "requests (in Discord or on the movie pages) and get the movie pages' Admin tools. "
+                "Server admins always can.",
+                group="Who can do what",
+            ),
+            F(
                 "nominate",
                 "select",
                 "Who can nominate",

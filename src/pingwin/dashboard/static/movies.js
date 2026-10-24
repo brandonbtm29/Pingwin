@@ -61,6 +61,7 @@ function posterArt(m, cls = "poster-art") {
 }
 
 let data = null;
+const canMod = () => !!(data && data.viewer && data.viewer.movie_mod);
 
 async function load() {
   try { data = await api("/api/movies"); } catch (e) { $("m-sub").textContent = e.message; return; }
@@ -78,14 +79,15 @@ async function load() {
     put(box, v.avatar ? el("img", { class: "avatar", src: v.avatar, alt: "", width: "22", height: "22" }) : null, el("span", {}, v.name),
       el("button", { class: "btn small", onclick: async () => { try { await api("/api/signout", {}); } catch { /* ignore */ } window.location.reload(); } }, "Sign out"));
   }
-  const admin = v && v.level === "admin";
+  const admin = v && v.level === "admin";  // the whole dashboard
+  const mod = canMod();  // movie night tools (admins and movie mods)
   const guest = v && v.level === "viewer";
   $("m-guest").hidden = !guest;
   $("rv-box").hidden = guest;
   $("w-suggest").hidden = guest;
   document.body.classList.toggle("guest", !!guest);
   $("m-dashboard").hidden = !admin;
-  $("m-admin-tab").hidden = !admin;
+  $("m-admin-tab").hidden = !mod;
   $("o-note").textContent = data.omdb
     ? "Pingwin fills in genre, poster, plot, director, writers and stars by itself, a few at a time. This button does a bigger batch now."
     : "Add an OMDb API key in the dashboard (Features → Movie night) to look up details.";
@@ -97,19 +99,21 @@ async function load() {
     $("o-status").textContent = `${d.done} of ${d.total} movies have details` + (d.not_found ? ` · ${d.not_found} not found on OMDb` : "") +
       (!data.omdb ? "." : d.paused ? ` · ${d.paused}` : d.left && d.auto ? ` · filling in ${d.left} more in the background (${d.used_today} of ${d.daily} requests used today)` : ".");
   }
-  $("w-note").textContent = data.approvals && !admin ? "A mod approves suggestions before they join the list." : "";
+  $("w-note").textContent = data.approvals && !mod ? "A movie mod approves suggestions before they join the list." : "";
   fillSeries();
   fillPeople();
   fillReviewForm();
   renderHistory();
   renderReviews();
-  if (admin) renderPeopleAdmin();
+  if (mod) renderPeopleAdmin();
   renderWatchlists();
   renderStats();
   renderImdb();
-  if (admin) { renderImdbAdmin(); renderUnmatched(); renderBackups(); showAdminTab(store.get("pingwin-movies-admin-tab", "people")); }
-  $("n-box").hidden = !admin;
-  if (admin && !$("n-date").value) $("n-date").value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  if (mod) { renderImdbAdmin(); renderUnmatched(); renderBackups(); showAdminTab(store.get("pingwin-movies-admin-tab", "people")); }
+  $("n-box").hidden = !!guest;
+  $("n-go").textContent = mod || !data.approvals ? "Add to the history" : "Send to the movie mods";
+  $("n-note").textContent = mod || !data.approvals ? "" : "A movie mod approves it (in Discord or here) before it joins the history.";
+  if (!guest && !$("n-date").value) $("n-date").value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   // Guests are reviewers without a Discord account (their key is their name); list them for the review form.
   const guests = new Map();
   for (const h of data.history) for (const r of h.ratings) {
@@ -206,7 +210,7 @@ function renderHistory() {
 function showMovie(h) {
   const m = h.movie;
   const d = $("d-movie");
-  const admin = data.viewer.level === "admin";
+  const admin = canMod();  // admins and movie mods
   const fix = el("details", { class: "fix-form" }, el("summary", {}, admin ? "Edit" : "Suggest a fix"),
     el("div", { class: "grid2" },
       el("label", {}, "Date", el("input", { id: "f-date", type: "date", value: h.date || "" })),
@@ -362,7 +366,7 @@ async function queueOp(series, op, extra = {}) {
 
 function queueBlock(w) {
   const q = w.queue;
-  const admin = data.viewer.level === "admin";
+  const admin = canMod();  // admins and movie mods
   if (!q) {
     return el("div", { class: "queue empty" },
       el("h3", {}, "🎬 Franchise queue"),
@@ -501,9 +505,9 @@ $("n-go").addEventListener("click", async () => {
   const btn = $("n-go");
   btn.disabled = true;
   try {
-    const res = await api("/api/movies/admin", { action: "add_night", title, year: $("n-year").value.trim(), imdb_id: nightBox.imdb(),
+    const res = await api("/api/movies/suggest", { kind: "night", title, year: $("n-year").value.trim(), imdb_id: nightBox.imdb(),
       date: $("n-date").value, series: $("n-series").value, rate: $("n-rate").checked });
-    toast(res.message);
+    toast(res.message.replace(/\*\*/g, ""));
     nightBox.reset();
     await load();
     const h = data.history.find((x) => x.id === res.hid);
@@ -733,7 +737,7 @@ function reviewer() {
   return $("rv-who").value;
 }
 function fillReviewForm() {
-  const admin = data.viewer.level === "admin";
+  const admin = canMod();  // admins and movie mods
   const keepMovie = $("rv-movie").value;
   put($("rv-movie"), data.history.map((h) => el("option", { value: h.id }, `${movieLabel(h.movie)} · ${fmtDate(h.date)}${h.series ? " · " + evName(h.series) : ""}`)));
   if (keepMovie) $("rv-movie").value = keepMovie;
@@ -964,13 +968,13 @@ $("p-save").addEventListener("click", async () => {
 });
 
 // ---------- pending (mods approve here too) ----------
-const KIND = { nominate: "Add to watchlist", remove: "Remove from watchlist", watched: "Watched mark", tonight: "Tonight's movie", edit: "History fix" };
+const KIND = { nominate: "Add to watchlist", remove: "Remove from watchlist", watched: "Watched mark", tonight: "Tonight's movie", edit: "History fix", night: "Add a movie night" };
 function renderPending() {
   const p = data.pending || [];
   $("m-pending").hidden = !p.length;
-  const admin = data.viewer.level === "admin";
+  const admin = canMod();  // admins and movie mods
   put($("m-pending-list"), p.map((r) => el("li", {},
-    el("span", {}, el("strong", {}, KIND[r.kind] || r.kind), ` · ${r.series || ""} · `, r.data.title || r.data.label || "", r.data.changes ? ` (${Object.entries(r.data.changes).map(([k, v]) => `${k}: ${v}`).join(", ")})` : "", el("span", { class: "hint" }, ` asked by ${r.by_name}`)),
+    el("span", {}, el("strong", {}, KIND[r.kind] || r.kind), ` · ${r.series || ""} · `, r.data.title || r.data.label || "", r.data.date ? ` (watched ${fmtDate(r.data.date)})` : "", r.data.changes ? ` (${Object.entries(r.data.changes).map(([k, v]) => `${k}: ${v}`).join(", ")})` : "", el("span", { class: "hint" }, ` asked by ${r.by_name}`)),
     admin ? el("span", { class: "row-btns" },
       el("button", { class: "btn small primary", onclick: () => decide(r.id, true) }, "Approve"),
       el("button", { class: "btn small danger", onclick: () => decide(r.id, false) }, "Deny")) : el("span", { class: "hint" }, "waiting"))));
