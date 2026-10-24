@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.21.1 (2026-10-24)
+- Matching a movie to IMDb by hand keeps our year (OMDb sometimes gives the US release year).
+- Editing a franchise list keeps watched marks only for the same title *and* year (a 2026 remake no longer
+  inherits the 2002 movie's mark).
+
 ## 0.21.0 (2026-10-24)
 - **Movie mods:** a new *Movie mods* role setting (Features → Movie night → Who can do what). Members with it
   approve movie requests (Discord cards or the movie pages) and get the movie pages' Admin tools, without the rest

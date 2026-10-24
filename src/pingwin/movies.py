@@ -220,8 +220,8 @@ def imdb_id_in(text: str) -> str | None:
 def set_match(m: dict[str, Any], info: dict[str, Any]) -> None:
     """Point a library movie at the IMDb entry someone picked, replacing details from a wrong match."""
     for k, v in info.items():
-        if k in ("title", "id") or v in (None, "", "N/A"):
-            continue
+        if k in ("title", "id", "year") or v in (None, "", "N/A"):
+            continue  # keep our title and year (OMDb's year is sometimes the US release)
         m[k] = v
     if not m.get("year") and info.get("year"):
         m["year"] = info["year"]

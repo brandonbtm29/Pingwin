@@ -1374,9 +1374,9 @@ async def _queue_action(cog: Any, payload: dict[str, Any], viewer: Any) -> dict[
             raise ApiError("Type the franchise's name.")
         if not items:
             raise ApiError("List at least one movie, one per line.")
-        old = {i["title"].casefold(): i for i in (q or {}).get("items", [])}
-        for i in items:  # keep what's already watched when a list is edited
-            before = old.get(i["title"].casefold())
+        old = {(i["title"].casefold(), i.get("year")): i for i in (q or {}).get("items", [])}
+        for i in items:  # keep what's already watched when a list is edited (same title and year)
+            before = old.get((i["title"].casefold(), i.get("year")))
             if before and before.get("done") and not i.get("done"):
                 i["done"] = before["done"]
         keep = {k: q[k] for k in ("announced_for", "logged_for", "postponed_for", "paused") if q and k in q}

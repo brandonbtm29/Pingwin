@@ -127,3 +127,35 @@ def test_two_fridays_end_to_end(monkeypatch):
         assert sent[-1].startswith("franchise_done")  # nothing more to announce
 
     asyncio.run(go())
+
+
+def test_editing_the_list_keeps_watched_marks_by_title_and_year(tmp_path, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace as NS
+
+    from pingwin import store
+    from pingwin.dashboard.server import _queue_action
+
+    monkeypatch.setenv("PINGWIN_DATA", str(tmp_path))
+    s = NS(name="FFF", showtime="")
+    state = {}
+
+    class Cog:
+        def series(self, name):
+            return s
+
+        def _data(self, st, series):
+            return st.setdefault("fff", {"nominations": []})
+
+    store.save("movienight", state)
+    cog = Cog()
+    me = NS(name="Riley")
+
+    async def go():
+        await _queue_action(cog, {"series": "FFF", "op": "set", "name": "RE", "text": "✅ Resident Evil (2002)"}, me)
+        text = "Resident Evil (2002)\nResident Evil (2026)"  # the ✅ left off: still watched; the 2026 one isn't
+        await _queue_action(cog, {"series": "FFF", "op": "set", "name": "RE", "text": text}, me)
+        q = store.load("movienight")["fff"]["queue"]
+        assert [bool(i["done"]) for i in q["items"]] == [True, False]
+
+    asyncio.run(go())
