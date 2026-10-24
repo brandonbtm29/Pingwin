@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.21.2 (2026-10-24)
+- Fixing a movie's title or year in the history corrects that movie in place (keeping its poster, IMDb link and
+  details). It only switches to a different movie when one with exactly that title and year already exists.
+
 ## 0.21.1 (2026-10-24)
 - Matching a movie to IMDb by hand keeps our year (OMDb sometimes gives the US release year).
 - Editing a franchise list keeps watched marks only for the same title *and* year (a 2026 remake no longer

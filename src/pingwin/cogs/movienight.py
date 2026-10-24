@@ -1005,13 +1005,27 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if "series" in ch:
             e["series"] = ch["series"]
         if "title" in ch or "year" in ch:
-            old = lib["movies"].get(e["movie_id"], {})
-            m = movies.find_movie(lib, ch.get("title", old.get("title", "")), ch.get("year", old.get("year")))
-            if m is None:
-                m = movies.upsert_movie(
-                    lib, {"title": ch.get("title", old.get("title")), "year": ch.get("year", old.get("year"))}
-                )
-            e["movie_id"] = m["id"]
+            old = lib["movies"].get(e["movie_id"])
+            title = (ch.get("title") or (old or {}).get("title") or "").strip()
+            year = ch["year"] if "year" in ch else (old or {}).get("year")
+            # Another movie with exactly this title and year: point at it. Otherwise it's a correction to this
+            # movie, so fix it in place and keep its poster, IMDb link and details.
+            same = next(
+                (
+                    x
+                    for x in lib["movies"].values()
+                    if x is not old
+                    and movies.norm(x["title"]) == movies.norm(title)
+                    and str(x.get("year") or "") == str(year or "")
+                ),
+                None,
+            )
+            if same is not None:
+                e["movie_id"] = same["id"]
+            elif old is not None:
+                old["title"], old["year"] = title, year
+            else:
+                e["movie_id"] = movies.upsert_movie(lib, {"title": title, "year": year})["id"]
         if "poster" in ch and e["movie_id"] in lib["movies"]:
             lib["movies"][e["movie_id"]]["poster"] = ch["poster"] or None
         movies.save(lib)

@@ -281,3 +281,25 @@ def test_movie_night_requests_and_the_movie_mod_role(monkeypatch):
         assert cog.is_movie_mod(object()) is False and seen == ["Movie Mod"]
 
     asyncio.run(go())
+
+
+def test_history_fixes_correct_the_movie_in_place():
+    async def go():
+        seed()
+        lib = movies.load()
+        fly = movies.find_movie(lib, "The Fly", 1986)
+        fly.update(imdb_id="tt0091064", poster="https://x/fly.jpg")
+        movies.save(lib)
+        hid = next(e["id"] for e in lib["history"] if e["movie_id"] == fly["id"])
+        cog = make_cog()
+        cog._apply_edit({"hid": hid, "changes": {"year": 1987}})  # a year fix keeps the poster and IMDb link
+        m = movies.load()["movies"][fly["id"]]
+        assert m["year"] == 1987 and m["imdb_id"] == "tt0091064" and m["poster"] == "https://x/fly.jpg"
+        cog._apply_edit(
+            {"hid": hid, "changes": {"title": "Dr. Caligari", "year": 1989}}
+        )  # an existing movie: point at it
+        lib = movies.load()
+        e = next(x for x in lib["history"] if x["id"] == hid)
+        assert lib["movies"][e["movie_id"]]["title"] == "Dr. Caligari"
+
+    asyncio.run(go())
