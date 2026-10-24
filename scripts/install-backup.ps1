@@ -188,6 +188,16 @@ try {
     Step 3 "Getting Pingwin"
     if (Test-Path (Join-Path $InstallDir ".git")) {
         & $git -C $InstallDir pull --ff-only --quiet
+        if ($LASTEXITCODE -ne 0) {
+            # GitHub's history was rewritten (for example to remove names). Follow it only if this
+            # copy's version is on GitHub's list of replaced commits and nothing was changed here.
+            & $git -C $InstallDir fetch --quiet
+            $head = (& $git -C $InstallDir rev-parse HEAD).Trim()
+            $listed = (& $git -C $InstallDir show "@{u}:.github/rewritten-commits.txt" 2>$null) -contains $head
+            $dirty = & $git -C $InstallDir status --porcelain --untracked-files=no
+            if ($listed -and -not $dirty) { & $git -C $InstallDir reset --hard --quiet "@{u}" }
+            else { Todo "Couldn't update $InstallDir automatically (it has changes of its own). Starting the version it has." }
+        }
         Ok "Updated $InstallDir"
     } elseif ((Test-Path $InstallDir) -and (Get-ChildItem $InstallDir -Force | Select-Object -First 1)) {
         Stop-Setup "$InstallDir already exists and isn't a Pingwin download. Move it, or run the installer with -InstallDir somewhere else."

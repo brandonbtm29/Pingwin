@@ -25,6 +25,24 @@ async def _git(root: Path, *args: str, timeout: float = 60) -> tuple[int, str]:
     return proc.returncode or 0, out.decode(errors="replace").strip()
 
 
+REWRITTEN_LIST = ".github/rewritten-commits.txt"
+
+
+async def history_rewritten(root: Path) -> bool:
+    """GitHub's history was rewritten (e.g. to remove names) and this PC is on one of the old commits.
+
+    GitHub lists every replaced commit in REWRITTEN_LIST; scripts/run_pingwin.cmd then switches over,
+    but only when nothing was changed on this PC."""
+    code, head = await _git(root, "rev-parse", "HEAD")
+    if code:
+        return False
+    code, listed = await _git(root, "show", f"@{{u}}:{REWRITTEN_LIST}")
+    if code or head.strip() not in {line.strip() for line in listed.splitlines()}:
+        return False
+    log.info("GitHub's history was tidied up; this PC will switch to it")
+    return True
+
+
 async def update_available(root: Path) -> bool:
     """True when GitHub has newer commits that can be fast-forwarded cleanly."""
     if not (root / ".git").exists():
@@ -38,7 +56,7 @@ async def update_available(root: Path) -> bool:
         return False  # no upstream branch yet, or already current
     behind = int(out)
     code, _ = await _git(root, "merge-base", "--is-ancestor", "HEAD", "@{u}")
-    if code:
+    if code and not await history_rewritten(root):
         log.warning("Local commits differ from GitHub; skipping auto-update until that's sorted out")
         return False
     code, out = await _git(root, "status", "--porcelain", "--untracked-files=no")
