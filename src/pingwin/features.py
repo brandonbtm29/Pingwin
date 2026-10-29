@@ -113,6 +113,50 @@ SECTIONS: list[dict[str, Any]] = [
                     {"key": "franchises", "type": "toggle", "label": "Franchise queue"},
                 ],
             ),
+            # ---- voice check
+            F(
+                "voice_check",
+                "toggle",
+                "Notice movie nights in voice",
+                False,
+                "From 15 minutes before each showtime, Pingwin notes who's in the movie night's voice channel (the "
+                "series' Discord Event channel, or the busiest one). If enough people stay long enough and the night "
+                "isn't in the history yet, the movie mods get a card asking which movie it was. Only who and how "
+                "long, never audio.",
+                group="Voice check",
+            ),
+            F(
+                "voice_min_people",
+                "number",
+                "At least this many people",
+                3,
+                min=1,
+                max=50,
+                group="Voice check",
+                half=True,
+                show_if={"voice_check": [True]},
+            ),
+            F(
+                "voice_min_minutes",
+                "number",
+                "For at least (minutes)",
+                45,
+                min=5,
+                max=300,
+                group="Voice check",
+                half=True,
+                show_if={"voice_check": [True]},
+            ),
+            F(
+                "polls_channel",
+                "channel",
+                "Your movie polls are in",
+                None,
+                "Optional. Pingwin reads the polls there (like Horror or Not Horror, then a movie for each) to "
+                "suggest which movie it was.",
+                group="Voice check",
+                show_if={"voice_check": [True]},
+            ),
             # ---- who can do what
             F(
                 "mod_role",

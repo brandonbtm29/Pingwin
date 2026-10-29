@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.0 (2026-10-29)
+- **Noticing movie nights in voice** (Features → Movie night → Voice check): from 15 minutes before each
+  showtime, Pingwin notes who's in the movie night's voice channel (its Discord Event channel, or the busiest
+  one). If enough people stay long enough (3 people for 45 minutes by default) and the night isn't in the history
+  yet, the movie mods get a card in the approvals channel: **Which movie was it?**, with likely picks from the
+  polls (it understands Horror / Not Horror rounds), the franchise queue and the watchlist, plus *Something else…*
+  and *We skipped it*. The same card shows under *Waiting for a mod* on the movie pages. Picking one adds it to
+  the history, takes it off the watchlist and posts the Rate it button. Nights that are already logged just get
+  their turnout noted, shown as *In voice* in the movie's details.
+- Movie nights with no date now read **Pre-Clubhouse 🦕** and sort as the oldest.
+
 ## 0.21.2 (2026-10-24)
 - Fixing a movie's title or year in the history corrects that movie in place (keeping its poster, IMDb link and
   details). It only switches to a different movie when one with exactly that title and year already exists.

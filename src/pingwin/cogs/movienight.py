@@ -29,7 +29,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import franchise, movieaccess, movies, store
+from .. import franchise, movieaccess, movies, store, voicewatch
 from ..features import slug
 from ..timeparse import next_weekly
 
@@ -99,18 +99,29 @@ def describe_request(req: dict[str, Any]) -> str:
     if kind == "night":
         imdb = f" · <https://www.imdb.com/title/{d['imdb_id']}/>" if d.get("imdb_id") else ""
         return f"Add **{d['title']}**{_yr(d)} to the {req['series']} history, watched {d['date']}{imdb}"
+    if kind == "detected":
+        v = d.get("voice", {})
+        return (
+            f"{req['series']} on {d['date']}: {v.get('people', '?')} people were in voice for about "
+            f"{_duration(v.get('minutes', 0))}. Which movie was it?"
+        )
     return kind
+
+
+def _duration(minutes: int) -> str:
+    h, m = divmod(int(minutes or 0), 60)
+    return f"{h} h {m} min" if h else f"{m} min"
 
 
 # --------------------------------------------------------------------- buttons
 class RequestButton(
     discord.ui.DynamicItem[discord.ui.Button], template=r"pingwin:mvq:(?P<rid>[0-9a-f]+):(?P<act>ok|no)"
 ):
-    def __init__(self, rid: str, act: str) -> None:
+    def __init__(self, rid: str, act: str, label: str | None = None) -> None:
         ok = act == "ok"
         super().__init__(
             discord.ui.Button(
-                label="Approve" if ok else "Deny",
+                label=label or ("Approve" if ok else "Deny"),
                 style=discord.ButtonStyle.success if ok else discord.ButtonStyle.danger,
                 custom_id=f"pingwin:mvq:{rid}:{act}",
             )
@@ -135,6 +146,69 @@ class RequestButton(
         msg = await cog.decide(self.rid, self.act == "ok", interaction.user)
         try:
             await interaction.edit_original_response(content=msg, view=None)
+        except discord.HTTPException:
+            pass
+
+
+class NightPick(discord.ui.DynamicItem[discord.ui.Select], template=r"pingwin:mvd:(?P<rid>[0-9a-f]+)"):
+    """On a "movie night noticed in voice" card: movie mods pick which movie it was."""
+
+    def __init__(self, rid: str, options: list[discord.SelectOption] | None = None) -> None:
+        super().__init__(
+            discord.ui.Select(
+                custom_id=f"pingwin:mvd:{rid}",
+                placeholder="Which movie did we watch?",
+                options=options or [discord.SelectOption(label="Something else…", value="other")],
+            )
+        )
+        self.rid = rid
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Select, match):
+        return cls(match["rid"], list(getattr(item, "options", []) or []))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return getattr(interaction.client, "is_active", True)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        if cog is None:
+            return
+        if not cog.is_movie_mod(interaction.user):
+            await interaction.response.send_message("Only movie mods can pick this.", ephemeral=True)
+            return
+        choice = (interaction.data.get("values") or ["other"])[0]
+        if choice == "other":
+            await interaction.response.send_modal(OtherNightModal(self.rid))
+            return
+        await interaction.response.defer()
+        msg = await cog.decide(self.rid, True, interaction.user, choice=int(choice))
+        try:
+            await interaction.edit_original_response(content=msg, embed=None, view=None)
+        except discord.HTTPException:
+            pass
+
+
+class OtherNightModal(discord.ui.Modal, title="Which movie was it?"):
+    movie = discord.ui.TextInput(label="Title", max_length=100, placeholder="Like The Thing (1982)")
+    year = discord.ui.TextInput(label="Year (optional)", max_length=4, required=False)
+
+    def __init__(self, rid: str) -> None:
+        super().__init__()
+        self.rid = rid
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        if cog is None:
+            return
+        title, year = voicewatch.split_year(str(self.movie.value))
+        y = str(self.year.value or "").strip()
+        custom = {"title": title, "year": int(y) if y.isdigit() else year}
+        await interaction.response.defer()
+        msg = await cog.decide(self.rid, True, interaction.user, custom=custom)
+        try:
+            if interaction.message is not None:
+                await interaction.message.edit(content=msg, embed=None, view=None)
         except discord.HTTPException:
             pass
 
@@ -858,11 +932,261 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         log.info("Movie change from %s sent for approval: %s", req["by_name"], describe_request(req))
         return "Sent to the mods for approval. 👍"
 
-    async def decide(self, rid: str, approve: bool, mod: discord.abc.User) -> str:
+    # ------------------------------------------------------------ noticing movie nights in voice
+    async def watch_voice(self) -> None:
+        """Around each showtime, note who's in the group's voice channel. When the night is over and enough
+        people stayed long enough, ask the movie mods which movie it was (unless it's already logged)."""
+        if not getattr(self.cfg, "voice_check", False):
+            return
+        guild = self.bot.home_guild
+        if guild is None:
+            return
+        now_dt = datetime.now(self.bot.features.tz)
+        now = time.time()
+        state = store.load(STATE)
+        watch = state.setdefault("voice_watch", {})
+        changed = False
+        for s in self.all_series:
+            key = slug(s.name)
+            show = voicewatch.current_show(getattr(s, "showtime", "") or "", now_dt)
+            day = show.date().isoformat() if show else None
+            sess = watch.get(key)
+            if sess and sess["day"] != day:  # that night's window has closed
+                if not sess.get("done"):
+                    await self._voice_verdict(s, sess)
+                watch.pop(key)
+                changed, sess = True, None
+            if show is None:
+                continue
+            if sess is None:
+                sess = watch[key] = voicewatch.new_session(day, now)
+            elif sess.get("done") or now - sess["last"] < 55:  # about once a minute is plenty
+                continue
+            channel = self._movie_voice_channel(guild, s, show)
+            here = {str(m.id) for m in (channel.members if channel else []) if not m.bot}
+            voicewatch.sample(sess, here, now, channel.id if channel else None)
+            changed = True
+            if voicewatch.is_over(sess, show, now):
+                await self._voice_verdict(s, sess)
+                sess["done"] = True
+        if changed:
+            store.save(STATE, state)
+
+    def _movie_voice_channel(self, guild: discord.Guild, s, show: datetime):
+        """The voice channel of this series' Discord Event (if there is one around showtime), else the busiest."""
+        names = {n.casefold() for n in (s.name, getattr(s, "full_name", "")) if n}
+        near = [
+            e
+            for e in guild.scheduled_events
+            if e.channel is not None
+            and e.status in (discord.EventStatus.scheduled, discord.EventStatus.active)
+            and abs((e.start_time - show).total_seconds()) < 3 * 3600
+        ]
+        named = [e for e in near if any(n in e.name.casefold() for n in names)]
+        for e in named + near:
+            if isinstance(e.channel, discord.VoiceChannel | discord.StageChannel):
+                return e.channel
+        rooms = [*guild.voice_channels, *guild.stage_channels]
+        busiest = max(rooms, key=lambda c: sum(1 for m in c.members if not m.bot), default=None)
+        return busiest if busiest and any(not m.bot for m in busiest.members) else None
+
+    async def _voice_verdict(self, s, sess: dict[str, Any]) -> None:
+        need_people = int(getattr(self.cfg, "voice_min_people", 3) or 3)
+        need_minutes = int(getattr(self.cfg, "voice_min_minutes", 45) or 45)
+        people = voicewatch.stayed(sess, need_minutes)
+        day = sess["day"]
+        if len(people) < need_people:
+            log.info("%s on %s: %d stayed in voice, not a movie night", s.name, day, len(people))
+            return
+        voice = {"people": len(people), "minutes": voicewatch.minutes_together(sess), "peak": sess.get("peak", 0)}
+        lib = movies.load()
+        logged = next((e for e in lib["history"] if e.get("date") == day and e.get("series") == s.name), None)
+        if logged is not None:  # already in the history (franchise queue, a Pingwin poll, or a mod)
+            logged["voice"] = voice
+            movies.save(lib)
+            log.info("%s on %s: %d in voice, already logged", s.name, day, len(people))
+            return
+        if any(
+            r.get("kind") == "detected" and r.get("series") == s.name and r["data"].get("date") == day
+            for r in lib["pending"].values()
+        ):
+            return
+        guild = self.bot.home_guild
+        names = []
+        for uid in people:
+            m = guild.get_member(int(uid)) if guild else None
+            names.append(m.display_name if m else "someone")
+        try:
+            candidates = await self._night_candidates(s, day)
+        except Exception:  # a guess list is nice to have; the card still works without it
+            log.exception("Couldn't gather likely movies for %s", s.name)
+            candidates = []
+        rid = secrets.token_hex(4)
+        req = {
+            "id": rid,
+            "kind": "detected",
+            "series": s.name,
+            "data": {"date": day, "candidates": candidates, "voice": voice, "names": names},
+            "by": 0,
+            "by_name": "Pingwin",
+            "at": time.time(),
+            "status": "pending",
+        }
+        channel = self.approval_channel()
+        if channel is not None:
+            options = [
+                discord.SelectOption(
+                    label=(f"{c['title']} ({c['year']})" if c.get("year") else c["title"])[:100],
+                    description=(c.get("why") or "")[:100] or None,
+                    value=str(i),
+                )
+                for i, c in enumerate(candidates[:24])
+            ]
+            options.append(discord.SelectOption(label="Something else…", value="other", emoji="✏️"))
+            view = discord.ui.View(timeout=None)
+            view.add_item(NightPick(rid, options))
+            view.add_item(RequestButton(rid, "no", label="We skipped it"))
+            embed = discord.Embed(
+                title=f"🎬 Looks like {series_label(s)} happened!",
+                description=(
+                    f"**{len(people)} people** were in voice for about **{_duration(voice['minutes'])}** on "
+                    f"{day}: {', '.join(names)}.\nWhich movie was it? Picking one adds it to the history and "
+                    "posts the Rate it button."
+                ),
+                color=GOLD,
+            )
+            try:
+                msg = await channel.send(embed=embed, view=view)
+                req["card"] = [channel.id, msg.id]
+            except discord.HTTPException as e:
+                log.warning("Couldn't post the movie night card: %s", e)
+        lib = movies.load()
+        lib["pending"][rid] = req
+        movies.save(lib)
+        log.info("%s on %s: %d stayed in voice; asked the movie mods which movie", s.name, day, len(people))
+
+    async def _night_candidates(self, s, day: str) -> list[dict[str, Any]]:
+        """Likely movies for a night: the franchise queue's next part, the polls, then the watchlist."""
+        out: list[dict[str, Any]] = []
+        state = store.load(STATE)
+        data = self._data(state, s)
+        nxt = franchise.next_part(data.get("queue")) if is_franchise(s) else None
+        if nxt:
+            part, total = franchise.part_number(data["queue"], nxt)
+            out.append({"title": nxt["title"], "year": nxt.get("year"), "why": f"part {part} of {total} in the queue"})
+        show = datetime.fromisoformat(day).replace(tzinfo=self.bot.features.tz)
+        channels = []
+        for cid in (getattr(self.cfg, "polls_channel", None), getattr(s, "channel", None)):
+            ch = self.bot.text_channel(cid)
+            if ch is not None and ch not in channels:
+                channels.append(ch)
+        polls = []
+        for ch in channels:
+            try:
+                async for m in ch.history(limit=200, after=show - timedelta(days=15), before=show + timedelta(days=1)):
+                    if m.poll is None:
+                        continue
+                    q = m.poll.question
+                    polls.append(
+                        {
+                            "q": str(getattr(q, "text", q) or ""),
+                            "answers": [(str(a.text or ""), a.vote_count or 0) for a in m.poll.answers],
+                            "at": m.created_at.timestamp(),
+                        }
+                    )
+            except discord.HTTPException as e:
+                log.info("Couldn't read polls in #%s: %s", ch.name, e)
+        polls.sort(key=lambda p: p["at"])
+        for c in voicewatch.poll_picks(polls):
+            title, year = voicewatch.split_year(c["title"])
+            out.append({"title": title, "year": year, "why": c["why"]})
+        waiting = [n for n in data.get("nominations", []) if not n.get("watched")]
+        for n in sorted(waiting, key=lambda n: n.get("added") or "", reverse=True)[:6]:
+            out.append({"title": n["title"], "year": n.get("year"), "why": "on the watchlist"})
+        lib = movies.load()
+        recent = {
+            movies.norm(lib["movies"].get(e["movie_id"], {}).get("title", ""))
+            for e in lib["history"]
+            if e.get("series") == s.name and e.get("date") and e["date"] < day
+        }
+        seen: set[str] = set()
+        picks = []
+        for c in out:
+            k = movies.norm(c["title"])
+            if k and k not in seen and k not in recent:
+                seen.add(k)
+                picks.append(c)
+        return picks[:24]
+
+    async def _decide_detected(
+        self,
+        lib: dict[str, Any],
+        req: dict[str, Any],
+        approve: bool,
+        mod: discord.abc.User,
+        choice: int | None,
+        custom: dict[str, Any] | None,
+    ) -> str:
+        d = req["data"]
+        who = getattr(mod, "display_name", mod.name)
+        if not approve:
+            req["status"], req["decided_by"] = "denied", who
+            movies.save(lib)
+            msg = f"⏭️ {who} says {req['series']} on {d['date']} was skipped. Nothing was added."
+        else:
+            pick = custom
+            if pick is None and choice is not None and 0 <= choice < len(d.get("candidates", [])):
+                pick = d["candidates"][choice]
+            if not pick or not str(pick.get("title", "")).strip():
+                return "Pick a movie (or Something else…) first."
+            s = self.series(req["series"])
+            if s is None:
+                return f"There's no {req['series']} series anymore."
+            req["status"], req["decided_by"] = "approved", who
+            movies.save(lib)
+            year = pick.get("year")
+            e, _created = await self.add_night(
+                s,
+                str(pick["title"]).strip(),
+                int(year) if str(year or "").isdigit() else None,
+                pick.get("imdb_id"),
+                d["date"],
+                rate=bool(self.cfg.rate),
+            )
+            lib = movies.load()
+            entry = next((x for x in lib["history"] if x["id"] == e["id"]), None)
+            if entry is not None:
+                entry["voice"] = d.get("voice")
+                movies.save(lib)
+            m = lib["movies"].get(e["movie_id"], {"title": pick["title"]})
+            label = f"{m['title']} ({m['year']})" if m.get("year") else m["title"]
+            msg = f"✅ {who} logged **{label}** for {req['series']} on {d['date']}."
+            if self.cfg.rate:
+                msg += " The Rate it button is on its way."
+        log.info(msg.replace("**", ""))
+        card = req.get("card")
+        channel = self.bot.get_channel(card[0]) if card else None
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.get_partial_message(card[1]).edit(content=msg, embed=None, view=None)
+            except discord.HTTPException:
+                pass
+        return msg
+
+    async def decide(
+        self,
+        rid: str,
+        approve: bool,
+        mod: discord.abc.User,
+        choice: int | None = None,
+        custom: dict[str, Any] | None = None,
+    ) -> str:
         lib = movies.load()
         req = lib["pending"].get(rid)
         if req is None or req.get("status") != "pending":
             return "This one was already handled."
+        if req["kind"] == "detected":
+            return await self._decide_detected(lib, req, approve, mod, choice, custom)
         req["status"] = "approved" if approve else "denied"
         req["decided_by"] = getattr(mod, "display_name", mod.name)
         movies.save(lib)
@@ -1586,6 +1910,10 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if changed:
             store.save(STATE, state)
         await self.run_queues()
+        try:
+            await self.watch_voice()
+        except Exception:
+            log.exception("Watching voice for movie nights failed")
         # Rate it buttons: post after the movie, close when the time is up.
         lib = movies.load()
         dirty = False
@@ -1708,5 +2036,5 @@ class ChooseView(discord.ui.View):
 
 
 async def setup(bot: Pingwin) -> None:
-    bot.add_dynamic_items(RequestButton, RateButton)
+    bot.add_dynamic_items(RequestButton, RateButton, NightPick)
     await bot.add_cog(MovieNight(bot))

@@ -818,3 +818,8 @@ p.center { text-align: center; }
 @media (max-width: 760px) { .n-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .n-grid .n-title { grid-column: 1 / -1; } }
 label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; }
 #rv-guest-wrap .hint { font-size: .78rem; }
+
+/* movie nights noticed in voice */
+.pending-list li.detected { display: grid; gap: 8px; align-items: start; }
+.d-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.pending-list li.detected .row-actions input { flex: 1 1 220px; min-width: 0; }

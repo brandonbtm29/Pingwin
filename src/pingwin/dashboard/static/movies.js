@@ -42,7 +42,10 @@ async function api(path, body) {
 }
 
 const fmt = (n) => (n === null || n === undefined ? "–" : Number(n).toFixed(1).replace(/\.0$/, ""));
-const fmtDate = (d) => (d ? new Date(d + "T12:00:00").toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "–");
+// Movie nights from before anyone wrote dates down.
+const NO_DATE = "Pre-Clubhouse 🦕";
+const fmtDate = (d) => (d ? new Date(d + "T12:00:00").toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : NO_DATE);
+const dur = (min) => { const h = Math.floor((min || 0) / 60), m = (min || 0) % 60; return h ? `${h} h ${m} min` : `${m} min`; };
 const movieLabel = (m) => (m.year ? `${m.title} (${m.year})` : m.title);
 const evName = (x) => (x && data && data.series_full && data.series_full[x]) || x || "";
 
@@ -143,7 +146,7 @@ const nul = (x) => (x === null || x === undefined || x === "" ? null : x);
 const gapOf = (h) => (h.avg !== null && h.movie.imdb_rating ? h.avg - h.movie.imdb_rating : null);
 const signed = (n) => (n === null ? "–" : (n > 0 ? "+" : "") + fmt(n));
 const COLS = [
-  { key: "date", label: "Date", on: true, cls: "nowrap", cell: (h) => fmtDate(h.date), sort: (h) => nul(h.date) },
+  { key: "date", label: "Date", on: true, cls: "nowrap", cell: (h) => fmtDate(h.date), sort: (h) => h.date || "0000" },  // undated = oldest
   { key: "movie", label: "Movie", on: true, fixed: true, sort: (h) => h.movie.title.toLowerCase(),
     cell: (h) => el("div", { class: "movie-cell" }, h.movie.poster ? el("img", { class: "thumb", src: h.movie.poster, alt: "", loading: "lazy" }) : null,
       el("div", {}, el("strong", {}, h.movie.title), h.movie.year ? el("span", { class: "hint" }, ` ${h.movie.year}`) : null, h.open ? el("span", { class: "tag live" }, "rating now") : null)) },
@@ -237,6 +240,7 @@ function showMovie(h) {
       posterArt(m, "poster"),
       el("dl", { class: "kv" },
         el("dt", {}, "Watched"), el("dd", {}, fmtDate(h.date)),
+        h.voice ? [el("dt", {}, "In voice"), el("dd", {}, `${h.voice.people} people · about ${dur(h.voice.minutes)}`)] : null,
         el("dt", {}, "Event"), el("dd", {}, evName(h.series) || "–"),
         el("dt", {}, "Our rating"), el("dd", {}, scoreBadge(h.avg, " / 10")),
         el("dt", {}, "IMDb"), el("dd", {}, m.imdb_rating ? fmt(m.imdb_rating) : "–",
@@ -972,15 +976,34 @@ const KIND = { nominate: "Add to watchlist", remove: "Remove from watchlist", wa
 function renderPending() {
   const p = data.pending || [];
   $("m-pending").hidden = !p.length;
-  const admin = canMod();  // admins and movie mods
-  put($("m-pending-list"), p.map((r) => el("li", {},
+  const admin = canMod();
+  put($("m-pending-list"), p.map((r) => r.kind === "detected" ? detectedCard(r, admin) : el("li", {},
     el("span", {}, el("strong", {}, KIND[r.kind] || r.kind), ` · ${r.series || ""} · `, r.data.title || r.data.label || "", r.data.date ? ` (watched ${fmtDate(r.data.date)})` : "", r.data.changes ? ` (${Object.entries(r.data.changes).map(([k, v]) => `${k}: ${v}`).join(", ")})` : "", el("span", { class: "hint" }, ` asked by ${r.by_name}`)),
     admin ? el("span", { class: "row-btns" },
       el("button", { class: "btn small primary", onclick: () => decide(r.id, true) }, "Approve"),
       el("button", { class: "btn small danger", onclick: () => decide(r.id, false) }, "Deny")) : el("span", { class: "hint" }, "waiting"))));
 }
-async function decide(id, approve) {
-  try { toast((await api("/api/movies/admin", { action: "decide", id, approve })).message.replace(/\*\*/g, "")); await load(); } catch (e) { toast(e.message, true); }
+// A movie night Pingwin noticed in voice: movie mods pick which movie it was.
+function detectedCard(r, admin) {
+  const d = r.data;
+  const other = el("input", { placeholder: "Something else: title (year)", maxlength: "100", "aria-label": "Another movie" });
+  return el("li", { class: "detected" },
+    el("div", {}, el("strong", {}, `🎬 ${evName(r.series)} on ${fmtDate(d.date)}`),
+      el("span", { class: "hint" }, ` · ${d.voice.people} people in voice for about ${dur(d.voice.minutes)}${d.names && d.names.length ? `: ${d.names.join(", ")}` : ""}`)),
+    admin ? [
+      el("div", { class: "hint" }, "Which movie was it? Picking one adds it to the history (hover a choice to see why it's listed)."),
+      el("div", { class: "d-picks" }, (d.candidates || []).map((c, i) => el("button", { class: "btn small", title: c.why || "", onclick: () => decide(r.id, true, { choice: i }) },
+        c.year ? `${c.title} (${c.year})` : c.title))),
+      el("div", { class: "row-actions" }, other,
+        el("button", { class: "btn small primary", onclick: () => {
+          const m = other.value.trim().match(/^(.*?)\s*(?:\((\d{4})\))?$/);
+          if (!m || !m[1]) return toast("Type the movie's title.", true);
+          decide(r.id, true, { title: m[1], year: m[2] || "" });
+        } }, "Log it"),
+        el("button", { class: "btn small danger", onclick: () => decide(r.id, false) }, "We skipped it"))] : el("div", { class: "hint" }, "Waiting for a movie mod to say which movie it was."));
+}
+async function decide(id, approve, extra = {}) {
+  try { toast((await api("/api/movies/admin", { action: "decide", id, approve, ...extra })).message.replace(/\*\*/g, "")); await load(); } catch (e) { toast(e.message, true); }
 }
 
 // ---------- admin ----------

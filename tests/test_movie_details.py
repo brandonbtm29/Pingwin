@@ -303,3 +303,56 @@ def test_history_fixes_correct_the_movie_in_place():
         assert lib["movies"][e["movie_id"]]["title"] == "Dr. Caligari"
 
     asyncio.run(go())
+
+
+def test_a_night_noticed_in_voice_goes_to_the_movie_mods(monkeypatch):
+    from zoneinfo import ZoneInfo
+
+    async def lookup(http, key, title, year=None, spent=None, imdb_id=None):
+        return None
+
+    monkeypatch.setattr(movies, "omdb_lookup", lookup)
+
+    async def go():
+        seed()
+        cog = make_cog()
+        vars(cog.cfg).update(
+            voice_min_people=2, voice_min_minutes=30, rate=False, approval_channel=None, polls_channel=None
+        )
+        cog.bot.features.tz = ZoneInfo("America/New_York")
+        cog.bot.features.welcome = NS(approval_channel=None)
+        cog.bot.text_channel = lambda cid: None
+        cog.bot.home_guild = None
+        s = cog.series("MMM")
+        sess = {
+            "day": "2026-10-19",
+            "seconds": {"1": 3600, "2": 3000, "3": 600},
+            "first_seen": 0,
+            "last_seen": 5400,
+            "peak": 3,
+        }
+        await cog._voice_verdict(s, sess)
+        (req,) = movies.load()["pending"].values()
+        assert req["kind"] == "detected" and req["data"]["voice"]["people"] == 2
+        assert [c["title"] for c in req["data"]["candidates"]] == ["Arrival"]  # from the watchlist
+        assert "Which movie was it?" in movienight.describe_request(req)
+        await cog._voice_verdict(s, sess)  # the same night isn't asked twice
+        assert len(movies.load()["pending"]) == 1
+        assert "Pick a movie" in await cog.decide(req["id"], True, NS(display_name="Riley", name="riley"))
+        msg = await cog.decide(req["id"], True, NS(display_name="Riley", name="riley"), choice=0)
+        assert "logged **Arrival**" in msg
+        lib = movies.load()
+        e = next(x for x in lib["history"] if x["date"] == "2026-10-19")
+        assert e["voice"]["people"] == 2 and lib["movies"][e["movie_id"]]["title"] == "Arrival"
+        # A night that's already logged just gets its turnout noted; too few people means no card.
+        await cog._voice_verdict(s, {**sess, "seconds": {"1": 3600, "2": 3600, "4": 3600}})
+        assert len(movies.load()["pending"]) == 1
+        await cog._voice_verdict(s, {**sess, "day": "2026-10-26", "seconds": {"1": 3600}})
+        assert len(movies.load()["pending"]) == 1
+        # We skipped it.
+        await cog._voice_verdict(s, {**sess, "day": "2026-11-02"})
+        rid = next(r["id"] for r in movies.load()["pending"].values() if r["data"]["date"] == "2026-11-02")
+        assert "skipped" in await cog.decide(rid, False, NS(display_name="Riley", name="riley"))
+        assert not any(x["date"] == "2026-11-02" for x in movies.load()["history"])
+
+    asyncio.run(go())

@@ -301,6 +301,26 @@ all count as.
 The **Admin** tab is split into **People**, **Imports** (history, Discord watchlists, IMDb lists), **Movie
 details** (OMDb progress and movies not matched to IMDb) and **Backups**.
 
+### Noticing movie nights in voice
+
+Turn on **Features → Movie night → Notice movie nights in voice** and Pingwin keeps an eye on voice around each
+series' showtime, so nobody has to remember to log the movie:
+
+1. From 15 minutes before showtime, it notes who's in the movie night's voice channel: the voice channel of the
+   series' Discord Event if there is one around showtime, otherwise the busiest voice channel. Only who and how
+   long, never audio.
+2. When everyone has left (after showtime + 30 minutes), or 5 hours after showtime, it checks whether at least
+   *At least this many people* stayed for *For at least (minutes)* (3 and 45 by default).
+3. If the night is already in the history (a franchise queue part, a Pingwin poll, or someone added it), it just
+   notes the turnout. Otherwise the movie mods get a card in the approvals channel asking **Which movie was
+   it?** The menu lists likely picks: the franchise queue's next part, poll winners from *Your movie polls are in*
+   and the series' channel (it follows Horror / Not Horror rounds: the winning side's latest movie poll comes
+   first), then recent watchlist suggestions. *Something else…* lets a mod type it, and **We skipped it** closes
+   the card. The same choices are under *Waiting for a mod* on the movie pages.
+4. Picking a movie adds it to the history on that date, takes it off the watchlist and posts the Rate it button.
+
+Movie nights with no date show as **Pre-Clubhouse 🦕**.
+
 ### Movie mods
 
 **Features → Movie night → Movie mods** names a role (like `Movie Mod`) for people who run movie night without

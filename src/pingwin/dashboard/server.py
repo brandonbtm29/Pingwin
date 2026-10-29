@@ -1091,6 +1091,7 @@ async def get_movies(request: web.Request) -> web.Response:
                     for k, r in ratings
                 ],
                 "open": bool((e.get("prompt") or {}).get("message")) and not (e.get("prompt") or {}).get("closed"),
+                "voice": e.get("voice"),
             }
         )
     state = store.load(WATCH)
@@ -1798,9 +1799,19 @@ async def post_movie_admin(request: web.Request) -> web.Response:
         class _Mod:
             display_name = name = viewer.name
 
-        return web.json_response(
-            {"ok": True, "message": await cog.decide(str(payload.get("id")), bool(payload.get("approve")), _Mod())}
+        choice = payload.get("choice")
+        custom = None
+        if str(payload.get("title") or "").strip():
+            y = _str(payload, "year", 4)
+            custom = {"title": _str(payload, "title", 100), "year": int(y) if y.isdigit() else None}
+        msg = await cog.decide(
+            str(payload.get("id")),
+            bool(payload.get("approve")),
+            _Mod(),
+            choice=int(choice) if isinstance(choice, int) or str(choice or "").isdigit() else None,
+            custom=custom,
         )
+        return web.json_response({"ok": True, "message": msg})
     raise ApiError("Unknown action")
 
 
