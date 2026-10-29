@@ -440,8 +440,12 @@ async def movies_login(request: web.Request) -> web.StreamResponse:
             '<button class="btn primary big" type="submit">Open the movie pages</button></form>'
             '<p class="hint">This link is just for you and works once.</p>'
         )
-    origin = request.headers.get("Origin")
-    if origin and _hostname(origin.split("://", 1)[-1]) != _hostname(request.host):
+    # The button posts from the sign-in page itself. Behind Tailscale Funnel the request's Host is this PC, so
+    # compare with the public address (like the rest of the dashboard). Some in-app browsers send "null".
+    origin = (request.headers.get("Origin") or "").strip()
+    allowed = {request.app[REMOTE].host, _hostname(request.host)} | LOCAL_HOSTS
+    if origin and origin != "null" and _hostname(urlparse(origin).netloc) not in allowed:
+        log.info("Personal sign-in refused: it came from %s", origin)
         return signin_page(request, "That sign-in didn't come from this page.", 403)
     form = await request.post()
     found = movieaccess.take_login_code(str(form.get("code", ""))[:64])

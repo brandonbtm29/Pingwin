@@ -1,6 +1,6 @@
 """Pingwin: a friendly Discord bot for friends' servers."""
 
-__version__ = "0.22.0"
+__version__ = "0.22.1"
 REPO_URL = "https://github.com/brandonbtm29/Pingwin"
 # Manage Roles, Change Nickname, View Channels, Send Messages, Send Messages in Threads, Embed Links,
 # Read Message History, Mention All Roles (to ping roles), Create Polls, Pin Messages
