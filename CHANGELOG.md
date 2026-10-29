@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.22.1 (2026-10-29)
+- **Personal sign-in links work again.** Pressing *Open the movie pages* was refused ("That sign-in didn't come
+  from this page") because browsers send `Origin: null` for that button (the pages ask browsers not to send
+  referrers). Pingwin now accepts that, and checks a real origin against the dashboard's public address.
+
 ## 0.22.0 (2026-10-29)
 - **Noticing movie nights in voice** (Features → Movie night → Voice check): from 15 minutes before each
   showtime, Pingwin notes who's in the movie night's voice channel (its Discord Event channel, or the busiest
