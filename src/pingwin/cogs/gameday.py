@@ -134,10 +134,8 @@ class GameDay(commands.GroupCog, group_name="gameday", group_description="Game d
                 ephemeral=True,
             )
             return
-        channel = (
-            interaction.channel
-            if isinstance(interaction.channel, discord.TextChannel)
-            else self.bot.text_channel(self.cfg.channel)
+        channel = self.bot.text_channel(self.cfg.channel) or (  # the game day channel, if one is set
+            interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None
         )
         if channel is None:
             await interaction.response.send_message("Run this in a text channel.", ephemeral=True)

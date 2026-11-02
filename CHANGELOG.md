@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.23.0 (2026-11-01)
+- **Birthdays for people without Discord:** friends who aren't on Discord, or celebrities you like to celebrate
+  (Features → Birthdays, or `/pingwin birthday add_other` / `remove_other`). Pingwin wishes them a happy birthday
+  in the birthdays channel with no pings, adds their age if you give the year ("who would have been…" if they've
+  died), and lists the movie nights they were in. They show in `/pingwin birthday upcoming` with a ⭐.
+- **Movie night announcements channel:** franchise queue posts and new watchlist suggestions can go to their own
+  channel, like #events (Features → Movie night → Announcements go to). Polls and Rate it stay in the series'
+  channel.
+- **Game day** cards post in the game day channel when one is set, wherever `/pingwin gameday` is run.
+
 ## 0.22.1 (2026-10-29)
 - **Personal sign-in links work again.** Pressing *Open the movie pages* was refused ("That sign-in didn't come
   from this page") because browsers send `Origin: null` for that button (the pages ask browsers not to send

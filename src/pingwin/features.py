@@ -87,6 +87,29 @@ SECTIONS: list[dict[str, Any]] = [
                 "{mentions} becomes the birthday people.",
             ),
             F("ping_role", "role", "Also ping this role", "", "Optional, for example Birthday Brigade."),
+            F(
+                "others",
+                "rows",
+                "Birthdays of people without Discord",
+                [],
+                "Friends who aren't on Discord, or celebrities you like to celebrate. Pingwin says happy birthday "
+                "to them in the same channel (no pings), with their age if you give the year, and the movie "
+                "nights they were in. Dates like Sep 2, 9/2 or 1964-09-02.",
+                columns=[
+                    {"key": "name", "type": "text", "label": "Name"},
+                    {"key": "date", "type": "text", "label": "Birthday"},
+                    {"key": "note", "type": "text", "label": "Note (optional, e.g. Neo in The Matrix)"},
+                    {"key": "died", "type": "text", "label": "Died (year, optional)"},
+                ],
+            ),
+            F(
+                "others_message",
+                "text",
+                "Message for them",
+                "🎉 Happy birthday to **{name}**{age}!{note}",
+                "{name}, {age} (like ', 62 today', or ', who would have been 53' if they've died) and {note} are "
+                "filled in.",
+            ),
             F("birthday_role", "role", "Give this role for the day", "", "Optional."),
         ],
     },
@@ -112,6 +135,15 @@ SECTIONS: list[dict[str, Any]] = [
                     {"key": "showtime", "type": "text", "label": "Showtime"},
                     {"key": "franchises", "type": "toggle", "label": "Franchise queue"},
                 ],
+            ),
+            F(
+                "announce_channel",
+                "channel",
+                "Announcements go to",
+                None,
+                "Franchise queue posts (tonight's part, a finished franchise) and new watchlist suggestions, "
+                "for example #events. Blank = each series' own channel. Polls and Rate it buttons stay in the "
+                "series' channel.",
             ),
             # ---- voice check
             F(
@@ -331,9 +363,9 @@ SECTIONS: list[dict[str, Any]] = [
             F(
                 "channel",
                 "channel",
-                "Default channel",
+                "Post game days in",
                 None,
-                "Used when /pingwin gameday is run outside a text channel.",
+                "For example #events. Blank = wherever /pingwin gameday is run.",
             ),
             F("role", "role", "Ping this role for new game days", "", "For example Gamer."),
             F("remind_minutes", "number", "Remind sign-ups this many minutes before (0 = don't)", 60, min=0, max=1440),

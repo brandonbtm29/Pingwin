@@ -114,6 +114,8 @@ Pingwin only adds to (or takes back from) balances for attendance; it doesn't re
 | `/pingwin birthday upcoming` | Everyone | The next birthdays |
 | `/pingwin birthday set_for member month day` | Mods | Set someone else's |
 | `/pingwin birthday remove_for member` | Mods | Remove someone else's |
+| `/pingwin birthday add_other name birthday [note]` | Mods | A birthday for someone without Discord, like a celebrity |
+| `/pingwin birthday remove_other name` | Mods | Remove one |
 
 You can also add, change or remove anyone's birthday in the **Birthday list** on the Features tab: type
 the start of their name, pick them, choose the date, and click **Save birthday**.
@@ -121,6 +123,15 @@ the start of their name, pick them, choose the date, and click **Save birthday**
 On the dashboard, pick the channel, the hour to post (in each member's own time zone) and the message (`{mentions}`
 becomes the birthday people). Optionally ping a role, or give a role for the day (Pingwin takes it back
 the next day). Feb 29 birthdays are celebrated on Feb 28 in other years.
+
+### Birthdays of people without Discord
+
+For friends who aren't on Discord, or celebrities you like to celebrate, fill in **Birthdays of people without
+Discord** on the Features tab (or use `/pingwin birthday add_other`): a name, the birthday (`Sep 2`, `9/2` or
+`1964-09-02`), an optional note, and the year they died if they have. On the day, at the same hour (in the
+server's time zone), Pingwin posts *Message for them* in the birthdays channel without pinging anyone. With the
+year it adds their age ("62 today", or "who would have been 53"), and if they're in the cast or crew of movies
+from your movie nights it adds "We've watched them in …". They're in `/pingwin birthday upcoming` with a ⭐.
 
 ## Movie night
 
@@ -368,7 +379,8 @@ and ones already on the list are skipped. You can paste the list's text instead 
 
 `/pingwin gameday create title when [note]` posts a card with **I'm in**, **Maybe** and **Can't** buttons and
 pings the game role. *when* can be things like `fri 8pm`, `tomorrow 7:30pm`, `10/31 9pm` or `in 2 hours`
-(a bare `8` means 8 pm). The time is in your own zone (`/pingwin timezone set`), or add one like `sat 7pm CT`. Pingwin reminds everyone who's in before it starts (set the minutes on the
+(a bare `8` means 8 pm). The card goes to *Post game days in* if it's set (like #events), otherwise to the
+channel you ran the command in. The time is in your own zone (`/pingwin timezone set`), or add one like `sat 7pm CT`. Pingwin reminds everyone who's in before it starts (set the minutes on the
 dashboard) and pings them when it starts. `/pingwin gameday cancel` cancels it (the host or a mod).
 
 ## Stream alerts

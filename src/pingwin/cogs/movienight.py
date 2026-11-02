@@ -765,8 +765,12 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             movies.save(lib)
         return sorted(found.values(), key=lambda t: (t[1] or 9999, t[0]))
 
+    def announce_channel(self, s) -> discord.TextChannel | None:
+        """Where movie night announcements go: the announcements channel if one is set, else the series'."""
+        return self.bot.text_channel(getattr(self.cfg, "announce_channel", None)) or self.bot.text_channel(s.channel)
+
     async def _queue_post(self, s, key: str, q: dict, item: dict | None, when: datetime | None) -> None:
-        channel = self.bot.text_channel(s.channel)
+        channel = self.announce_channel(s)
         if channel is None:
             log.warning("%s: no channel for franchise announcements", s.name)
             return
@@ -1279,7 +1283,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 }
             )
             store.save(STATE, state)
-            channel = self.bot.text_channel(s.channel)
+            channel = self.announce_channel(s)
             if channel:
                 try:
                     await channel.send(
