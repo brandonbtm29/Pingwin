@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.0 (2026-11-02)
+- **More event reminders:** as many as you like (1 day, 2 hours, 15 min…), each for every event or only events
+  with certain keywords, with its own message and its own choice of pinging. If Pingwin was off and several
+  are due, only the nearest one is sent.
+- **Movie night reminders say where the vote stands:** "🗳️ Horror is ahead (3–2), so it's looking like
+  Monster Squad", from the movie polls channel (it follows Horror / Not Horror rounds and shows both sides on a
+  tie), or tonight's part for a franchise queue.
+- **Vote nudges:** reminders add a message when few people have voted ("Only 3 people have voted so far!"),
+  with thresholds and messages in Features → Movie night → Polls.
+
 ## 0.23.0 (2026-11-01)
 - **Birthdays for people without Discord:** friends who aren't on Discord, or celebrities you like to celebrate
   (Features → Birthdays, or `/pingwin birthday add_other` / `remove_other`). Pingwin wishes them a happy birthday

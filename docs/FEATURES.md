@@ -74,6 +74,29 @@ its name and description and pings every role whose keywords appear in it.
 
 Each event is announced, reminded and started only once, even when several PCs are running Pingwin.
 
+### More reminders
+
+Under **More reminders**, add as many as you like, each with:
+
+| How long before | Only events with | Message (optional) | Ping |
+|---|---|---|---|
+| `1 day` | | | off |
+| `2 hours` | `MMM, Maggie` | `🍿 {event} is {when}! {poll} {nudge}` | on |
+| `15 min` | `game` | `Grab your snacks, {event} starts {when}!` | on |
+
+*How long before* reads things like `1 day`, `2h`, `1h30m` or `15 min`. *Only events with* takes keywords
+(blank = every event). A blank message is the usual reminder. If Pingwin was off and several reminders are
+due at once, only the nearest one is sent.
+
+**Movie nights:** when an event is for a movie night series (its short or full name is in the event's name),
+reminders say where the vote stands, from the polls in *Your movie polls are in* (Features → Movie night): for
+example "🗳️ **Horror** is ahead (3–2), so it's looking like **Monster Squad**.", or both sides' movies on a tie.
+It follows Horror / Not Horror rounds: this week's genre poll picks the side, and that side's latest movie
+poll picks the movie. For a franchise queue it's tonight's part instead. **Vote nudges in reminders**
+(Features → Movie night → Polls) adds a message when few people have voted, like "Only 3 people have voted
+so far! Get yours in at #polls 🗳️". The lowest row that applies wins. In a custom message, `{poll}` and
+`{nudge}` put these where you like.
+
 ## Event attendance and Frumples
 
 Pingwin takes attendance at your Discord Events and pays the reward into **UnbelievaBoat**, so balances

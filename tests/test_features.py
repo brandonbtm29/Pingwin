@@ -32,7 +32,7 @@ def test_intents_follow_features():
 @pytest.mark.parametrize(
     "data, match",
     [
-        ({"events": {"remind_minutes": 5000}}, "between"),
+        ({"events": {"remind_minutes": 20000}}, "between"),
         ({"bot": {"timezone": "Mars/Base"}}, "time zone"),
         ({"movienight": {"pick": "vibes"}}, "one of"),
         ({"movienight": {"series": [{"name": "MMM"}, {"name": "mmm"}]}}, "same name"),

@@ -1069,16 +1069,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         movies.save(lib)
         log.info("%s on %s: %d stayed in voice; asked the movie mods which movie", s.name, day, len(people))
 
-    async def _night_candidates(self, s, day: str) -> list[dict[str, Any]]:
-        """Likely movies for a night: the franchise queue's next part, the polls, then the watchlist."""
-        out: list[dict[str, Any]] = []
-        state = store.load(STATE)
-        data = self._data(state, s)
-        nxt = franchise.next_part(data.get("queue")) if is_franchise(s) else None
-        if nxt:
-            part, total = franchise.part_number(data["queue"], nxt)
-            out.append({"title": nxt["title"], "year": nxt.get("year"), "why": f"part {part} of {total} in the queue"})
-        show = datetime.fromisoformat(day).replace(tzinfo=self.bot.features.tz)
+    async def _read_polls(self, s, after: datetime, before: datetime | None = None) -> list[dict[str, Any]]:
+        """Discord polls in the movie polls channel (and the series' channel), oldest first."""
         channels = []
         for cid in (getattr(self.cfg, "polls_channel", None), getattr(s, "channel", None)):
             ch = self.bot.text_channel(cid)
@@ -1087,7 +1079,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         polls = []
         for ch in channels:
             try:
-                async for m in ch.history(limit=200, after=show - timedelta(days=15), before=show + timedelta(days=1)):
+                async for m in ch.history(limit=200, after=after, before=before):
                     if m.poll is None:
                         continue
                     q = m.poll.question
@@ -1101,6 +1093,58 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             except discord.HTTPException as e:
                 log.info("Couldn't read polls in #%s: %s", ch.name, e)
         polls.sort(key=lambda p: p["at"])
+        return polls
+
+    def series_for_event(self, name: str):
+        """The series a Discord Event is for, by its short or full name in the event's name."""
+        text = name.casefold()
+        for s in self.all_series:
+            if s is GENERAL:  # the General watchlist isn't a movie night
+                continue
+            names = [n for n in (getattr(s, "full_name", ""), s.name) if n]
+            if any(re.search(r"(?<!\w)" + re.escape(n.casefold()) + r"(?!\w)", text) for n in names):
+                return s
+        return None
+
+    async def reminder_info(self, event_name: str, start: datetime) -> dict[str, Any] | None:
+        """For an event reminder about a movie night: where the vote stands (or tonight's franchise part),
+        and a nudge if few people have voted. None if the event isn't a movie night."""
+        s = self.series_for_event(event_name)
+        if s is None or not self.cfg.enabled:
+            return None
+        data = self._data(store.load(STATE), s)
+        nxt = franchise.next_part(data.get("queue")) if is_franchise(s) else None
+        if nxt and not (data.get("queue") or {}).get("paused"):
+            part, total = franchise.part_number(data["queue"], nxt)
+            return {
+                "line": f"🍿 Tonight: **{franchise.label(nxt)}**, part {part} of {total}.",
+                "nudge": "",
+                "votes": None,
+            }
+        polls = await self._read_polls(s, start - timedelta(days=15))
+        st = voicewatch.standings(polls, (start - timedelta(days=7)).timestamp())
+        if st is None:
+            return None
+        polls_ch = self.bot.text_channel(getattr(self.cfg, "polls_channel", None))
+        rows = []
+        for r in getattr(self.cfg, "vote_nudges", []) or []:
+            below = str(getattr(r, "below", "") or "").strip()
+            if below.isdigit():
+                rows.append((int(below), str(getattr(r, "message", "") or "")))
+        text = voicewatch.nudge(rows, st["votes"]).replace("{polls}", polls_ch.mention if polls_ch else "the polls")
+        return {"line": voicewatch.standings_line(st), "nudge": text, "votes": st["votes"]}
+
+    async def _night_candidates(self, s, day: str) -> list[dict[str, Any]]:
+        """Likely movies for a night: the franchise queue's next part, the polls, then the watchlist."""
+        out: list[dict[str, Any]] = []
+        state = store.load(STATE)
+        data = self._data(state, s)
+        nxt = franchise.next_part(data.get("queue")) if is_franchise(s) else None
+        if nxt:
+            part, total = franchise.part_number(data["queue"], nxt)
+            out.append({"title": nxt["title"], "year": nxt.get("year"), "why": f"part {part} of {total} in the queue"})
+        show = datetime.fromisoformat(day).replace(tzinfo=self.bot.features.tz)
+        polls = await self._read_polls(s, show - timedelta(days=15), show + timedelta(days=1))
         for c in voicewatch.poll_picks(polls):
             title, year = voicewatch.split_year(c["title"])
             out.append({"title": title, "year": year, "why": c["why"]})

@@ -54,7 +54,24 @@ SECTIONS: list[dict[str, Any]] = [
             F("enabled", "toggle", "Turn on event reminders", False),
             F("channel", "channel", "Post in", None, "For example #events."),
             F("announce_new", "toggle", "Announce new events", True),
-            F("remind_minutes", "number", "Remind this many minutes before (0 = don't)", 60, min=0, max=1440),
+            F("remind_minutes", "number", "Remind this many minutes before (0 = don't)", 60, min=0, max=10080),
+            F(
+                "reminders",
+                "rows",
+                "More reminders",
+                [],
+                "Add as many as you like, like 1 day, 2 hours or 15 min before. Keywords limit one to some events "
+                "(blank = every event). The message can use {event}, {when}, {poll} and {nudge}: for movie nights, "
+                "{poll} is where the vote stands (or tonight's franchise part) and {nudge} is the vote nudge. "
+                "Blank = the usual reminder with those added. If Pingwin was off and several are due, only the "
+                "nearest one is sent.",
+                columns=[
+                    {"key": "before", "type": "text", "label": "How long before"},
+                    {"key": "keywords", "type": "tags", "label": "Only events with (blank = all)"},
+                    {"key": "message", "type": "text", "label": "Message (optional)"},
+                    {"key": "ping", "type": "toggle", "label": "Ping"},
+                ],
+            ),
             F("remind_at_start", "toggle", "Post when it starts", True),
             F("ping_interested", "toggle", "Also ping people who clicked Interested", False),
             F(
@@ -135,6 +152,22 @@ SECTIONS: list[dict[str, Any]] = [
                     {"key": "showtime", "type": "text", "label": "Showtime"},
                     {"key": "franchises", "type": "toggle", "label": "Franchise queue"},
                 ],
+            ),
+            F(
+                "vote_nudges",
+                "rows",
+                "Vote nudges in reminders",
+                [
+                    {"below": "4", "message": "Only {votes} people have voted so far! Get yours in at {polls} 🗳️"},
+                    {"below": "7", "message": "{votes} votes so far. There's still time to vote in {polls}!"},
+                ],
+                "Event reminders for a movie night say where the vote stands. With fewer votes than a row's number, "
+                "its message is added too (the lowest row that applies). {votes} and {polls} are filled in.",
+                columns=[
+                    {"key": "below", "type": "text", "label": "Fewer than this many votes"},
+                    {"key": "message", "type": "text", "label": "Message"},
+                ],
+                group="Polls",
             ),
             F(
                 "announce_channel",

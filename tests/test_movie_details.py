@@ -356,3 +356,32 @@ def test_a_night_noticed_in_voice_goes_to_the_movie_mods(monkeypatch):
         assert not any(x["date"] == "2026-11-02" for x in movies.load()["history"])
 
     asyncio.run(go())
+
+
+def test_reminders_know_where_the_movie_vote_stands():
+    from datetime import UTC, datetime
+
+    async def go():
+        seed()
+        cog = make_cog()
+        vars(cog.cfg).update(polls_channel=1, vote_nudges=[NS(below="4", message="Only {votes} voted! Go to {polls}")])
+        cog.bot.text_channel = lambda cid: NS(mention="#polls") if cid == 1 else None
+        start = datetime(2026, 11, 2, 1, 30, tzinfo=UTC)
+
+        async def fake_polls(s, after, before=None):
+            t = start.timestamp() - 86400
+            return [
+                {"q": "Next MMM", "answers": [("Horror", 2), ("Not Horror", 1)], "at": t},
+                {"q": "If Horror wins", "answers": [("Monster Squad", 2), ("Saw", 0)], "at": t + 60},
+            ]
+
+        cog._read_polls = fake_polls
+        assert cog.series_for_event("MMM tonight!").name == "MMM"
+        assert cog.series_for_event("Game night") is None
+        assert cog.series_for_event("General hangout") is None
+        info = await cog.reminder_info("MMM: what are we watching?", start)
+        assert "**Monster Squad**" in info["line"] and info["votes"] == 3
+        assert info["nudge"] == "Only 3 voted! Go to #polls"
+        assert await cog.reminder_info("Game night", start) is None
+
+    asyncio.run(go())

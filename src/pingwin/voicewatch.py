@@ -142,3 +142,113 @@ def split_year(text: str) -> tuple[str, int | None]:
     """'Alien (1979)' -> ('Alien', 1979)."""
     m = _YEAR.search(text)
     return (text[: m.start()].strip(), int(m[1])) if m else (text.strip(), None)
+
+
+# --------------------------------------------------------------------- where the vote stands (for reminders)
+def standings(polls: list[dict[str, Any]], since: float) -> dict[str, Any] | None:
+    """Where this week's vote stands, from recent polls (oldest first, with "at" timestamps).
+
+    `since` is when this week's voting began (the last showing): only polls posted after it count for the
+    Horror / Not Horror race and the number of votes, while the movie polls for each side can be older.
+    Returns {"sides": [(answer, votes)], "lead": [sides tied for first], "picks": {side: (title, votes)},
+    "pick": title or None, "votes": how many voted} or None when there's no poll to go on."""
+    this_week = [p for p in polls if p.get("at", 0) >= since]
+    if not this_week:
+        return None
+    genre = None
+    for p in reversed(this_week):
+        answers = [(a.strip(), int(n or 0)) for a, n in p.get("answers", []) if a and a.strip()]
+        if answers and all(_GENRE.match(a) for a, _ in answers):
+            genre = answers
+            break
+    picks: dict[str, tuple[str, int]] = {}
+    for p in reversed(polls):  # the newest movie poll for each side
+        answers = [(a.strip(), int(n or 0)) for a, n in p.get("answers", []) if a and a.strip()]
+        if not answers or all(_GENRE.match(a) for a, _ in answers) or all(_SKIP.match(a) for a, _ in answers):
+            continue
+        side = _side(p.get("q", "")) or ""
+        if side in picks:
+            continue
+        best = max(answers, key=lambda x: x[1])
+        if best[1] > 0:
+            picks[side] = best
+    lead: list[str] = []
+    if genre:
+        top = max(n for _, n in genre)
+        lead = [_side(a) or a.casefold() for a, n in genre if n == top] if top else []
+        votes = sum(n for _, n in genre)
+    else:
+        votes = max((sum(int(n or 0) for _, n in p.get("answers", [])) for p in this_week), default=0)
+    pick = None
+    if len(lead) == 1 and lead[0] in picks:
+        pick = picks[lead[0]][0]
+    elif not genre and "" in picks:
+        pick = picks[""][0]
+    return {"sides": genre or [], "lead": lead, "picks": picks, "pick": pick, "votes": votes}
+
+
+def standings_line(st: dict[str, Any] | None) -> str:
+    """'🗳️ Horror is ahead (3–2), so it's looking like **Monster Squad**.'"""
+    if not st:
+        return ""
+    sides = st["sides"]
+    score = "–".join(str(n) for _, n in sorted(sides, key=lambda x: -x[1])) if sides else ""
+    if sides and not st["votes"]:
+        return "🗳️ Nobody has voted yet!"
+    if len(st["lead"]) == 1:
+        side = st["lead"][0]
+        label = next((a for a, _ in sides if (_side(a) or a.casefold()) == side), side.title())
+        text = f"🗳️ **{label}** is ahead ({score})"
+        return text + (f", so it's looking like **{st['pick']}**." if st["pick"] else ".")
+    if len(st["lead"]) > 1:
+        options = [f"{side.title()}: **{st['picks'][side][0]}**" for side in st["lead"] if side in st["picks"]]
+        return f"🗳️ It's a tie ({score})!" + (" " + " or ".join(options) + "." if options else "")
+    if st["pick"]:
+        return f"🗳️ **{st['pick']}** is winning so far."
+    return ""
+
+
+def nudge(nudges: list[tuple[int, str]], votes: int | None) -> str:
+    """The message for the lowest 'fewer than N votes' threshold that applies, with {votes} filled in."""
+    if votes is None:
+        return ""
+    for below, message in sorted(nudges):
+        if votes < below and message.strip():
+            return message.replace("{votes}", str(votes))
+    return ""
+
+
+_UNITS = {
+    "m": 1,
+    "min": 1,
+    "mins": 1,
+    "minute": 1,
+    "minutes": 1,
+    "h": 60,
+    "hr": 60,
+    "hrs": 60,
+    "hour": 60,
+    "hours": 60,
+    "d": 1440,
+    "day": 1440,
+    "days": 1440,
+    "w": 10080,
+    "week": 10080,
+    "weeks": 10080,
+}
+
+
+def parse_before(text: str) -> int | None:
+    """Minutes from '1 day', '2h', '1h30m', '90', '15 min'. None if it can't be read."""
+    t = str(text or "").strip().casefold().replace(",", " ")
+    if not t:
+        return None
+    if t.isdigit():
+        return int(t)
+    total, found = 0, False
+    for n, unit in re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]+)", t):
+        if unit not in _UNITS:
+            return None
+        total += float(n) * _UNITS[unit]
+        found = True
+    return int(total) if found and total > 0 else None
