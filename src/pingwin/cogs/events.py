@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta
+import time
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import discord
@@ -24,6 +25,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("pingwin.events")
 STATE = "events"
+# A repeating event's date that nobody started is treated as over this long after it was meant to start, and
+# Pingwin moves on to the next date itself (Discord only moves a repeating event on once a date is started
+# and ended, so one nobody clicked Start on would stay stuck on the old date).
+MISSED_AFTER = timedelta(hours=4)
 
 
 def match_roles(text: str, rules) -> list[str]:
@@ -97,6 +102,44 @@ def is_new_date(record: dict, start: int, longest_minutes: int) -> bool:
     return bool(stamps) and max(stamps) < start - (longest_minutes + 90) * 60
 
 
+def next_occurrence(rule: dict | None, after: datetime) -> datetime | None:
+    """A repeating event's first date after `after`, from Discord's recurrence rule (daily and weekly rules,
+    every N days or weeks). None for other rules or when it has ended."""
+    if not rule or not rule.get("start"):
+        return None
+    try:
+        anchor = datetime.fromisoformat(rule["start"])
+        end = datetime.fromisoformat(rule["end"]) if rule.get("end") else None
+    except ValueError:
+        return None
+    interval = max(1, int(rule.get("interval") or 1))
+    if rule.get("frequency") == 3:  # daily
+        step, days = timedelta(days=interval), None
+    elif rule.get("frequency") == 2:  # weekly (Discord's weekdays: 0 = Monday)
+        step, days = timedelta(weeks=interval), rule.get("by_weekday") or None
+    else:
+        return None
+    k = max(0, (after - anchor) // step) if after > anchor else 0
+    for i in range(int(k), int(k) + 3):
+        base = anchor + i * step
+        options = sorted(base + timedelta(days=wd - base.weekday()) for wd in days) if days else [base]
+        for when in options:
+            if when > after and when >= anchor:
+                return when if end is None or when <= end else None
+    return None
+
+
+def effective_start(event, rule: dict | None, now: datetime) -> datetime:
+    """When the event is next on: its own start, or for a repeating event stuck on a date nobody started, the
+    next date from its rule."""
+    start = event.start_time
+    if event.status == discord.EventStatus.scheduled and now - start > MISSED_AFTER:
+        nxt = next_occurrence(rule, max(start, now - MISSED_AFTER))
+        if nxt is not None:
+            return nxt
+    return start
+
+
 class EventReminders(commands.Cog):
     def __init__(self, bot: Pingwin) -> None:
         self.bot = bot
@@ -137,29 +180,45 @@ class EventReminders(commands.Cog):
         now = discord.utils.utcnow()
         reminders = reminder_list(self.cfg)
         longest = max([r["minutes"] for r in reminders] or [0])
+        rules = await self._rules(guild)
         for event in guild.scheduled_events:
+            when = effective_start(event, rules.get(event.id), now)
             if event.status == discord.EventStatus.scheduled:
-                await self._check_date(event, longest, now)
+                await self._check_date(event, longest, now, when)
             if event.status == discord.EventStatus.scheduled and reminders:
-                left = (event.start_time - now).total_seconds() / 60
+                left = (when - now).total_seconds() / 60
                 record = store.load(STATE).get(str(event.id), {})
                 sent = {int(k.split(":")[1]) for k in record if k.startswith("reminded:")}
                 if record.get("reminded") and getattr(self.cfg, "remind_minutes", 0):
                     sent.add(int(self.cfg.remind_minutes))  # sent before reminders were a list
                 pick, mark = due_reminder(reminders, f"{event.name}\n{event.description or ''}", left, sent)
                 if pick is not None:
-                    await self.post(event, "reminded", pick, mark)
+                    await self.post(event, "reminded", pick, mark, when=when)
             elif event.status == discord.EventStatus.active and self.cfg.remind_at_start:
                 # Covers a start that happened while another PC was answering.
                 if now - event.start_time < timedelta(minutes=15):
                     await self.post(event, "started")
         self._prune(guild)
 
-    async def _check_date(self, event: discord.ScheduledEvent, longest: int, now) -> None:
+    async def _rules(self, guild: discord.Guild) -> dict[int, dict]:
+        """Each event's recurrence rule (discord.py doesn't keep them), fetched every 10 minutes."""
+        if time.monotonic() - getattr(self, "_rules_at", -1e9) < 600:
+            return self._rules_cache
+        try:
+            raw = await self.bot.http.get_scheduled_events(guild.id, False)
+            self._rules_cache = {int(e["id"]): e.get("recurrence_rule") for e in raw}
+        except (discord.HTTPException, AttributeError, KeyError, TypeError) as e:
+            log.info("Couldn't read the events' repeat rules: %s", e)
+            self._rules_cache = getattr(self, "_rules_cache", {})
+        self._rules_at = time.monotonic()
+        return self._rules_cache
+
+    async def _check_date(self, event: discord.ScheduledEvent, longest: int, now, when=None) -> None:
         """Start over when a repeating event moves on to its next date, and say when the next one is."""
+        when = when or event.start_time
         state = store.load(STATE)
         record = state.get(str(event.id))
-        start = int(event.start_time.timestamp())
+        start = int(when.timestamp())
         if record is None:
             return
         if not is_new_date(record, start, longest):
@@ -169,8 +228,8 @@ class EventReminders(commands.Cog):
             return
         state[str(event.id)] = {"start": start, **({"msg": record["msg"]} if record.get("msg") else {})}
         store.save(STATE, state)
-        if getattr(self.cfg, "post_next", True) and event.start_time > now:
-            await self.post(event, "next")
+        if getattr(self.cfg, "post_next", True) and when > now:
+            await self.post(event, "next", when=when)
 
     async def _remove_old(self, channel: discord.abc.Messageable, event: discord.ScheduledEvent, record: dict) -> None:
         """Delete Pingwin's last post about this event, so the new one is the only one (at the bottom)."""
@@ -206,11 +265,17 @@ class EventReminders(commands.Cog):
             store.save(STATE, state)
 
     async def post(
-        self, event: discord.ScheduledEvent, kind: str, reminder: dict | None = None, mark: list[int] | None = None
+        self,
+        event: discord.ScheduledEvent,
+        kind: str,
+        reminder: dict | None = None,
+        mark: list[int] | None = None,
+        when: datetime | None = None,
     ) -> None:
+        when = when or event.start_time
         state = store.load(STATE)
         record = state.setdefault(str(event.id), {})
-        record.setdefault("start", int(event.start_time.timestamp()))
+        record.setdefault("start", int(when.timestamp()))
         key = f"reminded:{reminder['minutes']}" if reminder else kind
         if record.get(key):
             return
@@ -234,7 +299,7 @@ class EventReminders(commands.Cog):
             except discord.HTTPException:
                 users = []
             mentions += [u.mention for u in users]
-        start = int(event.start_time.timestamp())
+        start = int(when.timestamp())
         if kind == "announced":
             text = self.bot.persona.say("event_new", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
         elif kind == "next":
@@ -268,7 +333,7 @@ class EventReminders(commands.Cog):
         movie = self.bot.get_cog("MovieNight")
         if movie is not None and hasattr(movie, "reminder_info"):
             try:
-                info = await movie.reminder_info(event.name, event.start_time)
+                info = await movie.reminder_info(event.name, datetime.fromtimestamp(start, UTC))
             except Exception:  # standings are a bonus: the reminder still goes out
                 log.exception("Couldn't work out the movie poll standings for %s", event.name)
         poll = (info or {}).get("line", "")

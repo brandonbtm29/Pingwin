@@ -146,3 +146,45 @@ def test_old_posts_are_found_in_the_channel():
         assert len(ch.sent) == 1 and "event_next" in ch.sent[0]
 
     asyncio.run(go())
+
+
+MMM_RULE = {"start": "2026-03-17T00:30:00+00:00", "end": None, "frequency": 2, "interval": 1, "by_weekday": [1]}
+GAME_RULE = {"start": "2026-03-21T19:00:00+00:00", "end": None, "frequency": 2, "interval": 2, "by_weekday": [5]}
+
+
+def test_next_date_from_the_repeat_rule():
+    nov3 = datetime(2026, 11, 3, 0, 30, tzinfo=UTC)
+    assert events.next_occurrence(MMM_RULE, nov3) == nov3 + timedelta(days=7)
+    assert events.next_occurrence(MMM_RULE, nov3 - timedelta(minutes=1)) == nov3
+    # Every other Saturday, from Mar 21: Nov 14 is one of them, Nov 7 isn't.
+    assert events.next_occurrence(GAME_RULE, datetime(2026, 11, 3, tzinfo=UTC)) == datetime(
+        2026, 11, 14, 19, 0, tzinfo=UTC
+    )
+    assert events.next_occurrence({"start": "2026-01-01T00:00:00+00:00", "frequency": 1}, nov3) is None  # monthly
+    assert events.next_occurrence(None, nov3) is None
+    ended = {**MMM_RULE, "end": "2026-11-01T00:00:00+00:00"}
+    assert events.next_occurrence(ended, nov3) is None
+
+
+def test_a_date_nobody_started_moves_on():
+    nov3 = datetime(2026, 11, 3, 0, 30, tzinfo=UTC)
+    ev = event_at(nov3)
+    assert events.effective_start(ev, MMM_RULE, nov3 + timedelta(hours=2)) == nov3  # still on, maybe late
+    assert events.effective_start(ev, MMM_RULE, nov3 + timedelta(hours=5)) == nov3 + timedelta(days=7)
+    assert events.effective_start(ev, None, nov3 + timedelta(hours=5)) == nov3  # one-off: left alone
+
+    async def go():
+        ch = Channel()
+        cog = make(ch, ev)
+        store.save(events.STATE, {"777": {"start": int(nov3.timestamp()), "msg": [9, 400]}})
+        now = nov3 + timedelta(hours=5)
+        await cog._check_date(ev, 60, now, events.effective_start(ev, MMM_RULE, now))
+        assert ch.deleted == [400] and "event_next: MMM" in ch.sent[-1]
+        assert store.load(events.STATE)["777"]["start"] == int((nov3 + timedelta(days=7)).timestamp())
+        # Its reminder next week goes out even though Discord still shows the old date.
+        reminders = events.reminder_list(cog.cfg)
+        pick, mark = events.due_reminder(reminders, "MMM", 30, set())
+        await cog.post(ev, "reminded", pick, mark, when=nov3 + timedelta(days=7))
+        assert len(ch.sent) == 2 and str(int((nov3 + timedelta(days=7)).timestamp())) in ch.sent[-1]
+
+    asyncio.run(go())
