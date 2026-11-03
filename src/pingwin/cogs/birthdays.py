@@ -249,9 +249,9 @@ def star_board(people: list[dict], lib: dict, today: date, days: int = 14, templ
                 soon.append(((when - today).days, year, p))
                 break
     soon.sort(key=lambda x: (x[0], x[2]["name"]))
-    window = [x for x in soon if x[0] <= days] or [x for x in soon if x[0] == soon[0][0]]
+    window = [x for x in soon if x[0] <= days]  # never further ahead than that
     if window:
-        lines += ["", "📅 **Coming up**" if any(x[0] <= days for x in window) else "📅 **Next up**"]
+        lines += ["", "📅 **Coming up**"]
         for away, year, p in window:
             age = ""
             if p.get("y"):
@@ -261,7 +261,8 @@ def star_board(people: list[dict], lib: dict, today: date, days: int = 14, templ
                 f"**{_day(p['m'], p['d'])}** · {p['name']}{age} · " + ("tomorrow" if away == 1 else f"in {away} days")
             )
     if not todays and not window:
-        lines.append("No birthdays saved yet.")
+        span = "week" if days == 7 else f"{days // 7} weeks" if days % 7 == 0 else f"{days} days"
+        lines += ["", f"No star birthdays in the next {span}."]
     lines.append(f"-# Updated {_day(today.month, today.day, today.year)}")
     text = "\n".join(lines)
     return (text if len(text) <= 2000 else text[:1990] + "…"), bool(todays)

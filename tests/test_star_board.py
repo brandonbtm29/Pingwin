@@ -60,10 +60,13 @@ def test_board_on_a_birthday_and_on_other_days():
     assert "**Sep 12** · Paul Walker, would be 53 · in 10 days" in text
     text, today = star_board(people, LIB, date(2026, 8, 2), 14)
     assert "**Wes Craven**, who would have been 87" in text and "died at 76" in text
-    assert "Scream" in text and "📅 **Next up**" in text  # nothing within 14 days: the next one anyway
+    assert "Scream" in text and "Keanu" not in text  # Sep 2 is a month away: not listed
+    text, today = star_board(people, LIB, date(2026, 7, 20), 14)
+    assert text.count("**Jul 30**") == 2 and "Aug 2" in text and "Sep 2" not in text
+    text, today = star_board(people, LIB, date(2026, 7, 20), 7)
+    assert "Jul 30" not in text and "No star birthdays in the next week." in text
     text, today = star_board(people, LIB, date(2026, 11, 3), 14)
-    assert not today
-    assert text.count("**Jul 30**") == 2  # ties for next up are both listed
+    assert not today and "No star birthdays in the next 2 weeks." in text
 
 
 class Channel:

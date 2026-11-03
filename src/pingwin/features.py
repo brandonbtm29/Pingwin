@@ -165,6 +165,7 @@ SECTIONS: list[dict[str, Any]] = [
                 "number",
                 "Show birthdays coming up in the next (days)",
                 14,
+                "Nothing further ahead is listed, for example 7 for a week.",
                 min=1,
                 max=60,
                 show_if={"stars_board": [True]},
