@@ -823,3 +823,20 @@ label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; 
 .pending-list li.detected { display: grid; gap: 8px; align-items: start; }
 .d-picks { display: flex; flex-wrap: wrap; gap: 6px; }
 .pending-list li.detected .row-actions input { flex: 1 1 220px; min-width: 0; }
+
+/* rows: empty state; "see also" links between features */
+.rows-table .rows-empty td { color: var(--muted); font-size: .88rem; padding: .6rem .25rem; }
+.see-also { display: flex; flex-direction: column; gap: 6px; margin: -4px 0 14px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2, rgba(127,127,127,.08)); }
+.see-also .see-link { color: var(--accent); font-size: .92rem; text-decoration: none; width: fit-content; }
+.see-also .see-link:hover { text-decoration: underline; }
+
+/* watchlist cards: actions for members and movie mods, and the watched fold */
+.pc-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.pc-actions select.small { font-size: .78rem; padding: 3px 6px; max-width: 100%; flex: 1 1 90px; min-width: 0; }
+.pc-actions .btn.small { font-size: .78rem; }
+.w-watched { margin-top: 14px; }
+.w-watched summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+.w-watched ul { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; }
+.w-watched li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: .9rem; }
+.w-sum { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+.w-sum li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }

@@ -49,22 +49,28 @@ SECTIONS: list[dict[str, Any]] = [
         "key": "events",
         "title": "Event reminders",
         "description": "When someone creates a Discord Event, Pingwin pings the roles whose keywords match "
-        "its name or description, then reminds them before it starts.",
+        "its name or description, then reminds them before it starts. Add as many reminders as you like.",
+        "see_also": [
+            {"key": "movienight", "text": "🗳️ Vote nudges for movie night reminders: in Movie night, under Polls"}
+        ],
         "fields": [
             F("enabled", "toggle", "Turn on event reminders", False),
             F("channel", "channel", "Post in", None, "For example #events."),
             F("announce_new", "toggle", "Announce new events", True),
-            F("remind_minutes", "number", "Remind this many minutes before (0 = don't)", 60, min=0, max=10080),
+            F("remind_minutes", "number", "First reminder: minutes before (0 = none)", 60, min=0, max=10080),
             F(
                 "reminders",
                 "rows",
-                "More reminders",
+                "More reminders (days, hours or minutes before)",
                 [],
                 "Add as many as you like, like 1 day, 2 hours or 15 min before. Keywords limit one to some events "
                 "(blank = every event). The message can use {event}, {when}, {poll} and {nudge}: for movie nights, "
                 "{poll} is where the vote stands (or tonight's franchise part) and {nudge} is the vote nudge. "
                 "Blank = the usual reminder with those added. If Pingwin was off and several are due, only the "
                 "nearest one is sent.",
+                add_label="+ Add a reminder",
+                empty="No extra reminders yet. For example: 1 day before, only events with MMM, with {poll} in "
+                "the message.",
                 columns=[
                     {"key": "before", "type": "text", "label": "How long before"},
                     {"key": "keywords", "type": "tags", "label": "Only events with (blank = all)"},
@@ -80,6 +86,7 @@ SECTIONS: list[dict[str, Any]] = [
                 "Which roles to ping",
                 [],
                 "An event pings a role when its name or description contains any of that role's keywords.",
+                add_label="+ Add a role",
                 columns=[
                     {"key": "role", "type": "role", "label": "Role"},
                     {"key": "keywords", "type": "tags", "label": "Keywords (comma separated)"},
@@ -112,6 +119,8 @@ SECTIONS: list[dict[str, Any]] = [
                 "Friends who aren't on Discord, or celebrities you like to celebrate. Pingwin says happy birthday "
                 "to them in the same channel (no pings), with their age if you give the year, and the movie "
                 "nights they were in. Dates like Sep 2, 9/2 or 1964-09-02.",
+                add_label="+ Add a person",
+                empty="Nobody yet. Add a friend without Discord, or a star from our movies.",
                 columns=[
                     {"key": "name", "type": "text", "label": "Name"},
                     {"key": "date", "type": "text", "label": "Birthday"},
@@ -135,6 +144,13 @@ SECTIONS: list[dict[str, Any]] = [
         "title": "Movie night",
         "description": "Watchlists, polls that close at showtime, Rate it buttons and the movie pages. Each series "
         "has its own watchlist, plus a General one.",
+        "see_also": [
+            {
+                "key": "events",
+                "text": "⏰ Reminders before movie nights (how many, and how long before): Event reminders",
+            },
+            {"href": "/movies", "text": "🍿 Watchlists, history and reviews: the movie pages"},
+        ],
         "fields": [
             F("enabled", "toggle", "Turn on movie night", False),
             F(
@@ -144,6 +160,7 @@ SECTIONS: list[dict[str, Any]] = [
                 [],
                 "With a showtime (like Mon 8:30pm), polls close when the movie starts. Franchise queue: the series "
                 "works through one franchise's movies in order, and polls pick the next franchise.",
+                add_label="+ Add a series",
                 columns=[
                     {"key": "name", "type": "text", "label": "Short name (e.g. MM)"},
                     {"key": "full_name", "type": "text", "label": "Full name (e.g. Movie Mondays)"},
@@ -163,6 +180,7 @@ SECTIONS: list[dict[str, Any]] = [
                 ],
                 "Event reminders for a movie night say where the vote stands. With fewer votes than a row's number, "
                 "its message is added too (the lowest row that applies). {votes} and {polls} are filled in.",
+                add_label="+ Add a nudge",
                 columns=[
                     {"key": "below", "type": "text", "label": "Fewer than this many votes"},
                     {"key": "message", "type": "text", "label": "Message"},

@@ -708,8 +708,8 @@ function rowsInput(field, rows, onChange) {
       el("div", { class: "label-text" }, el("strong", {}, field.label)),
       el("div", { class: "table-wrap" }, el("table", { class: "rows-table" },
         el("thead", {}, el("tr", {}, field.columns.map((c) => el("th", {}, c.label)), el("th", {}))),
-        el("tbody", {}, body))),
-      el("div", { class: "row-actions" }, el("button", { class: "btn", onclick: () => { rows.push(Object.fromEntries(field.columns.map((c) => [c.key, c.type === "toggle" ? false : ""]))); onChange(rows); draw(); } }, "+ Add row")),
+        el("tbody", {}, body.length ? body : el("tr", { class: "rows-empty" }, el("td", { colspan: String(field.columns.length + 1) }, field.empty || "None yet."))))),
+      el("div", { class: "row-actions" }, el("button", { class: "btn", onclick: () => { rows.push(Object.fromEntries(field.columns.map((c) => [c.key, c.type === "toggle" ? false : ""]))); onChange(rows); draw(); } }, field.add_label || "+ Add row")),
       field.help ? el("span", { class: "hint" }, field.help) : null,
     );
   };
@@ -850,6 +850,9 @@ function renderFeatures() {
       el("div", { class: "feature-body" },
         el("p", { class: "desc" }, section.description,
           GUIDE_ANCHORS[section.key] ? [" ", el("a", { href: guideUrl(GUIDE_ANCHORS[section.key]), target: "_blank", rel: "noreferrer" }, "Guide ↗")] : null),
+        (section.see_also || []).length ? el("div", { class: "see-also" }, section.see_also.map((x) => x.href
+          ? el("a", { class: "see-link", href: x.href, target: "_blank", rel: "noreferrer" }, x.text, " ↗")
+          : el("button", { class: "see-link linkish", type: "button", onclick: () => { showFeatureTab(x.key); window.scrollTo({ top: 0, behavior: "smooth" }); } }, x.text, " →"))) : null,
         needs, extra, ...fields,
         el("div", { class: "row-actions" }, saveBtn, dirtyNote)),
     );
@@ -863,18 +866,14 @@ async function loadWatchlist() {
   try { data = await api("/api/watchlist"); } catch { return; }
   const panel = $("f-watchlist");
   panel.hidden = !data.series.length;
-  $("f-watchlist-body").replaceChildren(...data.series.map((s) => el("div", { class: "watch-series" },
-    el("h3", {}, s.name, s.open_poll ? el("span", { class: "tag live" }, " poll running") : null),
-    s.nominations.length ? el("ul", { class: "watch-list" }, s.nominations.map((n) => el("li", { class: n.watched ? "watched" : "" },
-      el("span", { class: "t" }, n.title),
-      el("button", { class: "btn", onclick: () => watchAction(s.key, n.id, "watched") }, n.watched ? "Unwatch" : "Watched"),
-      el("button", { class: "btn icon", "aria-label": "Remove", onclick: () => { if (window.confirm(`Remove ${n.title}?`)) watchAction(s.key, n.id, "remove"); } }, "✕"),
-    ))) : el("p", { class: "hint" }, "Nothing nominated yet. Members use /pingwin movie nominate."),
-  )));
-}
-
-async function watchAction(series, id, action) {
-  try { await api("/api/watchlist", { series, id, action }); await loadWatchlist(); } catch (e) { toast(e.message, true); }
+  $("f-watchlist-body").replaceChildren(
+    el("ul", { class: "w-sum" }, data.series.map((s) => {
+      const waiting = s.nominations.filter((n) => !n.watched).length;
+      return el("li", {}, el("strong", {}, s.name), el("span", { class: "hint" }, `${waiting} waiting`),
+        s.open_poll ? el("span", { class: "tag live" }, "poll running") : null);
+    })),
+    el("p", { class: "hint" }, "Posters, who suggested what, and the buttons to mark a movie watched, move it to another list or remove it are on the movie pages. Movie Mods can use them too."),
+    el("div", { class: "row-actions" }, el("a", { class: "btn", href: "/movies#watchlists", target: "_blank", rel: "noreferrer" }, "🍿 Open the watchlists ↗")));
 }
 
 // ---------- who's here, stale saves, sync conflicts ------------------------

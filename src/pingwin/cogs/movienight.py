@@ -1295,6 +1295,38 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         store.save(STATE, state)
         return stats
 
+    def watchlist_change(self, series: str, item_id: str, op: str, to: str = "") -> str:
+        """A movie mod's change to a watchlist from the movie pages: remove, move to another list, or put a
+        watched movie back. Raises ValueError with a message for the mod."""
+        s = self.series(series)
+        if s is None:
+            raise ValueError(f"There's no {series} watchlist anymore.")
+        state = store.load(STATE)
+        noms = self._data(state, s)["nominations"]
+        n = next((x for x in noms if x.get("id") == item_id), None)
+        if n is None:
+            raise ValueError("That movie isn't on the list anymore.")
+        if op == "remove":
+            noms.remove(n)
+            msg = f"Removed **{n['title']}** from the {series_label(s)} watchlist."
+        elif op == "unwatch":
+            n["watched"] = None
+            msg = f"**{n['title']}** is back on the {series_label(s)} watchlist."
+        elif op == "move":
+            t = self.series(to)
+            if t is None or slug(t.name) == slug(s.name):
+                raise ValueError("Pick another watchlist to move it to.")
+            dest = self._data(state, t)["nominations"]
+            if any(movies.norm(x["title"]) == movies.norm(n["title"]) and not x.get("watched") for x in dest):
+                raise ValueError(f"{n['title']} is already on the {series_label(t)} watchlist.")
+            noms.remove(n)
+            dest.append({**n, "list": ""})
+            msg = f"Moved **{n['title']}** to the {series_label(t)} watchlist."
+        else:
+            raise ValueError("Unknown change.")
+        store.save(STATE, state)
+        return msg
+
     async def apply(self, kind: str, series: str, data: dict[str, Any], by: int) -> str:
         s = self.series(series)
         if kind == "edit":

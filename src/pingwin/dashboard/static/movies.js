@@ -338,12 +338,30 @@ function qaBlocks(r) {
 // ---------- watchlists ----------
 const listFilter = {};
 function renderWatchlists() {
+  const mod = canMod();
+  const member = data.viewer && data.viewer.level !== "viewer";
   put($("w-lists"), data.watchlists.map((w) => {
     const waiting = w.items.filter((i) => !i.watched);
+    const watched = w.items.filter((i) => i.watched).sort((a, b) => String(b.watched).localeCompare(String(a.watched)));
     const lists = [...new Set(waiting.map((i) => i.list || "").filter(Boolean))].sort();
     const pick = listFilter[w.series] || "";
     const shown = waiting.filter((i) => !pick || (i.list || "") === pick);
     const isFranchise = (data.franchise_series || []).includes(w.series);
+    const others = data.watchlists.map((x) => x.series).filter((x) => x !== w.series);
+    const actions = (i) => {
+      if (!member) return null;
+      const out = [el("button", { class: "btn small", title: "Add it to the history (it then leaves this list)", onclick: () => watchedIt(i, w.series) }, "🎬 We watched it")];
+      if (mod) {
+        if (others.length) {
+          const move = el("select", { class: "small", "aria-label": `Move ${i.title} to another watchlist`, onchange: () => { if (move.value) watchOp(w.series, i, "move", move.value); } },
+            el("option", { value: "" }, "Move to…"), others.map((x) => el("option", { value: x }, evName(x))));
+          out.push(move);
+        }
+        out.push(el("button", { class: "btn small icon", "aria-label": `Remove ${i.title}`, title: "Remove from this watchlist",
+          onclick: () => { if (window.confirm(`Remove ${i.title} from the ${evName(w.series)} watchlist?`)) watchOp(w.series, i, "remove"); } }, "✕"));
+      }
+      return el("div", { class: "pc-actions" }, out);
+    };
     return el("div", { class: "panel" },
       isFranchise || w.queue ? queueBlock(w) : null,
       el("div", { class: "w-head" },
@@ -357,9 +375,36 @@ function renderWatchlists() {
           i.imdb_id ? imdbLink(i.imdb_id, el("strong", {}, i.title), "pc-title") : el("strong", {}, i.title), i.year ? el("span", { class: "hint" }, ` ${i.year}`) : null,
           el("div", { class: "pc-meta" }, i.list ? el("span", { class: "chip small" }, i.list) : null, i.runtime ? `${i.runtime} min` : null, i.imdb_rating ? `IMDb ${fmt(i.imdb_rating)}` : null),
           i.note ? el("div", { class: "hint" }, i.note) : null,
-          el("div", { class: "hint" }, `suggested by ${i.by}`))))) :
-        el("p", { class: "hint" }, "Nothing waiting. Suggest one above!"));
+          el("div", { class: "hint" }, `suggested by ${i.by}`),
+          actions(i))))) :
+        el("p", { class: "hint" }, "Nothing waiting. Suggest one above!"),
+      watched.length ? el("details", { class: "w-watched" },
+        el("summary", {}, `Watched from this list (${watched.length})`),
+        el("ul", {}, watched.slice(0, 30).map((i) => el("li", {},
+          el("span", {}, i.title, i.year ? el("span", { class: "hint" }, ` ${i.year}`) : null),
+          el("span", { class: "hint" }, ` · ${String(i.watched).slice(0, 10)}`),
+          mod ? el("button", { class: "btn small", title: "It's back on the watchlist", onclick: () => watchOp(w.series, i, "unwatch") }, "Put back") : null)))) : null);
   }));
+}
+
+async function watchOp(series, item, op, to = "") {
+  try { toast((await api("/api/movies/admin", { action: "watchlist", series, id: item.id, op, to })).message.replace(/\*\*/g, "")); }
+  catch (e) { toast(e.message, true); }
+  await load();
+}
+
+// "We watched it": the Add a movie we watched form on the History tab, filled in.
+function watchedIt(item, series) {
+  switchTab("history");
+  const box = $("n-box");
+  box.hidden = false;
+  box.open = true;
+  nightBox.set({ title: item.title, year: item.year, imdb_id: item.imdb_id || "" });
+  if ([...$("n-series").options].some((o) => o.value === series)) $("n-series").value = series;
+  $("n-date").value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  box.scrollIntoView({ behavior: "smooth", block: "center" });
+  $("n-date").focus();
+  toast("Check the date, then click the button to add it.");
 }
 
 // ---------- franchise queues ----------
@@ -485,6 +530,7 @@ function titleSuggest(input, list, yearInput, onSubmit) {
   return {
     imdb: () => (st.picked && st.picked.title === input.value.trim() ? st.picked.imdb_id || "" : ""),
     reset: () => { st.picked = null; input.value = ""; yearInput.value = ""; },
+    set: (h) => { st.picked = h; input.value = h.title; yearInput.value = h.year || ""; },
   };
 }
 
@@ -1217,5 +1263,7 @@ $("d-movie").addEventListener("click", (e) => { if (e.target === $("d-movie")) $
 
 let saved = null;
 try { saved = localStorage.getItem("pingwin-movies-tab"); } catch { /* ignore */ }
+const fromLink = window.location.hash.slice(1);
+if (fromLink && $(`tab-${fromLink}`) && fromLink !== "admin") saved = fromLink;
 switchTab(saved && $(`tab-${saved}`) && saved !== "admin" ? saved : "history");
 load();

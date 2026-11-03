@@ -1699,6 +1699,17 @@ async def post_movie_admin(request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "message": msg})
     if action == "queue":
         return web.json_response(await _queue_action(cog, payload, viewer))
+    if action == "watchlist":
+        if cog is None:
+            raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+        try:
+            msg = cog.watchlist_change(
+                _str(payload, "series", 50), _str(payload, "id", 20), _str(payload, "op", 10), _str(payload, "to", 50)
+            )
+        except ValueError as e:
+            raise ApiError(str(e)) from e
+        log.info("Watchlist change from the movie pages (%s): %s", viewer.name, msg)
+        return web.json_response({"ok": True, "message": msg})
     if action in ("share_info", "share_reset", "share_post"):
         from .. import movieaccess
 
