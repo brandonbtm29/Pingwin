@@ -1,13 +1,17 @@
 """Event reminders: ping the right roles for Discord Events, then remind them before they start.
 
 Reminders can be as many as you like (1 day, 2 hours, 15 minutes before...), each for all events or only
-those with certain keywords, with its own message. For movie nights they also say where the vote stands."""
+those with certain keywords, with its own message. For movie nights they also say where the vote stands.
+
+Repeating events (a weekly movie night) keep the same Discord Event, which moves to the next date when one
+is over, so reminders are kept per date. Pingwin keeps one message per event in the channel: each new post
+replaces the last one, and when a repeating event moves on, a "next one is..." post takes its place."""
 
 from __future__ import annotations
 
 import logging
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import discord
@@ -71,6 +75,28 @@ def due_reminder(
     return min(fresh, key=lambda r: r["minutes"]), sorted({r["minutes"] for r in due})
 
 
+def _stamps(record: dict) -> list[float]:
+    out = []
+    for k, v in record.items():
+        if k in ("start", "msg") or not isinstance(v, str):
+            continue
+        try:
+            out.append(datetime.fromisoformat(v).timestamp())
+        except ValueError:
+            pass
+    return out
+
+
+def is_new_date(record: dict, start: int, longest_minutes: int) -> bool:
+    """Whether the event has moved to a new date since this record was made (a repeating event's next one, or
+    a reschedule). Older records have no start: they belong to an earlier date when everything in them was
+    posted well before the earliest reminder for this one."""
+    if "start" in record:
+        return int(record["start"]) != start
+    stamps = _stamps(record)
+    return bool(stamps) and max(stamps) < start - (longest_minutes + 90) * 60
+
+
 class EventReminders(commands.Cog):
     def __init__(self, bot: Pingwin) -> None:
         self.bot = bot
@@ -110,7 +136,10 @@ class EventReminders(commands.Cog):
             return
         now = discord.utils.utcnow()
         reminders = reminder_list(self.cfg)
+        longest = max([r["minutes"] for r in reminders] or [0])
         for event in guild.scheduled_events:
+            if event.status == discord.EventStatus.scheduled:
+                await self._check_date(event, longest, now)
             if event.status == discord.EventStatus.scheduled and reminders:
                 left = (event.start_time - now).total_seconds() / 60
                 record = store.load(STATE).get(str(event.id), {})
@@ -125,6 +154,43 @@ class EventReminders(commands.Cog):
                 if now - event.start_time < timedelta(minutes=15):
                     await self.post(event, "started")
         self._prune(guild)
+
+    async def _check_date(self, event: discord.ScheduledEvent, longest: int, now) -> None:
+        """Start over when a repeating event moves on to its next date, and say when the next one is."""
+        state = store.load(STATE)
+        record = state.get(str(event.id))
+        start = int(event.start_time.timestamp())
+        if record is None:
+            return
+        if not is_new_date(record, start, longest):
+            if "start" not in record:
+                record["start"] = start
+                store.save(STATE, state)
+            return
+        state[str(event.id)] = {"start": start, **({"msg": record["msg"]} if record.get("msg") else {})}
+        store.save(STATE, state)
+        if getattr(self.cfg, "post_next", True) and event.start_time > now:
+            await self.post(event, "next")
+
+    async def _remove_old(self, channel: discord.abc.Messageable, event: discord.ScheduledEvent, record: dict) -> None:
+        """Delete Pingwin's last post about this event, so the new one is the only one (at the bottom)."""
+        old = record.get("msg")
+        if old:
+            where = self.bot.get_channel(int(old[0])) or channel
+            try:
+                await where.get_partial_message(int(old[1])).delete()
+            except (discord.HTTPException, AttributeError):
+                pass  # already gone
+            return
+        me = getattr(self.bot, "user", None)
+        if me is None or not hasattr(channel, "history"):
+            return
+        try:  # posts from before Pingwin kept track: look through the channel's last messages
+            async for m in channel.history(limit=50):
+                if m.author.id == me.id and f"/{event.id}" in (m.content or ""):
+                    await m.delete()
+        except discord.HTTPException as e:
+            log.info("Couldn't tidy up old posts for %s: %s", event.name, e)
 
     @check.before_loop
     async def _wait(self) -> None:
@@ -144,6 +210,7 @@ class EventReminders(commands.Cog):
     ) -> None:
         state = store.load(STATE)
         record = state.setdefault(str(event.id), {})
+        record.setdefault("start", int(event.start_time.timestamp()))
         key = f"reminded:{reminder['minutes']}" if reminder else kind
         if record.get(key):
             return
@@ -157,11 +224,11 @@ class EventReminders(commands.Cog):
             for name in match_roles(f"{event.name}\n{event.description or ''}", self.cfg.rules)
             if (r := self.bot.role_named(guild, name))
         ]
-        if reminder is not None and not reminder["ping"]:
+        if (reminder is not None and not reminder["ping"]) or kind == "next":
             roles = []
         mentions = [r.mention for r in roles]
         users: list[discord.abc.User] = []
-        if self.cfg.ping_interested and kind != "announced" and (reminder is None or reminder["ping"]):
+        if self.cfg.ping_interested and kind not in ("announced", "next") and (reminder is None or reminder["ping"]):
             try:
                 users = [u async for u in event.users(limit=100) if not u.bot]
             except discord.HTTPException:
@@ -170,13 +237,17 @@ class EventReminders(commands.Cog):
         start = int(event.start_time.timestamp())
         if kind == "announced":
             text = self.bot.persona.say("event_new", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
+        elif kind == "next":
+            text = self.bot.persona.say("event_next", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
         elif kind == "reminded":
             text = await self._reminder_text(event, reminder, start)
         else:
             text = self.bot.persona.say("event_starting", event=event.name)
         content = (" ".join(mentions) + "\n" if mentions else "") + f"{text}\n{event.url}"
+        if getattr(self.cfg, "replace_old", True):
+            await self._remove_old(channel, event, record)
         try:
-            await channel.send(
+            sent = await channel.send(
                 content[:2000],
                 allowed_mentions=discord.AllowedMentions(everyone=False, roles=roles, users=users),
             )
@@ -185,6 +256,7 @@ class EventReminders(commands.Cog):
             return
         stamp = discord.utils.utcnow().isoformat()
         record[key] = stamp
+        record["msg"] = [channel.id, sent.id]
         for minutes in mark or []:
             record.setdefault(f"reminded:{minutes}", stamp)
         store.save(STATE, state)

@@ -35,6 +35,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "event_new": "📅 **New event: {event}**\n{when}",
     "event_soon": "⏰ **{event}** starts {when}!",
     "event_starting": "▶️ **{event}** is starting now!",
+    "event_next": "📅 Next **{event}**: {when}",
     "checkin_open": "📍 **{event}** has started! Here? Tap to check in.",
     "franchise_next": "🎬 {series}: **{title}**, part {part} of {total} of {franchise}. Starts {when}.",
     "franchise_done": "🏁 That's all of **{franchise}**! Time to pick the next franchise: "

@@ -145,6 +145,128 @@ def other_message(template: str, person: dict, today: date, films: list[str]) ->
     return text
 
 
+# --------------------------------------------------------------------- the Star birthdays message
+def parse_died(text: str) -> tuple[int, int | None, int | None] | None:
+    """(year, month, day) from '2015', 'Aug 30, 2015' or '2015-08-30'; month and day are None for a bare year."""
+    t = str(text or "").strip()
+    if re.fullmatch(r"\d{4}", t):
+        return int(t), None, None
+    p = parse_birthday(t)
+    return (p[2], p[0], p[1]) if p and p[2] else None
+
+
+def star_people(others: list) -> list[dict]:
+    """The people without Discord, read from the settings rows (rows that can't be read are skipped)."""
+    out = []
+    for o in others:
+        name = str(getattr(o, "name", "") or "").strip()
+        when = parse_birthday(str(getattr(o, "date", "") or ""))
+        if not name or when is None:
+            continue
+        died = parse_died(str(getattr(o, "died", "") or ""))
+        out.append(
+            {
+                "name": name,
+                "m": when[0],
+                "d": when[1],
+                "y": when[2],
+                "note": str(getattr(o, "note", "") or "").strip(),
+                "died": died[0] if died else None,
+                "died_on": died,
+            }
+        )
+    return out
+
+
+def age_on(y: int, m: int, d: int, when: date) -> int:
+    return when.year - y - ((when.month, when.day) < (m, d))
+
+
+def _day(m: int, d: int, y: int | None = None) -> str:
+    return f"{MONTHS[m - 1][:3]} {d}" + (f", {y}" if y else "")
+
+
+def life_line(p: dict) -> str:
+    """'Born Sep 2, 1964' or 'Aug 2, 1939 – Aug 30, 2015 · died at 76'."""
+    if not p.get("died_on"):
+        return f"Born {_day(p['m'], p['d'], p.get('y'))}" if p.get("y") else ""
+    dy, dm, dd = p["died_on"]
+    if not p.get("y"):
+        return f"Died {_day(dm, dd, dy) if dm else dy}"
+    if dm is None:
+        return f"{p['y']}–{dy}"
+    at = age_on(p["y"], p["m"], p["d"], date(dy, dm, dd))
+    return f"{_day(p['m'], p['d'], p['y'])} – {_day(dm, dd, dy)} · died at {at}"
+
+
+def nights_with(lib: dict, name: str) -> list[tuple[str, str | None]]:
+    """(title, date watched) for each movie night with someone in the cast or crew, oldest first, one per movie."""
+    key = name.casefold()
+    seen, out = set(), []
+    for e in lib.get("history", []):
+        m = lib["movies"].get(e["movie_id"], {})
+        names = {
+            re.sub(r"\s*\(.*?\)\s*$", "", n).strip().casefold()
+            for k in ("stars", "director", "writer")
+            for n in re.split(r"[,\n]", str(m.get(k) or ""))
+        }
+        if key in names and m.get("id") not in seen:
+            seen.add(m.get("id"))
+            out.append((m.get("title", "?"), e.get("date")))
+    return out
+
+
+def films_line(nights: list[tuple[str, str | None]], limit: int = 8) -> str:
+    if not nights:
+        return ""
+
+    def one(t: str, day: str | None) -> str:
+        if not day:
+            return t
+        y, mo = day[:4], int(day[5:7])
+        return f"{t} ({MONTHS[mo - 1][:3]} {y})"
+
+    shown = [one(t, d) for t, d in nights[:limit]]
+    more = len(nights) - len(shown)
+    return f"🍿 Our movie nights with them ({len(nights)}): " + ", ".join(shown) + (f" and {more} more" if more else "")
+
+
+def star_board(people: list[dict], lib: dict, today: date, days: int = 14, template: str = "") -> tuple[str, bool]:
+    """The Star birthdays message, and whether someone's birthday is today."""
+    template = template or "🎉 Happy birthday to **{name}**{age}!{note}"
+    lines = ["⭐ **Star birthdays**"]
+    todays = [p for p in people if is_birthday(p["m"], p["d"], today)]
+    for p in todays:
+        lines += ["", other_message(template, p, today, [])]
+        lines += [f"-# {x}" for x in (life_line(p), films_line(nights_with(lib, p["name"]))) if x]
+    soon = []
+    for p in people:
+        if p in todays:
+            continue
+        for year in (today.year, today.year + 1):
+            when = date(year, p["m"], min(p["d"], calendar.monthrange(year, p["m"])[1]))
+            if when > today:
+                soon.append(((when - today).days, year, p))
+                break
+    soon.sort(key=lambda x: (x[0], x[2]["name"]))
+    window = [x for x in soon if x[0] <= days] or [x for x in soon if x[0] == soon[0][0]]
+    if window:
+        lines += ["", "📅 **Coming up**" if any(x[0] <= days for x in window) else "📅 **Next up**"]
+        for away, year, p in window:
+            age = ""
+            if p.get("y"):
+                n = year - p["y"]
+                age = f", would be {n}" if p.get("died") else f", turning {n}"
+            lines.append(
+                f"**{_day(p['m'], p['d'])}** · {p['name']}{age} · " + ("tomorrow" if away == 1 else f"in {away} days")
+            )
+    if not todays and not window:
+        lines.append("No birthdays saved yet.")
+    lines.append(f"-# Updated {_day(today.month, today.day, today.year)}")
+    text = "\n".join(lines)
+    return (text if len(text) <= 2000 else text[:1990] + "…"), bool(todays)
+
+
 class Birthdays(commands.GroupCog, group_name="birthday", group_description="Birthdays"):
     def __init__(self, bot: Pingwin) -> None:
         self.bot = bot
@@ -312,6 +434,51 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
         self._save_others(keep)
         await interaction.response.send_message(f"Removed **{name}**.", ephemeral=True)
 
+    async def _star_board(self, state: dict, now: datetime) -> bool:
+        """Keep one Star birthdays message: edited in place each day, and deleted and posted again on a day with a
+        birthday (Discord doesn't notify anyone about edits)."""
+        people = star_people(getattr(self.cfg, "others", []) or [])
+        board = state.setdefault("star_board", {})
+        channel = self.bot.text_channel(self.cfg.channel)
+        if not people or channel is None or now.hour < self.cfg.hour:
+            return False
+        text, has_today = star_board(
+            people,
+            movies.load(),
+            now.date(),
+            int(getattr(self.cfg, "stars_days", 14) or 14),
+            getattr(self.cfg, "others_message", "") or "",
+        )
+        today = now.date().isoformat()
+        new_day = board.get("day") != today
+        if board.get("text") == text and not new_day:
+            return False
+        old = board.get("message")
+        same_channel = board.get("channel") == channel.id
+        if old and (not same_channel or (new_day and has_today)):
+            old_channel = channel if same_channel else self.bot.get_channel(int(board.get("channel") or 0))
+            if old_channel is not None:
+                try:
+                    await old_channel.get_partial_message(int(old)).delete()
+                except discord.HTTPException:
+                    pass  # already gone
+            old = None
+        if old:
+            try:
+                await channel.get_partial_message(int(old)).edit(content=text)
+            except discord.HTTPException:
+                old = None  # someone deleted it: post a new one
+        if not old:
+            try:
+                msg = await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException as e:
+                log.warning("Couldn't post the Star birthdays message: %s", e)
+                return False
+            board["message"], board["channel"] = msg.id, channel.id
+            log.info("Posted the Star birthdays message%s", " (a birthday today)" if has_today else "")
+        board["day"], board["text"] = today, text
+        return True
+
     async def _wish_others(self, state: dict, now: datetime) -> bool:
         """Happy birthday to people without Discord (at the birthday hour, in the server's time zone)."""
         others = getattr(self.cfg, "others", []) or []
@@ -369,7 +536,8 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
                     state["role_given"].pop(uid)
                     changed = True
 
-        if await self._wish_others(state, now):
+        stars = self._star_board if getattr(self.cfg, "stars_board", True) else self._wish_others
+        if await stars(state, now):
             changed = True
         due = due_now(people, posted_for, saved_zones, self.bot.features.tz, self.cfg.hour, now)
         if due:

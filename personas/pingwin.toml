@@ -83,6 +83,10 @@ event_soon = [
     "⏰ **{event}** starts {when}! Time to waddle over. 🐧",
     "⏰ **{event}** starts {when}! Don't leave the colony waiting. 🐧",
 ]
+event_next = [
+    "📅 Next **{event}**: {when} 🐧",
+    "📅 Mark your calendars, penguins: the next **{event}** is {when}.",
+]
 event_starting = [
     "▶️ **{event}** is starting now! 🐧",
     "▶️ The huddle is forming: **{event}** is starting now!",

@@ -79,6 +79,21 @@ SECTIONS: list[dict[str, Any]] = [
                 ],
             ),
             F("remind_at_start", "toggle", "Post when it starts", True),
+            F(
+                "replace_old",
+                "toggle",
+                "Keep one message per event",
+                True,
+                "Each new post about an event (reminder, starting now, next date) deletes the last one, so it stays "
+                "at the bottom and the channel doesn't fill up.",
+            ),
+            F(
+                "post_next",
+                "toggle",
+                "Say when a repeating event's next one is",
+                True,
+                "When a weekly event like MMM is over, Pingwin posts its next date (no pings).",
+            ),
             F("ping_interested", "toggle", "Also ping people who clicked Interested", False),
             F(
                 "rules",
@@ -116,25 +131,43 @@ SECTIONS: list[dict[str, Any]] = [
                 "rows",
                 "Birthdays of people without Discord",
                 [],
-                "Friends who aren't on Discord, or celebrities you like to celebrate. Pingwin says happy birthday "
-                "to them in the same channel (no pings), with their age if you give the year, and the movie "
-                "nights they were in. Dates like Sep 2, 9/2 or 1964-09-02.",
+                "Friends who aren't on Discord, or stars from our movies. They share one ⭐ Star birthdays message "
+                "in the same channel (no pings): today's birthdays with their age (or the age they'd be, and how "
+                "old they were when they died), the movie nights we've seen them in, and who's coming up. Dates "
+                "like Sep 2, 9/2 or 1964-09-02; the year gives their age.",
                 add_label="+ Add a person",
                 empty="Nobody yet. Add a friend without Discord, or a star from our movies.",
                 columns=[
                     {"key": "name", "type": "text", "label": "Name"},
                     {"key": "date", "type": "text", "label": "Birthday"},
                     {"key": "note", "type": "text", "label": "Note (optional, e.g. Neo in The Matrix)"},
-                    {"key": "died", "type": "text", "label": "Died (year, optional)"},
+                    {"key": "died", "type": "text", "label": "Died (date or year, optional)"},
                 ],
             ),
             F(
                 "others_message",
                 "text",
-                "Message for them",
+                "Birthday line",
                 "🎉 Happy birthday to **{name}**{age}!{note}",
                 "{name}, {age} (like ', 62 today', or ', who would have been 53' if they've died) and {note} are "
                 "filled in.",
+            ),
+            F(
+                "stars_board",
+                "toggle",
+                "Keep them in one Star birthdays message",
+                True,
+                "Pingwin edits it every morning, and on someone's birthday deletes it and posts it again at the "
+                "bottom so people get notified. Off = a separate message on each birthday.",
+            ),
+            F(
+                "stars_days",
+                "number",
+                "Show birthdays coming up in the next (days)",
+                14,
+                min=1,
+                max=60,
+                show_if={"stars_board": [True]},
             ),
             F("birthday_role", "role", "Give this role for the day", "", "Optional."),
         ],
