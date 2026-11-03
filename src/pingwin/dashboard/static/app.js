@@ -73,6 +73,10 @@ function since(iso) {
 
 // ---------- state ----------------------------------------------------------
 let state = null;
+// Pickers (channels, roles) are filled from the state, so the Features tab waits for it on first load.
+let stateReady;
+const firstState = new Promise((resolve) => { stateReady = resolve; });
+let featuresWithoutState = false;
 let rolesDraft = null;   // { required_role, menus: [{ key, title, description, mode, timezone, roles: [...] }] }
 let pcsDraft = null;     // { enabled, status_channel_id, pcs, heartbeat_seconds, takeover_after_seconds }
 let rolesDirty = false;
@@ -87,6 +91,11 @@ async function loadState() {
     setPill("offline", "Not reachable");
     $("server-line").textContent = e.message;
     return;
+  }
+  stateReady();
+  if (featuresWithoutState && featureData && !Object.values(featureDrafts).some((d) => d.dirty)) {
+    featuresWithoutState = false;
+    renderFeatures();
   }
   if (!rolesDirty) { rolesDraft = clone(state.config.roles); bases.roles = state.versions.roles; }
   if (!pcsDirty) { pcsDraft = clone(state.config.failover); bases.failover = state.versions.failover; }
@@ -608,7 +617,10 @@ const featureDrafts = {};
 
 async function loadFeatures(force = false) {
   if (featureData && !force && Object.values(featureDrafts).some((d) => d.dirty)) return;
-  try { featureData = await api("/api/features"); } catch (e) { toast(e.message, true); return; }
+  const [features] = await Promise.allSettled([api("/api/features"), state ? null : Promise.race([firstState, new Promise((r) => setTimeout(r, 8000))])]);
+  if (features.status === "rejected") { toast(features.reason.message, true); return; }
+  featureData = features.value;
+  featuresWithoutState = !state;
   $("f-restart").hidden = !featureData.restart_needed;
   const missing = featureData.missing_intents || [];
   $("f-intents").hidden = !missing.length;
