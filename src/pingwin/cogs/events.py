@@ -102,6 +102,12 @@ def is_new_date(record: dict, start: int, longest_minutes: int) -> bool:
     return bool(stamps) and max(stamps) < start - (longest_minutes + 90) * 60
 
 
+def _card(movie: dict, why: str) -> discord.Embed:
+    from .movienight import movie_card
+
+    return movie_card(movie, why)
+
+
 def next_occurrence(rule: dict | None, after: datetime) -> datetime | None:
     """A repeating event's first date after `after`, from Discord's recurrence rule (daily and weekly rules,
     every N days or weeks). None for other rules or when it has ended."""
@@ -300,12 +306,19 @@ class EventReminders(commands.Cog):
                 users = []
             mentions += [u.mention for u in users]
         start = int(when.timestamp())
+        info = await self._movie_info(event, start) if kind != "announced" else None
+        embeds = []
+        if info and info.get("movie") and getattr(self.cfg, "movie_cards", True):
+            why = info.get("why", "")
+            if kind == "started" and why.startswith("Leading"):
+                why = "Tonight's pick"
+            embeds.append(_card(info["movie"], why))
         if kind == "announced":
             text = self.bot.persona.say("event_new", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
         elif kind == "next":
             text = self.bot.persona.say("event_next", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
         elif kind == "reminded":
-            text = await self._reminder_text(event, reminder, start)
+            text = self._reminder_text(event, reminder, start, info)
         else:
             text = self.bot.persona.say("event_starting", event=event.name)
         content = (" ".join(mentions) + "\n" if mentions else "") + f"{text}\n{event.url}"
@@ -314,6 +327,7 @@ class EventReminders(commands.Cog):
         try:
             sent = await channel.send(
                 content[:2000],
+                embeds=embeds,
                 allowed_mentions=discord.AllowedMentions(everyone=False, roles=roles, users=users),
             )
         except discord.HTTPException as e:
@@ -327,15 +341,21 @@ class EventReminders(commands.Cog):
         store.save(STATE, state)
         log.info("Event %s: %s (pinged %s)", kind, event.name, ", ".join(r.name for r in roles) or "nobody")
 
-    async def _reminder_text(self, event: discord.ScheduledEvent, reminder: dict | None, start: int) -> str:
-        """The reminder, with where a movie night's vote stands (and a nudge) when there is one."""
-        info = None
+    async def _movie_info(self, event: discord.ScheduledEvent, start: int) -> dict | None:
+        """For a movie night: where the vote stands (or tonight's franchise part) and the likely movie."""
         movie = self.bot.get_cog("MovieNight")
-        if movie is not None and hasattr(movie, "reminder_info"):
-            try:
-                info = await movie.reminder_info(event.name, datetime.fromtimestamp(start, UTC))
-            except Exception:  # standings are a bonus: the reminder still goes out
-                log.exception("Couldn't work out the movie poll standings for %s", event.name)
+        if movie is None or not hasattr(movie, "reminder_info"):
+            return None
+        try:
+            return await movie.reminder_info(event.name, datetime.fromtimestamp(start, UTC))
+        except Exception:  # standings are a bonus: the post still goes out
+            log.exception("Couldn't work out the movie poll standings for %s", event.name)
+            return None
+
+    def _reminder_text(
+        self, event: discord.ScheduledEvent, reminder: dict | None, start: int, info: dict | None = None
+    ) -> str:
+        """The reminder, with where a movie night's vote stands (and a nudge) when there is one."""
         poll = (info or {}).get("line", "")
         nudge = (info or {}).get("nudge", "")
         when = f"<t:{start}:R>"

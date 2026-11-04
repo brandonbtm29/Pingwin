@@ -88,6 +88,14 @@ SECTIONS: list[dict[str, Any]] = [
                 "at the bottom and the channel doesn't fill up.",
             ),
             F(
+                "movie_cards",
+                "toggle",
+                "Show the movie in movie night posts",
+                True,
+                "Poster, IMDb link, rating and runtime: the franchise's next part for a franchise series, or "
+                "the movie leading the vote.",
+            ),
+            F(
                 "post_next",
                 "toggle",
                 "Say when a repeating event's next one is",

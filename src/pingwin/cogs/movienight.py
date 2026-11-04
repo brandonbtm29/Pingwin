@@ -108,6 +108,37 @@ def describe_request(req: dict[str, Any]) -> str:
     return kind
 
 
+def movie_card(m: dict[str, Any], why: str = "") -> discord.Embed:
+    """A movie for an event post: title (linked to IMDb), poster, rating, runtime, genre and a short plot.
+    `why` goes underneath, like 'Part 3 of 6 of Alien' or 'Leading the vote so far'."""
+    title = m.get("title") or "?"
+    if m.get("year"):
+        title += f" ({m['year']})"
+    url = f"https://www.imdb.com/title/{m['imdb_id']}/" if m.get("imdb_id") else None
+    facts = []
+    if m.get("imdb_rating"):
+        facts.append(f"⭐ IMDb {m['imdb_rating']}")
+    if m.get("runtime"):
+        facts.append(f"{m['runtime']} min")
+    if m.get("genre"):
+        facts.append(str(m["genre"]))
+    plot = str(m.get("plot") or "").strip()
+    if len(plot) > 220:
+        plot = plot[:217].rsplit(" ", 1)[0] + "…"
+    lines = [" · ".join(facts), plot]
+    if m.get("director"):
+        lines.append(f"-# Directed by {m['director']}")
+    e = discord.Embed(
+        title=title[:250], url=url, description="\n".join(x for x in lines if x)[:4000] or None, color=0xE8B04B
+    )
+    poster = str(m.get("poster") or "")
+    if poster.startswith("https://"):
+        e.set_image(url=poster)
+    if why:
+        e.set_footer(text=why[:200])
+    return e
+
+
 def _duration(minutes: int) -> str:
     h, m = divmod(int(minutes or 0), 60)
     return f"{h} h {m} min" if h else f"{m} min"
@@ -785,9 +816,19 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         url = self.page_url()
         if url and key == "franchise_done":
             text += f"\nThe whole {q['name']} run, with everyone's ratings: <{self.view_url()}>"
+        embeds = []
+        if (
+            item is not None
+            and key == "franchise_next"
+            and getattr(getattr(self.bot.features, "events", None), "movie_cards", True)
+        ):
+            part, total = franchise.part_number(q, item)
+            m = await self._card_movie(item["title"], item.get("year"), item.get("imdb_id"))
+            embeds.append(movie_card(m, f"Part {part} of {total} of {q['name']}"))
         try:
             await channel.send(
                 ((role.mention + " ") if role and key == "franchise_next" else "") + text,
+                embeds=embeds,
                 allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
             )
         except discord.HTTPException as e:
@@ -1116,10 +1157,13 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         nxt = franchise.next_part(data.get("queue")) if is_franchise(s) else None
         if nxt and not (data.get("queue") or {}).get("paused"):
             part, total = franchise.part_number(data["queue"], nxt)
+            name = (data.get("queue") or {}).get("name") or "the franchise"
             return {
                 "line": f"🍿 Tonight: **{franchise.label(nxt)}**, part {part} of {total}.",
                 "nudge": "",
                 "votes": None,
+                "movie": await self._card_movie(nxt["title"], nxt.get("year"), nxt.get("imdb_id")),
+                "why": f"Part {part} of {total} of {name}",
             }
         polls = await self._read_polls(s, start - timedelta(days=15))
         st = voicewatch.standings(polls, (start - timedelta(days=7)).timestamp())
@@ -1132,7 +1176,26 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             if below.isdigit():
                 rows.append((int(below), str(getattr(r, "message", "") or "")))
         text = voicewatch.nudge(rows, st["votes"]).replace("{polls}", polls_ch.mention if polls_ch else "the polls")
-        return {"line": voicewatch.standings_line(st), "nudge": text, "votes": st["votes"]}
+        movie = None
+        if st.get("pick"):
+            title, year = voicewatch.split_year(st["pick"])
+            movie = await self._card_movie(title, year)
+        return {
+            "line": voicewatch.standings_line(st),
+            "nudge": text,
+            "votes": st["votes"],
+            "movie": movie,
+            "why": "Leading the vote so far",
+        }
+
+    async def _card_movie(self, title: str, year: Any = None, imdb_id: str | None = None) -> dict[str, Any] | None:
+        """The movie's details for a movie card (looked up on OMDb once if we don't have them)."""
+        try:
+            m = await self.details(title, year, imdb_id)
+        except Exception:  # a card is a bonus: the post still goes out without it
+            log.exception("Couldn't look up %s for a movie card", title)
+            m = None
+        return m or {"title": title, "year": year, "imdb_id": imdb_id}
 
     async def _night_candidates(self, s, day: str) -> list[dict[str, Any]]:
         """Likely movies for a night: the franchise queue's next part, the polls, then the watchlist."""

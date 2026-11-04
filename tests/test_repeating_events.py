@@ -188,3 +188,63 @@ def test_a_date_nobody_started_moves_on():
         assert len(ch.sent) == 2 and str(int((nov3 + timedelta(days=7)).timestamp())) in ch.sent[-1]
 
     asyncio.run(go())
+
+
+def test_movie_card():
+    from pingwin.cogs.movienight import movie_card
+
+    m = {
+        "title": "Alien 3",
+        "year": 1992,
+        "imdb_id": "tt0103644",
+        "poster": "https://m.media-amazon.com/images/alien3.jpg",
+        "imdb_rating": 6.4,
+        "runtime": 114,
+        "genre": "Action, Horror, Sci-Fi",
+        "plot": "x " * 200,
+        "director": "David Fincher",
+    }
+    e = movie_card(m, "Part 3 of 6 of Alien")
+    assert e.title == "Alien 3 (1992)" and e.url == "https://www.imdb.com/title/tt0103644/"
+    assert e.image.url.endswith("alien3.jpg") and e.footer.text == "Part 3 of 6 of Alien"
+    assert (
+        e.description.startswith("⭐ IMDb 6.4 · 114 min · Action, Horror, Sci-Fi") and "David Fincher" in e.description
+    )
+    assert len(e.description) < 400
+    bare = movie_card({"title": "Mystery Movie"})
+    assert bare.title == "Mystery Movie" and bare.url is None and bare.image.url is None
+
+
+def test_movie_nights_get_a_movie_card():
+    async def go():
+        ev = event_at(datetime(2026, 11, 7, 1, 30, tzinfo=UTC))
+        ch = Channel()
+        sent_embeds = []
+        orig = ch.send
+
+        async def send(text, **kw):
+            sent_embeds.append(kw.get("embeds"))
+            return await orig(text, **kw)
+
+        ch.send = send
+        cog = make(ch, ev)
+
+        async def info(name, start):
+            return {
+                "line": "🍿 Tonight: **Alien 3 (1992)**, part 3 of 6.",
+                "nudge": "",
+                "votes": None,
+                "movie": {"title": "Alien 3", "year": 1992, "imdb_id": "tt0103644"},
+                "why": "Part 3 of 6 of Alien",
+            }
+
+        cog.bot.get_cog = lambda n: NS(reminder_info=info)
+        reminders = events.reminder_list(cog.cfg)
+        pick, mark = events.due_reminder(reminders, "MMM", 30, set())
+        await cog.post(ev, "reminded", pick, mark)
+        assert "Alien 3" in ch.sent[-1] and sent_embeds[-1][0].title == "Alien 3 (1992)"
+        cog.cfg.movie_cards = False
+        await cog.post(ev, "started")
+        assert sent_embeds[-1] == []
+
+    asyncio.run(go())
