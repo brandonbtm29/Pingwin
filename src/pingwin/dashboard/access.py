@@ -99,6 +99,22 @@ def report(bot: Pingwin) -> dict[str, Any]:
             )
         )
     f = bot.config.features
+    events = getattr(f, "events", None)
+    if (
+        events is not None
+        and events.enabled
+        and getattr(events, "keep_local_time", True)
+        and guild.scheduled_events
+        and not me.guild_permissions.manage_events
+    ):
+        items.append(
+            _item(
+                WARN,
+                "Pingwin can't keep repeating events at their local time",
+                "Discord moves them an hour when the clocks change, and Pingwin needs Manage Events to move them back.",
+                "Server Settings → Roles → Pingwin → turn on Manage Events.",
+            )
+        )
     wanted: list[tuple[str, str]] = [(r.name, "role menus") for m in bot.config.roles.menus for r in m.roles]
     if f.welcome.enabled and f.welcome.approve_role:
         wanted.append((f.welcome.approve_role, "the Approve button"))

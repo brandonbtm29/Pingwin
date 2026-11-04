@@ -108,39 +108,71 @@ def _card(movie: dict, why: str) -> discord.Embed:
     return movie_card(movie, why)
 
 
-def next_occurrence(rule: dict | None, after: datetime) -> datetime | None:
+def _at(day, anchor: datetime, tz) -> datetime:
+    """`day` at the anchor's local clock time."""
+    return datetime(day.year, day.month, day.day, anchor.hour, anchor.minute, anchor.second, tzinfo=tz)
+
+
+def next_occurrence(rule: dict | None, after: datetime, tz=UTC) -> datetime | None:
     """A repeating event's first date after `after`, from Discord's recurrence rule (daily and weekly rules,
-    every N days or weeks). None for other rules or when it has ended."""
+    every N days or weeks), at the rule's local clock time in `tz`. None for other rules or when it has ended."""
     if not rule or not rule.get("start"):
         return None
     try:
-        anchor = datetime.fromisoformat(rule["start"])
+        utc = datetime.fromisoformat(rule["start"]).astimezone(UTC)
         end = datetime.fromisoformat(rule["end"]) if rule.get("end") else None
     except ValueError:
         return None
+    anchor = utc.astimezone(tz)
     interval = max(1, int(rule.get("interval") or 1))
     if rule.get("frequency") == 3:  # daily
-        step, days = timedelta(days=interval), None
-    elif rule.get("frequency") == 2:  # weekly (Discord's weekdays: 0 = Monday)
-        step, days = timedelta(weeks=interval), rule.get("by_weekday") or None
+        step, days = interval, None
+    elif rule.get("frequency") == 2:  # weekly (Discord's weekdays, 0 = Monday, are UTC days)
+        step, days = 7 * interval, rule.get("by_weekday") or None
+        if days:  # Saturday 01:30 UTC is a Friday evening here
+            shift = (anchor.date() - utc.date()).days
+            days = [(int(wd) + shift) % 7 for wd in days]
     else:
         return None
-    k = max(0, (after - anchor) // step) if after > anchor else 0
-    for i in range(int(k), int(k) + 3):
-        base = anchor + i * step
+    gap = (after.astimezone(tz).date() - anchor.date()).days
+    k = max(0, gap // step - 1)
+    for i in range(k, k + 4):
+        base = anchor.date() + timedelta(days=i * step)
         options = sorted(base + timedelta(days=wd - base.weekday()) for wd in days) if days else [base]
-        for when in options:
+        for day in options:
+            when = _at(day, anchor, tz)
             if when > after and when >= anchor:
                 return when if end is None or when <= end else None
     return None
 
 
-def effective_start(event, rule: dict | None, now: datetime) -> datetime:
+def local_fix(rule: dict | None, start: datetime, tz) -> datetime | None:
+    """Where a repeating event's date should be to stay at the rule's local clock time. Discord keeps
+    repeating events at the same UTC time, so they move an hour when the clocks change; this undoes that.
+    None when it's already right, or when it's off by more than an hour (someone moved it on purpose)."""
+    if not rule or not rule.get("start") or rule.get("frequency") not in (2, 3):
+        return None
+    try:
+        anchor = datetime.fromisoformat(rule["start"]).astimezone(tz)
+    except ValueError:
+        return None
+    local = start.astimezone(tz)
+    for shift in (0, -1, 1):  # a late-night time can land on the next or previous day
+        want = _at(local.date() + timedelta(days=shift), anchor, tz)
+        diff = abs((want - start).total_seconds())
+        if diff == 0:
+            return None
+        if diff <= 3600:
+            return want
+    return None
+
+
+def effective_start(event, rule: dict | None, now: datetime, tz=UTC) -> datetime:
     """When the event is next on: its own start, or for a repeating event stuck on a date nobody started, the
     next date from its rule."""
     start = event.start_time
     if event.status == discord.EventStatus.scheduled and now - start > MISSED_AFTER:
-        nxt = next_occurrence(rule, max(start, now - MISSED_AFTER))
+        nxt = next_occurrence(rule, max(start, now - MISSED_AFTER), tz)
         if nxt is not None:
             return nxt
     return start
@@ -187,8 +219,10 @@ class EventReminders(commands.Cog):
         reminders = reminder_list(self.cfg)
         longest = max([r["minutes"] for r in reminders] or [0])
         rules = await self._rules(guild)
+        tz = self.bot.features.tz
+        await self._keep_local_time(guild, now)
         for event in guild.scheduled_events:
-            when = effective_start(event, rules.get(event.id), now)
+            when = effective_start(event, rules.get(event.id), now, tz)
             if event.status == discord.EventStatus.scheduled:
                 await self._check_date(event, longest, now, when)
             if event.status == discord.EventStatus.scheduled and reminders:
@@ -213,11 +247,66 @@ class EventReminders(commands.Cog):
         try:
             raw = await self.bot.http.get_scheduled_events(guild.id, False)
             self._rules_cache = {int(e["id"]): e.get("recurrence_rule") for e in raw}
+            self._raw_events = raw
         except (discord.HTTPException, AttributeError, KeyError, TypeError) as e:
             log.info("Couldn't read the events' repeat rules: %s", e)
             self._rules_cache = getattr(self, "_rules_cache", {})
         self._rules_at = time.monotonic()
         return self._rules_cache
+
+    async def _keep_local_time(self, guild: discord.Guild, now: datetime) -> None:
+        """Move repeating events back to their local time after a clock change (needs Manage Events)."""
+        raw, self._raw_events = getattr(self, "_raw_events", None), None  # once per fetch of the events
+        if not raw or not getattr(self.cfg, "keep_local_time", True):
+            return
+        tz = self.bot.features.tz
+        tried = self.__dict__.setdefault("_moved", set())
+        for e in raw:
+            rule = e.get("recurrence_rule")
+            if e.get("status") != 1 or not rule:  # only scheduled, repeating events
+                continue
+            start = datetime.fromisoformat(e["scheduled_start_time"])
+            want = local_fix(rule, start, tz)
+            if want is None or start - now < timedelta(minutes=10) or f"{e['id']}:{start}" in tried:
+                continue
+            tried.add(f"{e['id']}:{start}")
+            if not guild.me.guild_permissions.manage_events:
+                log.warning(
+                    "%s is at %s instead of %s (Discord moved it at the clock change). Give Pingwin's role Manage "
+                    "Events and it moves it back.",
+                    e.get("name"),
+                    f"{start.astimezone(tz):%a %H:%M}",
+                    f"{want:%a %H:%M}",
+                )
+                continue
+            payload: dict = {"scheduled_start_time": want.isoformat()}
+            if e.get("scheduled_end_time"):
+                end = datetime.fromisoformat(e["scheduled_end_time"])
+                payload["scheduled_end_time"] = (end + (want - start)).isoformat()
+            keep = ("frequency", "interval", "by_weekday", "by_n_weekday", "by_month", "by_month_day")
+            new_rule = {k: rule.get(k) for k in keep} | {"start": want.isoformat()}
+            route = discord.http.Route(
+                "PATCH",
+                "/guilds/{guild_id}/scheduled-events/{event_id}",
+                guild_id=guild.id,
+                event_id=e["id"],
+            )
+            reason = "Pingwin: keep the event at its local time after the clock change"
+            try:
+                await self.bot.http.request(route, json=payload | {"recurrence_rule": new_rule}, reason=reason)
+            except discord.HTTPException as err:
+                log.info("Moving %s with its repeat rule didn't work (%s); trying the date alone", e.get("name"), err)
+                try:
+                    await self.bot.http.request(route, json=payload, reason=reason)
+                except discord.HTTPException as err2:
+                    log.warning("Couldn't move %s back to its local time: %s", e.get("name"), err2)
+                    continue
+            log.info(
+                "Moved %s back to %s (its local time) after the clock change",
+                e.get("name"),
+                f"{want:%a %b %d %H:%M %Z}",
+            )
+            self._rules_at = -1e9  # read the events again next time
 
     async def _check_date(self, event: discord.ScheduledEvent, longest: int, now, when=None) -> None:
         """Start over when a repeating event moves on to its next date, and say when the next one is."""

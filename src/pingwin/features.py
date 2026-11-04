@@ -88,6 +88,14 @@ SECTIONS: list[dict[str, Any]] = [
                 "at the bottom and the channel doesn't fill up.",
             ),
             F(
+                "keep_local_time",
+                "toggle",
+                "Keep repeating events at their local time",
+                True,
+                "Discord keeps repeating events at the same UTC time, so they move an hour when the clocks change. "
+                "Pingwin moves them back. Needs the Manage Events permission.",
+            ),
+            F(
                 "movie_cards",
                 "toggle",
                 "Show the movie in movie night posts",

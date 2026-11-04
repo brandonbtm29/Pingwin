@@ -248,3 +248,82 @@ def test_movie_nights_get_a_movie_card():
         assert sent_embeds[-1] == []
 
     asyncio.run(go())
+
+
+ET = __import__("zoneinfo").ZoneInfo("America/New_York")
+FFF_RULE = {"start": "2026-03-14T01:30:00+00:00", "end": None, "frequency": 2, "interval": 1, "by_weekday": [5]}
+
+
+def test_clock_change_is_undone():
+    # Made in March for Fri 9:30 PM (EDT). Discord keeps 01:30 UTC, which is 8:30 PM after the clocks go back.
+    nov6 = datetime(2026, 11, 7, 1, 30, tzinfo=UTC)
+    fixed = events.local_fix(FFF_RULE, nov6, ET)
+    assert fixed is not None and fixed.astimezone(ET).strftime("%a %H:%M") == "Fri 21:30"
+    assert fixed.astimezone(UTC) == datetime(2026, 11, 7, 2, 30, tzinfo=UTC)
+    # Already right, or moved on purpose by more than an hour: left alone.
+    assert events.local_fix(FFF_RULE, datetime(2026, 10, 24, 1, 30, tzinfo=UTC), ET) is None
+    assert events.local_fix(FFF_RULE, datetime(2026, 11, 7, 23, 0, tzinfo=UTC), ET) is None
+    # After Pingwin moves it, the rule starts in November: in March it's put back the other way.
+    winter = {**FFF_RULE, "start": fixed.isoformat()}
+    assert events.local_fix(winter, datetime(2027, 3, 20, 2, 30, tzinfo=UTC), ET).astimezone(UTC) == datetime(
+        2027, 3, 20, 1, 30, tzinfo=UTC
+    )
+    assert events.local_fix(MMM_RULE, datetime(2026, 11, 10, 0, 30, tzinfo=UTC), ET).astimezone(ET).hour == 20
+
+
+def test_next_date_keeps_local_time():
+    nxt = events.next_occurrence(FFF_RULE, datetime(2026, 11, 3, tzinfo=UTC), ET)
+    assert nxt.astimezone(ET).strftime("%Y-%m-%d %a %H:%M") == "2026-11-06 Fri 21:30"
+
+
+class FakeHttp:
+    def __init__(self, fail_rule=False):
+        self.calls, self.fail_rule = [], fail_rule
+
+    async def request(self, route, json=None, reason=None):
+        if self.fail_rule and "recurrence_rule" in json:
+            raise discord.HTTPException(NS(status=400, reason="Bad"), "Invalid recurrence rule")
+        self.calls.append((route.path, json))
+        return {}
+
+
+def _raw(start):
+    return {"id": "777", "name": "FFF", "status": 1, "scheduled_start_time": start, "recurrence_rule": FFF_RULE}
+
+
+@pytest.mark.parametrize("fail_rule", [False, True])
+def test_pingwin_moves_the_event_back(fail_rule):
+    async def go():
+        ch = Channel()
+        cog = make(ch, event_at(datetime(2026, 11, 7, 1, 30, tzinfo=UTC)))
+        http = FakeHttp(fail_rule)
+        cog.bot.http = http
+        cog.bot.features.tz = ET
+        guild = NS(id=1, me=NS(guild_permissions=NS(manage_events=True)))
+        now = datetime(2026, 11, 4, 17, 0, tzinfo=UTC)
+        cog._raw_events = [_raw("2026-11-07T01:30:00+00:00")]
+        await cog._keep_local_time(guild, now)
+        assert len(http.calls) == 1
+        body = http.calls[0][1]
+        assert body["scheduled_start_time"] == "2026-11-06T21:30:00-05:00"
+        assert ("recurrence_rule" in body) is (not fail_rule)
+        cog._raw_events = [_raw("2026-11-07T01:30:00+00:00")]
+        await cog._keep_local_time(guild, now)  # tried once already: not again
+        assert len(http.calls) == 1
+
+    asyncio.run(go())
+
+
+def test_without_the_permission_it_only_logs(caplog):
+    async def go():
+        cog = make(Channel(), event_at(datetime(2026, 11, 7, 1, 30, tzinfo=UTC)))
+        cog.bot.http = FakeHttp()
+        cog.bot.features.tz = ET
+        cog._raw_events = [_raw("2026-11-07T01:30:00+00:00")]
+        await cog._keep_local_time(
+            NS(id=1, me=NS(guild_permissions=NS(manage_events=False))), datetime(2026, 11, 4, tzinfo=UTC)
+        )
+        assert cog.bot.http.calls == []
+
+    asyncio.run(go())
+    assert "Manage Events" in caplog.text
