@@ -108,6 +108,16 @@ def describe_request(req: dict[str, Any]) -> str:
     return kind
 
 
+def _same_year(m: dict[str, Any] | None, year: Any) -> dict[str, Any] | None:
+    """The library movie, unless its year says it's a namesake (the 2002 Resident Evil for the 2026 one)."""
+    try:
+        if m and year and m.get("year") and abs(int(m["year"]) - int(year)) > 1:
+            return None
+    except (TypeError, ValueError):
+        pass
+    return m
+
+
 def movie_card(m: dict[str, Any], why: str = "") -> discord.Embed:
     """A movie for an event post: title (linked to IMDb), poster, rating, runtime, genre and a short plot.
     `why` goes underneath, like 'Part 3 of 6 of Alien' or 'Leading the vote so far'."""
@@ -529,7 +539,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if imdb_id and not movies.IMDB_ID.fullmatch(imdb_id):
             imdb_id = None
         m = next((x for x in lib["movies"].values() if imdb_id and x.get("imdb_id") == imdb_id), None)
-        m = m or movies.find_movie(lib, title, year)
+        m = m or _same_year(movies.find_movie(lib, title, year), year)
         key = self.bot.features.secret(movies.SECRET)
         if (m and m.get("looked_up")) or not key or self._omdb_paused():
             return m
@@ -551,7 +561,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             return m
         if info is None:
             return None
-        m = movies.find_movie(lib, info["title"], info.get("year")) or movies.upsert_movie(lib, info)
+        m = _same_year(movies.find_movie(lib, info["title"], info.get("year")), info.get("year"))
+        m = m or movies.upsert_movie(lib, info)
         movies.merge_details(m, info)
         movies.save(lib)
         return m

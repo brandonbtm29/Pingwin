@@ -385,3 +385,23 @@ def test_reminders_know_where_the_movie_vote_stands():
         assert await cog.reminder_info("Game night", start) is None
 
     asyncio.run(go())
+
+
+def test_a_remake_is_not_the_original(monkeypatch):
+    """Looking up Resident Evil (2026) must not hand back the 2002 movie from the library."""
+    lib = movies.load()
+    movies.upsert_movie(lib, {"title": "Resident Evil", "year": 2002, "poster": "https://x/2002.jpg", "looked_up": 1.0})
+    movies.save(lib)
+
+    async def omdb(title, year, imdb_id=None, search=False):
+        return {"title": "Resident Evil", "year": 2026, "poster": "https://x/2026.jpg", "looked_up": 1.0}
+
+    async def go():
+        cog = make_cog()
+        cog._ask_omdb = omdb
+        m = await cog.details("Resident Evil", 2026)
+        assert m["year"] == 2026 and m["poster"] == "https://x/2026.jpg"
+        assert (await cog.details("Resident Evil", 2002))["poster"] == "https://x/2002.jpg"
+        assert (await cog.details("Resident Evil"))["title"] == "Resident Evil"  # no year: any of them
+
+    asyncio.run(go())
