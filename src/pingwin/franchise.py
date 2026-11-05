@@ -7,6 +7,9 @@ it's time for a poll to pick the next one.
 A queue lives in the series' movie night state:
     {"name": "Alien", "items": [{"id", "title", "year", "done": "2026-10-30" | None, "skipped": bool}],
      "paused": bool, "announced_for": date, "logged_for": date, "postponed_for": date}
+
+A franchise that wins a poll while the current one still has parts left waits in the series' state as
+"next_franchise", and starts once the current one is done.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import secrets
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from .movies import DONE_MARKS, TODO_MARKS, parse_list_message
+from .movies import DONE_MARKS, TODO_MARKS, norm, parse_list_message
 
 _NUMBERED = re.compile(r"^\s*(?:part\s*)?\d{1,3}\s*[.):-]\s*", re.I)
 
@@ -79,25 +82,54 @@ def finished(queue: dict[str, Any] | None) -> bool:
 
 
 def due(queue: dict[str, Any], showtime: datetime, now: datetime, announce_hours: float) -> str | None:
-    """What to do now for this week's showtime: "announce", "log" or None.
+    """What to do now for this week's showtime: "announce", "note", "log", "cancel" or None.
 
-    `showtime` is the next showing after `now`; last week's showing is a week earlier."""
-    if not queue or queue.get("paused") or next_part(queue) is None:
+    `showtime` is the next showing after `now`; last week's showing is a week earlier.
+    "note" is for when no announcement is wanted (`announce_hours` is 0): it just notes the coming showing,
+    so the part is still logged when it starts. "cancel" means an announced showing started while the queue
+    was paused: it didn't happen, so it mustn't be logged when the queue resumes."""
+    if not queue or next_part(queue) is None:
         return None
     last = showtime - timedelta(days=7)
-    # The showing that just started: log it, if we announced it (otherwise we can't tell it happened).
-    if (
+    started = (
         queue.get("announced_for") == last.date().isoformat()
         and queue.get("logged_for") != last.date().isoformat()
         and queue.get("postponed_for") != last.date().isoformat()
-    ):
+    )
+    if queue.get("paused"):
+        return "cancel" if started else None
+    # The showing that just started: log it, if we announced it (otherwise we can't tell it happened).
+    if started:
         return "log"
     day = showtime.date().isoformat()
     if queue.get("postponed_for") == day or queue.get("announced_for") == day:
         return None
+    if announce_hours <= 0:
+        return "note"
     if now >= showtime - timedelta(hours=announce_hours):
         return "announce"
     return None
+
+
+def same_movie(item: dict[str, Any], title: str, year: Any) -> bool:
+    """Is a movie this queue part? Same title, and the same year (give or take one) when both have one."""
+    if not title or norm(item["title"]) != norm(title):
+        return False
+    try:
+        return not (item.get("year") and year and abs(int(item["year"]) - int(year)) > 1)
+    except (TypeError, ValueError):
+        return True
+
+
+def mark_logged(queue: dict[str, Any] | None, titles: list[str], year: Any, day: str) -> dict[str, Any] | None:
+    """A movie night logged some other way (a voice card, /movie tonight, the movie pages). If it was the
+    queue's next part, that part is done, and that showing isn't announced or logged again. Returns the part."""
+    item = next_part(queue)
+    if item is None or not any(same_movie(item, t, year) for t in titles):
+        return None
+    item["done"] = day
+    queue["announced_for"] = queue["logged_for"] = day
+    return item
 
 
 def move(queue: dict[str, Any], item_id: str, delta: int) -> None:

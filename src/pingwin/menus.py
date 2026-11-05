@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .config import data_dir
+from .store import set_aside
 
 log = logging.getLogger("pingwin.menus")
 
@@ -32,19 +33,30 @@ def _path() -> Path:
     return data_dir() / "menus.json"
 
 
-def load_menus() -> list[PostedMenu]:
+def _read() -> list[PostedMenu] | None:
+    """The saved list, or None if menus.json is there but can't be read right now (so it mustn't be replaced)."""
     path = _path()
-    if not path.exists():
-        return []
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         return [
             PostedMenu(int(m["guild_id"]), int(m["channel_id"]), int(m["message_id"]), str(m.get("menu") or "main"))
             for m in raw
         ]
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        log.warning("Couldn't read %s (%s); starting a fresh list", path, e)
+    except FileNotFoundError:
         return []
+    except (ValueError, KeyError, TypeError) as e:  # broken: keep a copy, then start a fresh list
+        try:
+            set_aside(path, e)
+        except OSError:
+            return None
+        return []
+    except OSError as e:
+        log.warning("Couldn't read %s (%s)", path, e)
+        return None
+
+
+def load_menus() -> list[PostedMenu]:
+    return _read() or []
 
 
 def save_menus(menus: list[PostedMenu]) -> None:
@@ -56,11 +68,19 @@ def save_menus(menus: list[PostedMenu]) -> None:
     os.replace(tmp, path)
 
 
+def _for_update() -> list[PostedMenu] | None:
+    menus = _read()
+    if menus is None:
+        log.error("Not updating %s: it couldn't be read, and saving would replace it", _path().name)
+    return menus
+
+
 def remember(menu: PostedMenu) -> None:
-    menus = [m for m in load_menus() if m.message_id != menu.message_id]
-    save_menus([*menus, menu])
+    menus = _for_update()
+    if menus is not None:
+        save_menus([*(m for m in menus if m.message_id != menu.message_id), menu])
 
 
 def forget(message_ids: set[int]) -> None:
-    if message_ids:
-        save_menus([m for m in load_menus() if m.message_id not in message_ids])
+    if message_ids and (menus := _for_update()) is not None:
+        save_menus([m for m in menus if m.message_id not in message_ids])

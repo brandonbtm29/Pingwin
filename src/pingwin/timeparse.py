@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, time, timedelta, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 _DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 _DAY_WORDS = {
@@ -72,7 +72,11 @@ def parse_when(text: str, now: datetime) -> datetime | None:
         return None
     rel = _REL.match(s)
     if rel and (rel["h"] or rel["m"]):
-        return now + timedelta(hours=float(rel["h"] or 0), minutes=int(rel["m"] or 0))
+        delta = timedelta(hours=float(rel["h"] or 0), minutes=int(rel["m"] or 0))
+        if tz is None:
+            return now + delta
+        # Real elapsed time: add in UTC, so "in 2 hours" across a DST change is still 2 hours.
+        return (now.astimezone(UTC) + delta).astimezone(tz)
 
     day: date | None = None
     rest = s

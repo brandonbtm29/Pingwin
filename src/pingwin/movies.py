@@ -366,11 +366,12 @@ def plausible(m: dict[str, Any], info: dict[str, Any]) -> bool:
 
 
 def merge_details(m: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
-    """Fill in what a library movie is missing from an OMDb result. Keeps its own title and id."""
+    """Fill in what a library movie is missing from an OMDb result. Keeps its own title and id, and its
+    IMDb ID if it has one (a different one would be another movie; set_match is for fixing a wrong match)."""
     for k, v in info.items():
         if k in ("title", "id") or v in (None, "", "N/A"):
             continue
-        if k in ("imdb_id", "looked_up") or m.get(k) in (None, ""):
+        if k == "looked_up" or m.get(k) in (None, ""):
             m[k] = v
     if not m.get("year") and info.get("year"):
         m["year"] = info["year"]

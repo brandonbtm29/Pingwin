@@ -83,7 +83,7 @@ def due_reminder(
 def _stamps(record: dict) -> list[float]:
     out = []
     for k, v in record.items():
-        if k in ("start", "msg") or not isinstance(v, str):
+        if k in ("start", "msg", "moved") or not isinstance(v, str):
             continue
         try:
             out.append(datetime.fromisoformat(v).timestamp())
@@ -100,6 +100,35 @@ def is_new_date(record: dict, start: int, longest_minutes: int) -> bool:
         return int(record["start"]) != start
     stamps = _stamps(record)
     return bool(stamps) and max(stamps) < start - (longest_minutes + 90) * 60
+
+
+def after_move(record: dict, when: datetime) -> datetime:
+    """The event's time, counting Pingwin's own clock-change move: Discord's copy of the event can lag a moment
+    behind the move, and then still shows the old time."""
+    moved = record.get("moved")
+    if isinstance(moved, list) and len(moved) == 2 and int(when.timestamp()) == int(moved[0]):
+        return datetime.fromtimestamp(int(moved[1]), UTC)
+    return when
+
+
+def own_move(record: dict, start: int) -> bool:
+    """Whether the event's date changed only because Pingwin moved it back to its local time (the same date, an
+    hour off): what was already sent for it stays sent."""
+    moved = record.get("moved")
+    return (
+        isinstance(moved, list)
+        and len(moved) == 2
+        and "start" in record
+        and int(record["start"]) == int(moved[0])
+        and start == int(moved[1])
+    )
+
+
+def shift_weekdays(days, shift: int):
+    """Discord's weekdays are UTC days: a move across midnight UTC moves them too."""
+    if not days or not shift:
+        return days
+    return [(int(d) + shift) % 7 for d in days]
 
 
 def _card(movie: dict, why: str) -> discord.Embed:
@@ -223,6 +252,7 @@ class EventReminders(commands.Cog):
         await self._keep_local_time(guild, now)
         for event in guild.scheduled_events:
             when = effective_start(event, rules.get(event.id), now, tz)
+            when = after_move(store.load(STATE).get(str(event.id), {}), when)
             if event.status == discord.EventStatus.scheduled:
                 await self._check_date(event, longest, now, when)
             if event.status == discord.EventStatus.scheduled and reminders:
@@ -285,6 +315,9 @@ class EventReminders(commands.Cog):
                 payload["scheduled_end_time"] = (end + (want - start)).isoformat()
             keep = ("frequency", "interval", "by_weekday", "by_n_weekday", "by_month", "by_month_day")
             new_rule = {k: rule.get(k) for k in keep} | {"start": want.isoformat()}
+            # Thu 7:30 PM EDT is Thu 23:30 UTC, but 7:30 PM EST is Fri 00:30 UTC: the rule's weekday moves too.
+            day_shift = (want.astimezone(UTC).date() - start.astimezone(UTC).date()).days
+            new_rule["by_weekday"] = shift_weekdays(new_rule.get("by_weekday"), day_shift)
             route = discord.http.Route(
                 "PATCH",
                 "/guilds/{guild_id}/scheduled-events/{event_id}",
@@ -301,6 +334,7 @@ class EventReminders(commands.Cog):
                 except discord.HTTPException as err2:
                     log.warning("Couldn't move %s back to its local time: %s", e.get("name"), err2)
                     continue
+            self._remember_move(e["id"], start, want)
             log.info(
                 "Moved %s back to %s (its local time) after the clock change",
                 e.get("name"),
@@ -308,13 +342,26 @@ class EventReminders(commands.Cog):
             )
             self._rules_at = -1e9  # read the events again next time
 
+    def _remember_move(self, event_id, old: datetime, new: datetime) -> None:
+        """Note Pingwin's own clock-change move (in the shared state, so another PC knows too), so the new time
+        isn't taken for a new date: reminders already sent stay sent instead of pinging everyone again."""
+        state = store.load(STATE)
+        state.setdefault(str(event_id), {})["moved"] = [int(old.timestamp()), int(new.timestamp())]
+        store.save(STATE, state)
+
     async def _check_date(self, event: discord.ScheduledEvent, longest: int, now, when=None) -> None:
         """Start over when a repeating event moves on to its next date, and say when the next one is."""
         when = when or event.start_time
         state = store.load(STATE)
         record = state.get(str(event.id))
-        start = int(when.timestamp())
         if record is None:
+            return
+        when = after_move(record, when)
+        start = int(when.timestamp())
+        if own_move(record, start):  # the same date an hour off: keep what was sent, fix the time shown
+            record["start"] = start
+            store.save(STATE, state)
+            await self._retime_next(event, record, start)
             return
         if not is_new_date(record, start, longest):
             if "start" not in record:
@@ -325,6 +372,20 @@ class EventReminders(commands.Cog):
         store.save(STATE, state)
         if getattr(self.cfg, "post_next", True) and when > now:
             await self.post(event, "next", when=when)
+
+    async def _retime_next(self, event: discord.ScheduledEvent, record: dict, start: int) -> None:
+        """Put the new time in Pingwin's "next one is..." post after its own clock-change move. It's an edit, so
+        nobody is pinged; a reminder posted since is left as it is."""
+        msg = record.get("msg")
+        posts = {k: v for k, v in record.items() if k not in ("start", "msg", "moved") and isinstance(v, str)}
+        if not msg or not posts or max(posts, key=posts.get) != "next":
+            return
+        text = self.bot.persona.say("event_next", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
+        try:
+            where = self.bot.get_channel(int(msg[0]))
+            await where.get_partial_message(int(msg[1])).edit(content=f"{text}\n{event.url}"[:2000])
+        except (discord.HTTPException, AttributeError) as e:
+            log.info("Couldn't put the new time in the post about %s: %s", event.name, e)
 
     async def _remove_old(self, channel: discord.abc.Messageable, event: discord.ScheduledEvent, record: dict) -> None:
         """Delete Pingwin's last post about this event, so the new one is the only one (at the bottom)."""

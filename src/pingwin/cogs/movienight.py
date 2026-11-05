@@ -58,15 +58,18 @@ def poll_close(showtime: str, now: datetime, hours: int | None, default_hours: i
 
     Explicit hours win. Otherwise, with a showtime, the poll closes at the next showtime and Pingwin ends
     it then (Discord's own timer runs up to an hour longer). Otherwise the default length.
+
+    Lengths are real elapsed time (timestamps), not wall-clock time, so they're right across a DST change.
     """
     if hours is None and showtime:
         start = next_weekly(showtime, now)
         if start is not None:
-            if start - now < SOONEST:
-                start += timedelta(days=7)
-            return start, max(1, min(768, math.ceil((start - now).total_seconds() / 3600)))
+            if start.timestamp() - now.timestamp() < SOONEST.total_seconds():
+                start += timedelta(days=7)  # the same time a week later, by the clock
+            seconds = start.timestamp() - now.timestamp()
+            return start, max(1, min(768, math.ceil(seconds / 3600)))
     h = hours or default_hours
-    return now + timedelta(hours=h), h
+    return (now.astimezone(UTC) + timedelta(hours=h)).astimezone(now.tzinfo), h
 
 
 def winners(counts: list[tuple[str, int]]) -> list[str]:
@@ -92,7 +95,8 @@ def describe_request(req: dict[str, Any]) -> str:
     if kind == "watched":
         return f"Mark **{d['title']}** as {'watched' if d.get('watched', True) else 'not watched'} ({req['series']})"
     if kind == "tonight":
-        return f"Set tonight's {req['series']} movie to **{d['title']}**"
+        day = f" ({d['when'][:10]})" if d.get("when") else ""
+        return f"Set tonight's {req['series']} movie{day} to **{d['title']}**"
     if kind == "edit":
         changes = ", ".join(f"{k}: {v}" for k, v in d.get("changes", {}).items())
         return f"Fix **{d.get('label', 'a movie night')}** in the history: {changes}"
@@ -116,6 +120,17 @@ def _same_year(m: dict[str, Any] | None, year: Any) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         pass
     return m
+
+
+def _same_title(item: dict[str, Any], title: str, year: Any) -> bool:
+    """Is a watchlist or library movie this one? Same title, and not a remake or namesake from another year
+    (when both have a year)."""
+    return movies.norm(item.get("title") or "") == movies.norm(title or "") and _same_year(item, year) is not None
+
+
+def _known(index: dict[str, list[Any]], title: str, year: Any) -> bool:
+    """Is this title (and year) in an index of {normalized title: [years]}?"""
+    return any(_same_year({"year": y}, year) for y in index.get(movies.norm(title), []))
 
 
 def movie_card(m: dict[str, Any], why: str = "") -> discord.Embed:
@@ -708,9 +723,10 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                     if n is not None:
                         if info and movies.plausible(n, info):
                             lib = movies.load()
-                            m = movies.find_movie(lib, info["title"], info.get("year")) or movies.upsert_movie(
-                                lib, info
-                            )
+                            # Not a namesake from another year (The Thing 2011 isn't the 1982 one).
+                            m = _same_year(
+                                movies.find_movie(lib, info["title"], info.get("year")), info.get("year")
+                            ) or movies.upsert_movie(lib, info)
                             movies.merge_details(m, info)
                             movies.save(lib)
                             n["movie_id"] = m["id"]
@@ -750,22 +766,35 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
 
     # ------------------------------------------------------------ franchise queues
     async def run_queues(self) -> None:
-        """Announce each franchise part before showtime, then log it and move on when the movie starts."""
+        """Announce each franchise part before showtime, then log it and move on when the movie starts.
+
+        With queue_announce_hours at 0 nothing is announced, but each part is still logged at showtime."""
         hours = float(getattr(self.cfg, "queue_announce_hours", 6) or 0)
         for s in self.all_series:
-            if not is_franchise(s) or not getattr(s, "showtime", ""):
+            if not is_franchise(s):
+                continue
+            self._start_next_franchise(s)
+            if not getattr(s, "showtime", ""):
                 continue
             now = datetime.now(self.bot.features.tz)
             show = next_weekly(s.showtime, now)
             if show is None:
                 continue
             state = store.load(STATE)
-            q = self._data(state, s).get("queue")
+            data = self._data(state, s)
+            q = data.get("queue")
             what = franchise.due(q, show, now, hours)
             if what is None:
                 continue
             item = franchise.next_part(q)
-            if what == "announce":
+            if what == "note":  # no announcement wanted: just remember the showing, so it's logged
+                q["announced_for"] = show.date().isoformat()
+                store.save(STATE, state)
+            elif what == "cancel":  # it started while the queue was paused: that showing was skipped
+                q["announced_for"] = None
+                store.save(STATE, state)
+                log.info("%s: the %s queue was paused at showtime, so that night isn't logged", s.name, q["name"])
+            elif what == "announce":
                 q["announced_for"] = show.date().isoformat()
                 store.save(STATE, state)
                 await self._queue_post(s, "franchise_next", q, item, when=show)
@@ -777,7 +806,22 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 await self.log_watched(s, item["title"], item.get("year"), when=last)
                 log.info("%s: logged %s from the %s queue", s.name, item["title"], q["name"])
                 if franchise.finished(q):
-                    await self._queue_post(s, "franchise_done", q, None, when=None)
+                    up_next = data.get("next_franchise")
+                    note = f"**{up_next}** already won the vote, so it's up next. 🍿" if up_next else ""
+                    await self._queue_post(s, "franchise_done", q, None, when=None, note=note)
+                    self._start_next_franchise(s)
+
+    def _start_next_franchise(self, s) -> None:
+        """Start the franchise that already won a poll, once the current one has nothing left to watch."""
+        state = store.load(STATE)
+        data = self._data(state, s)
+        name = data.get("next_franchise")
+        if not name or franchise.next_part(data.get("queue")) is not None:
+            return
+        data["queue"] = franchise.new_queue(name, paused=True)  # a mod adds the movies
+        data.pop("next_franchise")
+        store.save(STATE, state)
+        log.info("%s: starting the next franchise, %s", s.name, name)
 
     async def suggest_franchise(self, name: str) -> list[tuple[str, int | None]]:
         """A starting list for a franchise: OMDb movies whose titles match, oldest first (mods trim it)."""
@@ -811,7 +855,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         """Where movie night announcements go: the announcements channel if one is set, else the series'."""
         return self.bot.text_channel(getattr(self.cfg, "announce_channel", None)) or self.bot.text_channel(s.channel)
 
-    async def _queue_post(self, s, key: str, q: dict, item: dict | None, when: datetime | None) -> None:
+    async def _queue_post(self, s, key: str, q: dict, item: dict | None, when: datetime | None, note: str = "") -> None:
         channel = self.announce_channel(s)
         if channel is None:
             log.warning("%s: no channel for franchise announcements", s.name)
@@ -824,6 +868,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if when is not None:
             values["when"] = f"<t:{int(when.timestamp())}:t> (<t:{int(when.timestamp())}:R>)"
         text = self.bot.persona.say(key, **values)
+        if note:
+            text += "\n" + note
         url = self.page_url()
         if url and key == "franchise_done":
             text += f"\nThe whole {q['name']} run, with everyone's ratings: <{self.view_url()}>"
@@ -846,7 +892,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             log.warning("Couldn't post the %s franchise update: %s", s.name, e)
 
     def queue_embed(self, s) -> discord.Embed:
-        q = self._data(store.load(STATE), s).get("queue")
+        data = self._data(store.load(STATE), s)
+        q = data.get("queue")
         if not q or not q.get("items"):
             name = (
                 f"**{q['name']}** is up next, but its movies aren't listed yet." if q else "No franchise in progress."
@@ -868,6 +915,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             if nxt is None
             else ("Paused." if q.get("paused") else (f"Next: <t:{int(show.timestamp())}:F>" if show else ""))
         )
+        if data.get("next_franchise"):
+            foot = (foot + "\n" if foot else "") + f"The next franchise (already picked): **{data['next_franchise']}**"
         return discord.Embed(
             title=f"🎬 {series_label(s)}: {q['name']}",
             description="\n".join(lines)[:3900] + (f"\n\n{foot}" if foot else ""),
@@ -958,7 +1007,6 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         channel = self.approval_channel()
         if channel is None:
             return "Changes need a mod's OK, but no approval channel is set up. Ask a mod."
-        lib = movies.load()
         rid = secrets.token_hex(4)
         req = {
             "id": rid,
@@ -983,6 +1031,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             log.warning("Couldn't post an approval card: %s", e)
             return "I couldn't reach the mods' channel. Ask a mod."
         req["card"] = [channel.id, msg.id]
+        # Load the library only now, after the card is posted, so a review or request saved meanwhile is kept.
+        lib = movies.load()
         lib["pending"][rid] = req
         movies.save(lib)
         log.info("Movie change from %s sent for approval: %s", req["by_name"], describe_request(req))
@@ -1026,6 +1076,10 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 await self._voice_verdict(s, sess)
                 sess["done"] = True
         if changed:
+            # Re-load first: the watchlists may have changed while we waited on Discord. Only the voice
+            # sessions are ours to save.
+            state = store.load(STATE)
+            state["voice_watch"] = watch
             store.save(STATE, state)
 
     def _movie_voice_channel(self, guild: discord.Guild, s, show: datetime):
@@ -1130,8 +1184,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 channels.append(ch)
         polls = []
         for ch in channels:
-            try:
-                async for m in ch.history(limit=200, after=after, before=before):
+            try:  # newest first: with `after`, Discord would otherwise give the oldest 200 since then
+                async for m in ch.history(limit=200, after=after, before=before, oldest_first=False):
                     if m.poll is None:
                         continue
                     q = m.poll.question
@@ -1337,21 +1391,26 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         state = store.load(STATE)
         noms = self._data(state, s)["nominations"]
         lib = movies.load()
-        seen = {movies.norm(n["title"]) for n in noms if not n.get("watched")}
-        watched = {
-            movies.norm(lib["movies"][e["movie_id"]]["title"]) for e in lib["history"] if e["movie_id"] in lib["movies"]
-        }
+        # Titles with their years, so a remake (The Thing 2011) isn't taken for the original (1982).
+        seen: dict[str, list[Any]] = {}
+        for n in noms:
+            if not n.get("watched"):
+                seen.setdefault(movies.norm(n["title"]), []).append(n.get("year"))
+        watched: dict[str, list[Any]] = {}
+        for e in lib["history"]:
+            m = lib["movies"].get(e["movie_id"])
+            if m:
+                watched.setdefault(movies.norm(m["title"]), []).append(m.get("year"))
         stats = {"added": 0, "watched": 0, "already": 0}
         for r in rows:
-            key = movies.norm(r["title"])
-            if r.get("done") or key in watched:
+            if r.get("done") or _known(watched, r["title"], r.get("year")):
                 stats["watched"] += 1
                 continue
-            if key in seen:
+            if _known(seen, r["title"], r.get("year")):
                 stats["already"] += 1
                 continue
-            seen.add(key)
-            found = movies.find_movie(lib, r["title"], r.get("year"))
+            seen.setdefault(movies.norm(r["title"]), []).append(r.get("year"))
+            found = _same_year(movies.find_movie(lib, r["title"], r.get("year")), r.get("year"))
             noms.append(
                 {
                     "id": secrets.token_hex(4),
@@ -1391,7 +1450,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             if t is None or slug(t.name) == slug(s.name):
                 raise ValueError("Pick another watchlist to move it to.")
             dest = self._data(state, t)["nominations"]
-            if any(movies.norm(x["title"]) == movies.norm(n["title"]) and not x.get("watched") for x in dest):
+            if any(_same_title(x, n["title"], n.get("year")) and not x.get("watched") for x in dest):
                 raise ValueError(f"{n['title']} is already on the {series_label(t)} watchlist.")
             noms.remove(n)
             dest.append({**n, "list": ""})
@@ -1419,7 +1478,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         state = store.load(STATE)
         noms = self._data(state, s)["nominations"]
         if kind == "nominate":
-            if any(movies.norm(n["title"]) == movies.norm(data["title"]) and not n.get("watched") for n in noms):
+            if any(_same_title(n, data["title"], data.get("year")) and not n.get("watched") for n in noms):
                 return f"**{data['title']}** is already on the watchlist."
             noms.append(
                 {
@@ -1455,18 +1514,20 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if kind == "watched":
             if n is None:
                 return "That movie isn't on the list anymore."
+            if data.get("watched", True) and n.get("watched"):  # say, set as tonight's movie meanwhile
+                return f"**{n['title']}** is already marked as watched."
             n["watched"] = discord.utils.utcnow().isoformat() if data.get("watched", True) else None
             store.save(STATE, state)
             if n["watched"]:
                 await self.log_watched(s, n["title"], n.get("year"), when=datetime.now(self.bot.features.tz))
             return f"**{n['title']}** marked as {'watched' if n['watched'] else 'not watched'}."
         if kind == "tonight":
-            showtime = next_weekly(
-                getattr(s, "showtime", "") or "", datetime.now(self.bot.features.tz) - timedelta(hours=6)
-            )
-            entry = await self.log_watched(
-                s, data["title"], data.get("year"), when=showtime or datetime.now(self.bot.features.tz)
-            )
+            # The showing it was asked for (worked out when it was asked), not the one after the approval.
+            when = datetime.fromisoformat(data["when"]) if data.get("when") else self.tonight_showing(s)
+            entry = await self.log_watched(s, data["title"], data.get("year"), when=when)
+            if entry is not None:
+                m = movies.load()["movies"].get(entry["movie_id"]) or {"id": entry["movie_id"], "title": data["title"]}
+                self._night_logged(s, m, entry["date"], data["title"])
             return f"Tonight's {s.name} movie is **{data['title']}**." + (
                 " I'll ask everyone to rate it afterwards." if entry and self.cfg.rate else ""
             )
@@ -1531,19 +1592,34 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             e["rate_at"] = time.time()
             e["rate_channel"] = s.channel
         movies.save(lib)
+        self._night_logged(s, m, day, title)
+        return e, created
+
+    def _night_logged(self, s, m: dict[str, Any], day: str, title: str = "") -> None:
+        """After a movie night is logged by hand (the movie pages, a voice card, /movie tonight): it comes off
+        the series' watchlist, and if it's the franchise queue's next part, that part is done, so the queue
+        moves on instead of announcing it again. `title` is the title as typed, if it differs."""
         state = store.load(STATE)
-        noms = self._data(state, s)["nominations"]
+        data = self._data(state, s)
         when = datetime.fromisoformat(day).replace(hour=20, tzinfo=UTC).isoformat()
         hit = False
-        for n in noms:
-            if not n.get("watched") and (
-                n.get("movie_id") == m["id"] or movies.norm(n["title"]) == movies.norm(m["title"])
+        for n in data["nominations"]:
+            if n.get("watched"):
+                continue
+            # The same title from another year is a remake or a namesake, so it stays on the watchlist.
+            if n.get("movie_id") == m["id"] or (
+                movies.norm(n["title"]) == movies.norm(m["title"]) and _same_year(m, n.get("year"))
             ):
                 n["watched"] = when
                 hit = True
+        if is_franchise(s):
+            part = franchise.mark_logged(data.get("queue"), [m["title"], title], m.get("year"), day)
+            if part is not None:
+                name = data["queue"].get("name")
+                log.info("%s: %s was logged by hand, so the %s queue moves on", s.name, part["title"], name)
+                hit = True
         if hit:
             store.save(STATE, state)
-        return e, created
 
     async def log_watched(self, s, title: str, year: Any, when: datetime) -> dict[str, Any] | None:
         """Add a movie night to the history and schedule its Rate it button."""
@@ -1567,14 +1643,26 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         return e
 
     # ------------------------------------------------------------ ratings
+    def _rater_names(self, lib: dict[str, Any]) -> dict[str, str]:
+        """Who each rater is, as the movie pages show them: the name or member set under People, else
+        their current server name."""
+        guild = getattr(self.bot, "home_guild", None)
+        members = {}
+        if guild is not None:
+            for uid in set(movies.rater_links(lib).values()):
+                member = guild.get_member(int(uid))
+                if member is not None:
+                    members[uid] = member.display_name
+        return movies.rater_names(lib, members)
+
     def _prompt_embed(
         self, entry: dict[str, Any], movie: dict[str, Any], closes: float, closed: bool = False
     ) -> discord.Embed:
-        people = movies.load().get("people", {})
+        names = self._rater_names(movies.load())
         rs = sorted(entry.get("ratings", {}).items(), key=lambda kv: kv[1].get("at", 0))
         avg = movies.ratings_avg(entry)
         lines = [
-            f"**{people.get(k) or r['name']}**: {r['score']:g}/10"
+            f"**{names.get(k) or r['name']}**: {r['score']:g}/10"
             for k, r in rs
             if isinstance(r.get("score"), (int, float))
         ]
@@ -1735,7 +1823,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             return "You can't nominate movies here."
         title = title.strip()
         noms = self._data(store.load(STATE), s)["nominations"]
-        if any(movies.norm(n["title"]) == movies.norm(title) and not n.get("watched") for n in noms):
+        if any(_same_title(n, title, year) and not n.get("watched") for n in noms):
             return f"**{title}** is already on the {s.name} watchlist."
         mine = [n for n in noms if n["by"] == member.id and not n.get("watched")]
         if self.cfg.max_per_person and len(mine) >= self.cfg.max_per_person and not self.is_movie_mod(member):
@@ -1832,13 +1920,20 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if s is None:
             return
         await interaction.response.defer(ephemeral=True)
+        when = self.tonight_showing(s)  # now, not when a mod approves it (that could be the next morning)
         m = await self.details(title, year)
         data = {
             "title": m["title"] if m else title.strip(),
             "year": (m or {}).get("year") or year,
             "poster": (m or {}).get("poster"),
+            "when": when.isoformat(),
         }
         await interaction.followup.send(await self.submit("tonight", s.name, data, interaction.user), ephemeral=True)
+
+    def tonight_showing(self, s) -> datetime:
+        """Tonight's showing: the series' showtime today (up to 6 hours after it started), else now."""
+        now = datetime.now(self.bot.features.tz)
+        return next_weekly(getattr(s, "showtime", "") or "", now - timedelta(hours=6)) or now
 
     @app_commands.command(name="history", description="Movies we've watched, with our ratings")
     @app_commands.describe(search="Part of a title, director or year (optional)")
@@ -1994,10 +2089,19 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 await msg.end_poll()
         except (discord.HTTPException, AttributeError):
             pass
-        p["ends"] = discord.utils.utcnow().isoformat()
-        p["end_sent"] = True
-        store.save(STATE, state)
+        self._update_poll(s, p["message_id"], ends=discord.utils.utcnow().isoformat(), end_sent=True)
         await interaction.followup.send("Ending the poll; the winner is announced in a moment.", ephemeral=True)
+
+    def _update_poll(self, s, message_id: int, **changes: Any) -> dict | None:
+        """Change one poll in the saved state. It re-loads first (with nothing to wait on in between), so
+        nominations and other changes made while we were waiting on Discord are kept."""
+        state = store.load(STATE)
+        p = next((x for x in self._data(state, s)["polls"] if x.get("message_id") == message_id), None)
+        if p is None:
+            return None
+        p.update(changes)
+        store.save(STATE, state)
+        return p
 
     # ------------------------------------------------------------ polls
     async def start_poll(
@@ -2048,59 +2152,81 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     async def check(self) -> None:
         if not (self.cfg.enabled and self.bot.is_active):
             return
-        state = store.load(STATE)
-        now = discord.utils.utcnow()
-        changed = False
-        for s in self.all_series:
-            data = self._data(state, s)
-            for p in data["polls"]:
-                if p["status"] != "open" or now < discord.utils.parse_time(p["ends"]):
-                    continue
-                if await self.finish(s, data, p):
-                    changed = True
-            data["polls"] = [p for p in data["polls"] if p["status"] == "open"][-5:] + [
-                p for p in data["polls"] if p["status"] != "open"
-            ][-5:]
-        if changed:
-            store.save(STATE, state)
+        # Franchise queues first: a part that starts just as the poll for the next franchise closes is
+        # logged before that poll's winner is lined up.
         await self.run_queues()
+        now = discord.utils.utcnow()
+        for s in self.all_series:
+            polls = self._data(store.load(STATE), s)["polls"]
+            due = [p for p in polls if p["status"] == "open" and now >= discord.utils.parse_time(p["ends"])]
+            for p in due:
+                await self.finish(s, p)
+            if due:  # keep the last few (loaded and saved with nothing to wait on in between)
+                state = store.load(STATE)
+                data = self._data(state, s)
+                data["polls"] = [p for p in data["polls"] if p["status"] == "open"][-5:] + [
+                    p for p in data["polls"] if p["status"] != "open"
+                ][-5:]
+                store.save(STATE, state)
         try:
             await self.watch_voice()
         except Exception:
             log.exception("Watching voice for movie nights failed")
-        # Rate it buttons: post after the movie, close when the time is up.
+        # Rate it buttons: post after the movie, close when the time is up. Each change is saved on its own
+        # after re-loading, so ratings given while we wait on Discord are kept.
         lib = movies.load()
-        dirty = False
         t = time.time()
         for e in lib["history"]:
             if e.get("rate_at") and not e.get("prompt") and t >= e["rate_at"]:
                 await self.post_prompt(e, lib)
-                dirty = True
+                self._save_prompt(e)
             p = e.get("prompt") or {}
             if p.get("message") and not p.get("closed") and t >= p.get("closes", 0):
-                await self.close_prompt(e, lib)
-                dirty = True
-        if dirty:
+                fresh = movies.load()
+                cur = next((x for x in fresh["history"] if x["id"] == e["id"]), None)
+                if cur is None or not (cur.get("prompt") or {}).get("message") or cur["prompt"].get("closed"):
+                    continue
+                cur["prompt"]["closed"] = True  # saved before we wait on Discord: no more ratings after this
+                movies.save(fresh)
+                await self.close_prompt(cur, fresh)
+
+    def _save_prompt(self, entry: dict[str, Any]) -> None:
+        """Save a history entry's Rate it post, re-loading first so ratings given meanwhile are kept."""
+        lib = movies.load()
+        cur = next((x for x in lib["history"] if x["id"] == entry["id"]), None)
+        if cur is not None:
+            cur["prompt"] = entry.get("prompt")
             movies.save(lib)
 
     @check.before_loop
     async def _wait(self) -> None:
         await self.bot.wait_until_ready()
 
-    async def finish(self, s, data: dict, p: dict) -> bool:
+    def _poll_showing(self, s, ends: str) -> datetime:
+        """The showing a poll picked the movie for: the series' showtime the poll was closing for (a poll
+        ended early on Sunday is still for Monday's showing), else when the poll closed."""
+        closed = discord.utils.parse_time(ends).astimezone(self.bot.features.tz)
+        return next_weekly(getattr(s, "showtime", "") or "", closed - timedelta(hours=6)) or closed
+
+    async def finish(self, s, p: dict) -> bool:
+        """Close a poll whose time is up: announce the winner, then log it for its showing (or line up the
+        next franchise). False while Discord is still counting.
+
+        This waits on Discord (and OMDb) along the way, so `p` is only read here: changes are saved by
+        re-loading the state right before saving, which keeps nominations made in the meantime."""
         channel = self.bot.get_channel(p["channel_id"])
         try:
             msg = await channel.fetch_message(p["message_id"])
         except (discord.HTTPException, AttributeError):
-            p["status"] = "gone"
+            self._update_poll(s, p["message_id"], status="gone")
             return True
         poll = msg.poll
         if poll is None:
-            p["status"] = "gone"
+            self._update_poll(s, p["message_id"], status="gone")
             return True
         if not poll.is_finalised() and p.get("end_early") and not p.get("end_sent"):
             # Showtime: close it now instead of waiting for Discord's whole-hour timer.
-            p["end_sent"] = True
+            self._update_poll(s, p["message_id"], end_sent=True)
             try:
                 await msg.end_poll()
                 await asyncio.sleep(3)
@@ -2114,7 +2240,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         answers = sorted(poll.answers, key=lambda a: a.id)
         counts = [(p["options"][i], a.vote_count) for i, a in enumerate(answers) if i < len(p["options"])]
         top = winners(counts)
-        noms = {n["id"]: n for n in data["nominations"]}
+        noms = {n["id"]: n for n in self._data(store.load(STATE), s)["nominations"]}
         role = self.bot.role_named(channel.guild, s.role)
         winner = None
         if not top:
@@ -2131,10 +2257,28 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             text = self.bot.persona.say(
                 key, title=title, votes=f"{votes} vote{'s' if votes != 1 else ''}", extra=extra, series=series_label(s)
             )
-            if pick in noms:
-                winner = noms[pick]
-                if self.cfg.mark_watched:
-                    noms[pick]["watched"] = discord.utils.utcnow().isoformat()
+            winner = noms.get(pick)
+        # Save the result: re-loaded first, with nothing to wait on before saving.
+        state = store.load(STATE)
+        data = self._data(state, s)
+        cur = next((x for x in data["polls"] if x.get("message_id") == p["message_id"]), None)
+        if cur is None or cur.get("status") != "open":
+            return True  # handled meanwhile
+        cur["status"] = "done"
+        if winner:
+            n = next((x for x in data["nominations"] if x["id"] == winner["id"]), None)
+            if n is not None and self.cfg.mark_watched:
+                n["watched"] = discord.utils.utcnow().isoformat()
+            if is_franchise(s) and franchise.next_part(data.get("queue")) is not None:
+                # The current franchise still has parts to go: the winner starts once its last part is logged.
+                data["next_franchise"] = winner["title"]
+                log.info("%s: the next franchise is %s, after %s", s.name, winner["title"], data["queue"]["name"])
+            elif is_franchise(s):
+                # The winner is the next franchise: start its queue (a mod adds the movies), not a movie night.
+                data["queue"] = franchise.new_queue(winner["title"], paused=True)
+                data.pop("next_franchise", None)
+                log.info("%s: the next franchise is %s", s.name, winner["title"])
+        store.save(STATE, state)
         try:
             await msg.reply(
                 ((role.mention + " ") if role else "") + text,
@@ -2142,13 +2286,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             )
         except discord.HTTPException as e:
             log.warning("Couldn't announce the %s winner: %s", s.name, e)
-        p["status"] = "done"
-        if winner and is_franchise(s):
-            # The winner is the next franchise: start its queue (a mod adds the movies), not a movie night.
-            data["queue"] = franchise.new_queue(winner["title"], paused=True)
-            log.info("%s: the next franchise is %s", s.name, winner["title"])
-        elif winner:
-            when = discord.utils.parse_time(p["ends"]).astimezone(self.bot.features.tz)
+        if winner and not is_franchise(s):
+            # Logged for the showing the poll was for, so its Rate it button comes after that movie.
+            when = self._poll_showing(s, cur["ends"])
             await self.log_watched(s, winner["title"], winner.get("year"), when=when)
         log.info("%s poll finished: %s", s.name, text)
         return True

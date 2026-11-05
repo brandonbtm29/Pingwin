@@ -38,9 +38,11 @@ from aiohttp import web
 from .. import REPO_URL, __version__, invite_url, menus, store, updater
 from .. import zones as _zones
 from ..config import MENU_MODES, PROJECT_ROOT, ConfigError, MenuConfig, MenuRole, config_path, data_dir
-from ..configedit import save_dashboard, save_failover, save_roles, save_secrets
+from ..configedit import check_secret, save_dashboard, save_failover, save_roles, save_secrets, secret_changes
 from . import access, editing, tailscale
 from .auth import (
+    DENIED,
+    RECHECK_SECONDS,
     SECRET_NAME,
     SESSION_COOKIE,
     SESSION_SECONDS,
@@ -52,6 +54,7 @@ from .auth import (
     check_member,
     client_secret,
     exchange_code,
+    member_status,
 )
 from .setup_check import checklist, gather_facts, summarize
 
@@ -95,6 +98,8 @@ MEMBER_PATHS = {
 DASHBOARDS = "dashboards"  # shared: each PC's public dashboard link, for /pingwin dashboard
 PUBLIC: web.RequestKey[bool] = web.RequestKey("public", bool)
 VIEWER: web.RequestKey[Any] = web.RequestKey("viewer", object)
+RECHECK_RETRY = 30  # seconds before asking Discord again when a session's role check couldn't be done
+LOGIN_COOKIE = "pingwin_login"  # ties the personal sign-in button to the page that showed it
 
 LOCKED_PAGE = """<!doctype html><meta charset="utf-8"><title>Pingwin</title>
 <body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem;line-height:1.5">
@@ -177,16 +182,20 @@ async def identify(request: web.Request) -> Viewer | None:
     item = app[SESSIONS].get(token)
     if item is None:
         return _view_only(request)
-    if time.time() - item["checked"] > 300:
-        level, reason, member = await check_member(bot, int(item["user_id"]))
-        if level is None:
+    if time.time() - item["checked"] > RECHECK_SECONDS:
+        status, reason, member = await member_status(bot, int(item["user_id"]))
+        if status == DENIED:  # Discord says they left, or lost the role
             log.info("Signed %s out of the dashboard: %s", item["name"], reason)
             app[SESSIONS].end(token)
             return None
-        item["checked"] = time.time()
-        item["level"] = level
-        if member is not None:
-            item["name"] = member.display_name
+        if status in ("admin", "member"):
+            item["checked"] = time.time()
+            item["level"] = status
+            if member is not None:
+                item["name"] = member.display_name
+        else:  # couldn't ask Discord just now (not connected, Discord trouble): keep them, ask again soon
+            log.debug("Couldn't recheck %s's dashboard access: %s", item["name"], reason)
+            item["checked"] = time.time() - RECHECK_SECONDS + RECHECK_RETRY
     app[SESSIONS].touch(item)
     cfg = getattr(getattr(bot, "config", None), "dashboard", None)
     return Viewer(
@@ -288,7 +297,31 @@ async def guard(request: web.Request, handler):
         response = web.json_response({"error": str(e), "stale": True}, status=409)
     except ConfigError as e:
         response = web.json_response({"error": str(e)}, status=400)
+    except (ValueError, TypeError) as e:
+        if request.method in ("GET", "HEAD"):
+            raise
+        # A change with a value of the wrong kind (a list where text goes, "abc" for a number...): the
+        # sender's mistake, so say so instead of a server error. Logged in full in case it's ours.
+        log.warning("Couldn't use a %s %s request: %r", request.method, request.path, e, exc_info=True)
+        response = web.json_response(
+            {"error": "Pingwin couldn't use one of the values sent. Reload the page and try again."}, status=400
+        )
     return _secure(request, response)
+
+
+def _no_constant(name: str) -> Any:
+    raise ValueError(f"{name} isn't allowed")
+
+
+async def read_json(request: web.Request) -> dict[str, Any]:
+    """The request's JSON body, which must be an object ({...}). Anything else is a 400, not a crash."""
+    try:
+        payload = await request.json(loads=lambda text: json.loads(text, parse_constant=_no_constant))
+    except (ValueError, LookupError) as e:  # bad JSON, NaN/Infinity, text that isn't UTF-8, unknown charset
+        raise ApiError("That request wasn't valid JSON.") from e
+    if not isinstance(payload, dict):
+        raise ApiError("That request should be a JSON object.")
+    return payload
 
 
 def _secure(request: web.Request, response: web.StreamResponse) -> web.StreamResponse:
@@ -432,22 +465,45 @@ async def movies_login(request: web.Request) -> web.StreamResponse:
         peek = movieaccess.peek_login_code(code)
         if peek is None:
             return signin_page(request, expired, 403)
-        return _page(
+        # A random token in a cookie and in the form: only this page (in this browser) can press the button,
+        # so another website can't sign a visitor in as someone else (with the other person's own link).
+        token = request.cookies.get(LOGIN_COOKIE, "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{22,64}", token):
+            token = secrets.token_urlsafe(24)
+        response = _page(
             f"<h1>Hi, {html.escape(str(peek.get('name') or 'there'))}!</h1>"
             "<p>Press the button to sign in to the movie pages, so you can write reviews and suggest movies.</p>"
             '<form method="post" action="/movies/login">'
             f'<input type="hidden" name="code" value="{html.escape(code, quote=True)}">'
+            f'<input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
             '<button class="btn primary big" type="submit">Open the movie pages</button></form>'
             '<p class="hint">This link is just for you and works once.</p>'
         )
+        response.set_cookie(
+            LOGIN_COOKIE,
+            token,
+            httponly=True,
+            secure=bool(request[PUBLIC]),
+            samesite="Lax",
+            path="/movies/login",
+            max_age=movieaccess.CODE_SECONDS,
+        )
+        return response
     # The button posts from the sign-in page itself. Behind Tailscale Funnel the request's Host is this PC, so
-    # compare with the public address (like the rest of the dashboard). Some in-app browsers send "null".
+    # compare with the public address (like the rest of the dashboard). Browsers send "Origin: null" here (the
+    # pages use Referrer-Policy: no-referrer), so the token above is what really ties the press to the page.
     origin = (request.headers.get("Origin") or "").strip()
     allowed = {request.app[REMOTE].host, _hostname(request.host)} | LOCAL_HOSTS
     if origin and origin != "null" and _hostname(urlparse(origin).netloc) not in allowed:
         log.info("Personal sign-in refused: it came from %s", origin)
         return signin_page(request, "That sign-in didn't come from this page.", 403)
     form = await request.post()
+    cookie, sent = request.cookies.get(LOGIN_COOKIE, ""), str(form.get("token", ""))
+    if not cookie or not hmac.compare_digest(cookie.encode(), sent.encode()):
+        log.info("Personal sign-in refused: the button wasn't pressed on the sign-in page")
+        return signin_page(
+            request, "That sign-in didn't come from this page. Open your sign-in link again.", 403, "/movies"
+        )
     found = movieaccess.take_login_code(str(form.get("code", ""))[:64])
     if found is None:
         return signin_page(
@@ -474,6 +530,7 @@ async def movies_login(request: web.Request) -> web.StreamResponse:
         path="/",
         max_age=SESSION_SECONDS,
     )
+    response.del_cookie(LOGIN_COOKIE, path="/movies/login")
     return response
 
 
@@ -642,11 +699,17 @@ async def post_features(request: web.Request) -> web.Response:
     from ..configedit import save_section
 
     bot = request.app[BOT]
-    payload = await request.json()
+    payload = await read_json(request)
     key, values = payload.get("section"), payload.get("values")
     if not isinstance(key, str) or not isinstance(values, dict):
         raise ApiError("section and values are required")
     viewer = viewer_of(request)
+    if secret_changes(key, values) and not viewer.full_access:
+        raise ApiError(
+            "Only the PC's owner can change saved keys and secrets (or turn on full access for signed-in admins "
+            "under Remote access). Leave those boxes empty to save the rest.",
+            403,
+        )
     editing.check(key, payload.get("base_version"), editing.versions().get(key, ""))
     save_section(key, values)
     editing.record(key, viewer.name, _pc(bot))
@@ -682,8 +745,8 @@ async def get_watchlist(request: web.Request) -> web.Response:
 async def post_watchlist(request: web.Request) -> web.Response:
     from .. import store
 
-    payload = await request.json()
-    key, nom_id, action = payload.get("series"), payload.get("id"), payload.get("action")
+    payload = await read_json(request)
+    key, nom_id, action = _str(payload, "series", 60), _str(payload, "id", 20), _str(payload, "action", 20)
     state = store.load("movienight")
     noms = state.get(key, {}).get("nominations", [])
     n = next((x for x in noms if x.get("id") == nom_id), None)
@@ -719,31 +782,38 @@ async def get_logs(request: web.Request) -> web.Response:
 
 # --------------------------------------------------------------------- working together
 async def post_presence(request: web.Request) -> web.Response:
-    payload = await request.json()
+    payload = await read_json(request)
     viewer = viewer_of(request)
     presence = request.app[PRESENCE]
     if payload.get("leaving"):
         presence.leave(viewer.sid)
         return web.json_response({"ok": True})
+    if not viewer.is_admin:  # members (movie pages only) don't see who's on the dashboard, nor show up there
+        presence.leave(viewer.sid)
+        return web.json_response({"others": [], "conflicts": 0, "versions": {}})
     presence.ping(viewer, str(payload.get("tab", "")), bool(payload.get("dirty")))
     return web.json_response(
         {
             "others": presence.others(viewer.sid),
-            "conflicts": len(await asyncio.to_thread(editing.find_conflicts)),
+            "conflicts": len(await asyncio.to_thread(editing.conflicts_for, viewer.full_access)),
             "versions": editing.versions(),
         }
     )
 
 
 async def get_conflicts(request: web.Request) -> web.Response:
-    return web.json_response({"conflicts": await asyncio.to_thread(editing.find_conflicts)})
+    viewer = viewer_of(request)
+    return web.json_response({"conflicts": await asyncio.to_thread(editing.conflicts_for, viewer.full_access)})
 
 
 async def post_conflicts(request: web.Request) -> web.Response:
-    payload = await request.json()
+    payload = await read_json(request)
     viewer = viewer_of(request)
-    msg = editing.resolve_conflict(str(payload.get("file", "")), str(payload.get("action", "")))
-    log.info("Sync conflict %s: %s (%s)", payload.get("file"), msg, viewer.name)
+    rel = _str(payload, "file", 500)
+    if not viewer.full_access and editing.conflict_access(rel) != "open":
+        raise ApiError("Only the PC's owner can sort out that file (it holds keys or sign-in links).", 403)
+    msg = editing.resolve_conflict(rel, str(payload.get("action", "")), full_access=viewer.full_access)
+    log.info("Sync conflict %s: %s (%s)", rel, msg, viewer.name)
     request.app[BOT].reload_settings()
     return web.json_response({"ok": True, "message": msg})
 
@@ -784,7 +854,7 @@ async def post_remote(request: web.Request) -> web.Response:
     bot = request.app[BOT]
     remote = request.app[REMOTE]
     viewer = need_full_access(request)
-    payload = await request.json()
+    payload = await read_json(request)
     action = payload.get("action")
     if action == "funnel_on":
         res = await asyncio.to_thread(tailscale.publish, remote.port)
@@ -813,10 +883,11 @@ async def post_remote(request: web.Request) -> web.Response:
         role = _str(payload, "admin_role", 100) or None
         base = payload.get("base_version")
         editing.check("dashboard", base, editing.versions().get("dashboard", ""))
-        save_dashboard(admin_role=role, remote_full_access=bool(payload.get("remote_full_access")))
         secret = payload.get("client_secret")
-        if isinstance(secret, str) and secret.strip():
-            save_secrets({SECRET_NAME: secret.strip()})
+        secret = check_secret(SECRET_NAME, secret) if isinstance(secret, str) else ""  # before anything is saved
+        save_dashboard(admin_role=role, remote_full_access=bool(payload.get("remote_full_access")))
+        if secret:
+            save_secrets({SECRET_NAME: secret})
         editing.record("dashboard", viewer.name, _pc(bot))
         bot.reload_settings()
         log.info("Remote access settings saved (%s)", viewer.name)
@@ -888,7 +959,7 @@ async def post_birthdays(request: web.Request) -> web.Response:
 
     bot = request.app[BOT]
     viewer = viewer_of(request)
-    payload = await request.json()
+    payload = await read_json(request)
     uid = str(payload.get("user_id", ""))
     if not uid.isdigit():
         raise ApiError("Pick someone first.")
@@ -1005,7 +1076,7 @@ async def get_attendance(request: web.Request) -> web.Response:
 async def post_attendance(request: web.Request) -> web.Response:
     bot = request.app[BOT]
     viewer = viewer_of(request)
-    payload = await request.json()
+    payload = await read_json(request)
     action = payload.get("action")
     if action not in ("add", "remove", "pay"):
         raise ApiError("Unknown action")
@@ -1117,7 +1188,10 @@ async def get_movies(request: web.Request) -> web.Response:
         items = []
         for n in state.get(slug(name), {}).get("nominations", []):
             if n["by"] not in by_cache:
-                by_cache[n["by"]] = (await _member_name(guild, int(n["by"])))[0] if guild else str(n["by"])
+                if not str(n["by"] or "").isdigit() or int(n["by"]) == 0:  # added on the dashboard, not by a member
+                    by_cache[n["by"]] = getattr(guild, "name", None) or "the dashboard"
+                else:
+                    by_cache[n["by"]] = (await _member_name(guild, int(n["by"])))[0] if guild else str(n["by"])
             by_name = by_cache[n["by"]]
             m = lib["movies"].get(n.get("movie_id") or "", {})
             items.append(
@@ -1191,8 +1265,18 @@ async def get_movies(request: web.Request) -> web.Response:
     )
 
 
+async def _need_who(request: web.Request) -> Any:
+    """The Discord member behind this request, or a 403 when Pingwin can't find them in the server.
+
+    Never treat "not found" as the PC's owner: that's viewer.kind == "owner"."""
+    who = await _who(request)
+    if who is None:
+        raise ApiError("Pingwin couldn't find you in the server just now. Try again in a minute.", 403)
+    return who
+
+
 async def _who(request: web.Request) -> Any:
-    """The Discord member behind this request (for changes that may need approval)."""
+    """The Discord member behind this request (for changes that may need approval), or None."""
     viewer = viewer_of(request)
     guild = _guild(request.app[BOT])
     if viewer.user_id and guild is not None:
@@ -1200,7 +1284,7 @@ async def _who(request: web.Request) -> Any:
         if member is None:
             try:
                 member = await guild.fetch_member(int(viewer.user_id))
-            except discord.HTTPException:
+            except (discord.HTTPException, aiohttp.ClientError, TimeoutError):
                 member = None
         if member is not None:
             return member
@@ -1249,7 +1333,7 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
     cog = _movie_cog(bot)
     if cog is None:
         raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
-    payload = await request.json()
+    payload = await read_json(request)
     kind = payload.get("kind")
     if kind == "nominate":
         s = cog.series(_str(payload, "series", 50))
@@ -1261,8 +1345,7 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
         year_raw = _str(payload, "year", 4)
         year = int(year_raw) if year_raw.isdigit() else None
         imdb_id = _str(payload, "imdb_id", 12) or None
-        who = await _who(request)
-        if who is None:  # this PC's owner
+        if viewer.kind == "owner":  # this PC's owner (no Discord account behind the dashboard)
             m = await cog.details(title, year, imdb_id)
             data = {
                 "title": m["title"] if m else title,
@@ -1270,6 +1353,7 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
                 "movie_id": (m or {}).get("id"),
             }
             return web.json_response({"ok": True, "message": await cog.apply("nominate", s.name, data, 0)})
+        who = await _need_who(request)
         return web.json_response({"ok": True, "message": await cog.nominate_text(who, s, title, year, imdb_id)})
     if kind == "edit":
         from .. import movies
@@ -1300,9 +1384,7 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
         if is_movie_mod(request):
             log.info("History fix from the movie pages (%s): %s", viewer.name, data)
             return web.json_response({"ok": True, "message": cog._apply_edit(data)})
-        who = await _who(request)
-        if who is None:
-            raise ApiError("Couldn't find you in the server.", 403)
+        who = await _need_who(request)
         return web.json_response({"ok": True, "message": await cog.submit("edit", e.get("series") or "", data, who)})
     if kind == "night":  # a movie night that already happened; movie mods add it, others ask them
         from .. import movies
@@ -1330,8 +1412,8 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
         hit = movies.find_movie(lib, title, data["year"])
         if hit and any(e["movie_id"] == hit["id"] and e.get("date") == day for e in lib["history"]):
             raise ApiError(f"{title} on {day} is already in the history.")
-        who = await _who(request)
-        if who is not None and not is_movie_mod(request):
+        if viewer.kind != "owner" and not is_movie_mod(request):  # everyone else asks the mods
+            who = await _need_who(request)
             return web.json_response({"ok": True, "message": await cog.submit("night", s.name, data, who)})
         log.info("Movie night added from the movie pages (%s): %s on %s", viewer.name, title, day)
         msg = await cog.apply("night", s.name, data, int(viewer.user_id or 0))
@@ -1437,7 +1519,7 @@ async def post_movie_review(request: web.Request) -> web.Response:
 
     bot = request.app[BOT]
     viewer = viewer_of(request)
-    payload = await request.json()
+    payload = await read_json(request)
     guild = _guild(bot)
     uid = str(viewer.user_id) if viewer.user_id else ""
     as_user = str(payload.get("as_user") or "").strip()
@@ -1568,6 +1650,43 @@ async def _fetch_text(url: str) -> str:
             return text
 
 
+async def _readable_message(request: web.Request, channel_id: int, message_id: int) -> Any:
+    """A message for a movie mod to import: only from this server, and only where they can read it themselves
+    (the list ends up on the movie pages, so Pingwin mustn't be a way to read other channels or servers)."""
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    guild = _guild(bot)
+    nope = "Pingwin couldn't read that message. Check the link, and that it's in a channel of this server."
+    if guild is None:
+        raise ApiError("Pingwin isn't connected to the server right now. Try again in a minute.", 409)
+    try:
+        channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+    except (discord.HTTPException, aiohttp.ClientError, TimeoutError) as e:
+        log.info("Couldn't find channel %s for a list import: %s", channel_id, e)
+        raise ApiError(nope, 404) from None
+    if getattr(getattr(channel, "guild", None), "id", None) != guild.id or not hasattr(channel, "fetch_message"):
+        log.info("List import refused (%s): channel %s isn't in %s", viewer.name, channel_id, guild.id)
+        raise ApiError(nope, 404)
+    if viewer.kind != "owner":  # the PC's owner may import from any channel of the server
+        member = await _need_who(request)
+        perms = channel.permissions_for(member)
+        private_thread = isinstance(channel, discord.Thread) and channel.is_private()
+        allowed = perms.view_channel and perms.read_message_history
+        if allowed and private_thread and not perms.manage_threads:  # only the thread's own members see it
+            try:
+                allowed = channel.owner_id == member.id or bool(await channel.fetch_member(member.id))
+            except (discord.HTTPException, aiohttp.ClientError, TimeoutError):
+                allowed = False
+        if not allowed:
+            log.info("List import refused (%s): they can't read channel %s", viewer.name, channel_id)
+            raise ApiError("You can only import a message from a channel you can read.", 403)
+    try:
+        return await channel.fetch_message(message_id)
+    except (discord.HTTPException, aiohttp.ClientError, TimeoutError) as e:
+        log.info("Couldn't read message %s in %s for a list import: %s", message_id, channel_id, e)
+        raise ApiError(nope, 404) from None
+
+
 async def post_movie_admin(request: web.Request) -> web.Response:
     from .. import movies
 
@@ -1575,12 +1694,12 @@ async def post_movie_admin(request: web.Request) -> web.Response:
     viewer = viewer_of(request)
     if not is_movie_mod(request):
         raise ApiError("That's for movie mods.", 403)
-    payload = await request.json()
+    payload = await read_json(request)
     action = payload.get("action")
     cog = _movie_cog(bot)
     if action == "import":
-        sheet_text = payload.get("sheet_csv") or ""
-        doc_text = payload.get("doc_text") or ""
+        sheet_text = _text(payload, "sheet_csv")
+        doc_text = _text(payload, "doc_text")
         if not sheet_text and payload.get("sheet_url"):
             sheet_text = await _fetch_text(_export_url(str(payload["sheet_url"]), "sheet"))
         if not doc_text and payload.get("doc_url"):
@@ -1612,7 +1731,7 @@ async def post_movie_admin(request: web.Request) -> web.Response:
     if action == "lookup":
         if cog is None or not os.environ.get(movies.SECRET):
             raise ApiError("Add an OMDb API key under Features → Movie night first.")
-        res = await cog.fill_details(int(payload.get("requests", 120)))
+        res = await cog.fill_details(_int(payload, "requests", 120, 1, 1000))
         return web.json_response({"ok": True, "message": res["message"]})
     if action == "add_night":
         if cog is None:
@@ -1740,11 +1859,7 @@ async def post_movie_admin(request: web.Request) -> web.Response:
                 raise ApiError(
                     "That doesn't look like a Discord message link (right-click the message → Copy Message Link)."
                 )
-            try:
-                channel = bot.get_channel(int(m[2])) or await bot.fetch_channel(int(m[2]))
-                msg = await channel.fetch_message(int(m[3]))
-            except (discord.HTTPException, AttributeError) as e:
-                raise ApiError(f"Pingwin couldn't read that message ({e}). Can it see that channel?") from e
+            msg = await _readable_message(request, int(m[2]), int(m[3]))
             text, by = msg.content, msg.author.id
         rows = movies.parse_list_message(text)
         if not rows:
@@ -1842,6 +1957,28 @@ def _str(payload: dict, key: str, limit: int = 2000) -> str:
     return value.strip()[:limit]
 
 
+def _text(payload: dict, key: str) -> str:
+    """A long text field (an uploaded file's contents) as sent; missing or null is ""."""
+    value = payload.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ApiError(f"{key} must be text")
+    return value
+
+
+def _int(payload: dict, key: str, default: int, low: int, high: int) -> int:
+    """A whole number from the request, kept between low and high."""
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        raise ApiError(f"{key} must be a whole number")
+    try:
+        number = int(value)
+    except ValueError as e:
+        raise ApiError(f"{key} must be a whole number") from e
+    return max(low, min(number, high))
+
+
 def _menu_roles(raw: Any, where: str) -> list[MenuRole]:
     if not isinstance(raw, list):
         raise ApiError(f"{where} must be a list")
@@ -1864,7 +2001,7 @@ def _menu_roles(raw: Any, where: str) -> list[MenuRole]:
 
 async def post_roles(request: web.Request) -> web.Response:
     bot = request.app[BOT]
-    payload = await request.json()
+    payload = await read_json(request)
     viewer = viewer_of(request)
     editing.check("roles", payload.get("base_version"), editing.versions().get("roles", ""))
     required = _str(payload, "required_role", 100) or None
@@ -1888,6 +2025,7 @@ async def post_roles(request: web.Request) -> web.Response:
                     description=_str(m, "description", 2000),
                     mode=mode,
                     roles=tuple(_menu_roles(m.get("roles", []), "roles")),
+                    timezone=bool(m.get("timezone")),
                 )
             )
         save_roles(
@@ -1912,7 +2050,7 @@ async def post_roles(request: web.Request) -> web.Response:
 
 async def post_failover(request: web.Request) -> web.Response:
     bot = request.app[BOT]
-    payload = await request.json()
+    payload = await read_json(request)
     viewer = viewer_of(request)
     editing.check("failover", payload.get("base_version"), editing.versions().get("failover", ""))
     channel = _str(payload, "status_channel_id", 30)
@@ -1945,7 +2083,7 @@ async def post_action(request: web.Request) -> web.Response:
     from ..pairing import PairingError
 
     bot = request.app[BOT]
-    payload = await request.json()
+    payload = await read_json(request)
     action = payload.get("action")
     viewer = viewer_of(request)
     if str(action).startswith("pair_"):

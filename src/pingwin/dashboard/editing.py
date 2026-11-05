@@ -192,10 +192,36 @@ class Presence:
 # --------------------------------------------------------------------- SyncThing conflicts
 CONFLICT = re.compile(r"\.sync-conflict-(?P<date>\d{8})-(?P<time>\d{6})-(?P<device>[A-Z0-9]{7})")
 SKIP_DIRS = {".stversions", ".stfolder", PRESENCE_DIR}
+# Files only the PC's owner (or admins with full access) may see or sort out:
+SECRET_FILES = {"secrets.env"}  # bot token and API keys: not even listed for others
+PRIVATE_FILES = {"movie_access.json"}  # the view link and personal sign-in codes: listed, but not shown
 
 
 def _original_name(name: str) -> str:
     return CONFLICT.sub("", name, count=1)
+
+
+def conflict_access(rel: str) -> str:
+    """Who may handle a conflict copy: "secret" (owner/full access only, hidden from others), "private"
+    (owner/full access only, others just see that it's there) or "open" (any admin)."""
+    original = _original_name(Path(rel).name).casefold()
+    if original in SECRET_FILES:
+        return "secret"
+    if original in PRIVATE_FILES:
+        return "private"
+    return "open"
+
+
+def conflicts_for(full_access: bool, root: Path | None = None) -> list[dict[str, Any]]:
+    """find_conflicts, with what this viewer mustn't see taken out."""
+    out = []
+    for c in find_conflicts(root):
+        access = conflict_access(c["file"])
+        if full_access or access == "open":
+            out.append({**c, "locked": False})
+        elif access == "private":
+            out.append({**c, "diff": "(Only the PC's owner can see what's in this file.)", "locked": True})
+    return out
 
 
 def find_conflicts(root: Path | None = None) -> list[dict[str, Any]]:
@@ -230,12 +256,14 @@ def find_conflicts(root: Path | None = None) -> list[dict[str, Any]]:
     return out
 
 
-def resolve_conflict(rel: str, action: str, root: Path | None = None) -> str:
+def resolve_conflict(rel: str, action: str, root: Path | None = None, *, full_access: bool = True) -> str:
     """keep_current: delete the conflict copy. use_other: make the conflict copy the real file."""
     root = (root or data_dir()).resolve()
     path = (root / rel).resolve()
     if root not in path.parents or not CONFLICT.search(path.name) or not path.is_file():
         raise ConfigError("That conflict file isn't there anymore.")
+    if not full_access and conflict_access(path.name) != "open":
+        raise ConfigError(f"Only the PC's owner can sort out {_original_name(path.name)}.")
     original = path.with_name(_original_name(path.name))
     if action == "keep_current":
         path.unlink()

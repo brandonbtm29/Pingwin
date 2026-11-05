@@ -630,7 +630,23 @@ SECTIONS: list[dict[str, Any]] = [
             F("leaves", "toggle", "Leaves, kicks and bans", True),
             F("roles", "toggle", "Role changes", True),
             F("ignore_menu_roles", "toggle", "Skip ping-menu roles (they change often)", True),
-            F("messages", "toggle", "Edited and deleted messages (needs Message Content)", True),
+            F("messages", "toggle", "Deleted messages (needs Message Content)", True),
+            F(
+                "edits",
+                "toggle",
+                "Edited messages too",
+                False,
+                "Every typo fix shows up, so this is off unless you need it. Quick fixes (within 10 minutes of "
+                "posting, or only a few characters changed) are skipped either way.",
+            ),
+            F(
+                "skip_channels",
+                "text",
+                "Don't log messages in these channels",
+                "",
+                "Channel names, comma separated, like bots, music. Mod-only channels and Pingwin's own posts are "
+                "never logged.",
+            ),
         ],
     },
 ]
@@ -719,7 +735,7 @@ class Features:
 
     @property
     def needs_message_content(self) -> bool:
-        return bool(self.modlog.enabled and self.modlog.messages)
+        return bool(self.modlog.enabled and (self.modlog.messages or getattr(self.modlog, "edits", False)))
 
     @property
     def tz(self) -> ZoneInfo:

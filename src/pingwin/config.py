@@ -46,6 +46,63 @@ def config_path() -> Path:
     return Path(raw) if raw else data_dir() / "config.toml"
 
 
+def secrets_path() -> Path:
+    return data_dir() / "secrets.env"
+
+
+def _local_env() -> Path:
+    return PROJECT_ROOT / ".env"  # per-PC, never synced
+
+
+_inherited_env: frozenset[str] | None = None  # names set before Pingwin loaded any file (Windows, the shell)
+_from_secrets: dict[str, str] = {}  # what this process put in os.environ from secrets.env
+
+
+def load_env() -> None:
+    """At startup: this PC's own .env, then the shared secrets.env (which doesn't override it)."""
+    from dotenv import load_dotenv
+
+    global _inherited_env
+    if _inherited_env is None:
+        _inherited_env = frozenset(os.environ)
+    load_dotenv(_local_env())  # per-PC: PINGWIN_DATA, PINGWIN_NODE
+    load_secrets()  # shared: DISCORD_TOKEN, API keys
+
+
+def load_secrets() -> list[str]:
+    """Copy secrets.env into os.environ; called again whenever the file changes (e.g. a key added on another
+    PC's dashboard, synced by SyncThing). Returns the names that changed.
+
+    A name set before Pingwin started or in this PC's .env keeps that value. A name that came from secrets.env
+    and has since been taken out of it is removed again. A missing file (not synced yet) changes nothing."""
+    from dotenv import dotenv_values
+
+    global _inherited_env, _from_secrets
+    if _inherited_env is None:  # not started through load_env()
+        _inherited_env = frozenset(os.environ)
+    path = secrets_path()
+    if not path.exists():
+        return []
+    values = {k: v for k, v in dotenv_values(path, encoding="utf-8").items() if v is not None}
+    local = _local_env()
+    keep = _inherited_env | (set(dotenv_values(local, encoding="utf-8")) if local.exists() else set())
+    changed: list[str] = []
+    loaded: dict[str, str] = {}
+    for name, value in values.items():
+        if name in keep:
+            continue
+        if os.environ.get(name) != value:
+            os.environ[name] = value
+            changed.append(name)
+        loaded[name] = value
+    for name, value in _from_secrets.items():
+        if name not in loaded and name not in keep and os.environ.get(name) == value:
+            del os.environ[name]
+            changed.append(name)
+    _from_secrets = loaded
+    return changed
+
+
 @dataclass(frozen=True)
 class Node:
     """This PC's identity when several PCs run Pingwin."""
@@ -78,9 +135,14 @@ class MenuConfig:
     description: str
     mode: str
     roles: tuple[MenuRole, ...]
+    # Saved as `timezone = true/false`, so a time zone menu with no roles yet stays one. None (older
+    # config files): a menu whose roles have zones is a time zone menu.
+    timezone: bool | None = None
 
     @property
     def is_timezone(self) -> bool:
+        if self.timezone is not None:
+            return self.timezone
         return any(r.zone for r in self.roles)
 
 
@@ -124,6 +186,21 @@ class FailoverConfig:
     @property
     def active(self) -> bool:
         return self.enabled and self.status_channel_id is not None
+
+    @property
+    def missing_channel(self) -> bool:
+        """Turned on without a status channel: there's no lease to share, so this PC runs as the only one."""
+        return self.enabled and self.status_channel_id is None
+
+    @property
+    def warning(self) -> str | None:
+        if not self.missing_channel:
+            return None
+        return (
+            "[failover] enabled = true but status_channel_id isn't set, so failover is OFF and this PC answers "
+            "as if it were the only one. If Pingwin also runs on other PCs, they will all answer (double replies). "
+            "Set failover.status_channel_id in config.toml or on the dashboard."
+        )
 
     def rank(self, pc: str) -> int:
         """1 = first choice. PCs not in the list come after all listed ones."""
@@ -230,6 +307,9 @@ def _parse_extra_menus(raw: object, main: tuple[MenuRole, ...]) -> tuple[MenuCon
         if mode not in MENU_MODES:
             raise ConfigError(f"Menu {title!r}: mode must be 'many' or 'one'")
         roles = _parse_menu(entry.get("roles", []), f"roles.extra.roles (menu {title!r})")
+        timezone = entry.get("timezone")
+        if timezone is not None and not isinstance(timezone, bool):
+            raise ConfigError(f"Menu {title!r}: timezone must be true or false")
         for r in roles:
             other = seen_roles.get(r.name.casefold())
             if other:
@@ -237,7 +317,12 @@ def _parse_extra_menus(raw: object, main: tuple[MenuRole, ...]) -> tuple[MenuCon
             seen_roles[r.name.casefold()] = repr(title)
         out.append(
             MenuConfig(
-                key=key, title=title, description=str(entry.get("description", "")).strip(), mode=mode, roles=roles
+                key=key,
+                title=title,
+                description=str(entry.get("description", "")).strip(),
+                mode=mode,
+                roles=roles,
+                timezone=timezone,
             )
         )
     return tuple(out)

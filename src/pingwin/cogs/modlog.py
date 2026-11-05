@@ -1,8 +1,13 @@
-"""Mod log: joins, leaves, bans, role changes and edited or deleted messages, in a private channel."""
+"""Mod log: joins, leaves, bans, role changes and deleted (optionally edited) messages, in a private channel.
+
+It stays quiet on purpose: Pingwin's own posts, other bots, mod-only channels and quick typo fixes aren't
+logged, and edits are off unless a mod turns them on."""
 
 from __future__ import annotations
 
+import difflib
 import logging
+import re
 from typing import TYPE_CHECKING
 
 import discord
@@ -12,11 +17,35 @@ if TYPE_CHECKING:
     from ..bot import Pingwin
 
 log = logging.getLogger("pingwin.modlog")
+MOD_PERMS = ("administrator", "manage_messages", "manage_guild", "kick_members", "ban_members")
 
 
 def clip(text: str, n: int = 1000) -> str:
     text = text or "*(no text)*"
     return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def bare_name(name: str) -> str:
+    """A channel name without emoji or punctuation around it: '🎵-music' and '#music' are both 'music'."""
+    return re.sub(r"^[\W_]+|[\W_]+$", "", (name or "").casefold())
+
+
+def skipped(name: str, skip_channels: str) -> bool:
+    """Whether a channel is one mods asked to skip (whole names: 'bots' doesn't skip #robots)."""
+    skip = {bare_name(s) for s in str(skip_channels or "").split(",")} - {""}
+    return bare_name(name) in skip
+
+
+def is_private(channel, guild) -> bool:
+    """Whether regular members can't see the channel (a mod channel): neither @everyone nor any role without
+    mod powers can. Bot and other managed roles don't count."""
+    everyone = guild.default_role
+    regular = [everyone] + [
+        r
+        for r in getattr(guild, "roles", ())
+        if r != everyone and not r.managed and not any(getattr(r.permissions, p, False) for p in MOD_PERMS)
+    ]
+    return not any(channel.permissions_for(r).view_channel for r in regular)
 
 
 class ModLog(commands.Cog):
@@ -88,13 +117,26 @@ class ModLog(commands.Cog):
 
     # ------------------------------------------------------------ messages
     def _skip_message(self, message: discord.Message, ch: discord.TextChannel) -> bool:
+        """Pingwin's own and other bots' posts, the log channel, channels mods asked to skip, and channels
+        regular members can't see (mod channels: mods talking among themselves isn't what the log is for)."""
         # Without the Message Content intent every message looks empty, so there's nothing useful to log.
-        return message.author.bot or message.channel.id == ch.id or not self.bot.intents.message_content
+        if message.author.bot or message.channel.id == ch.id or not self.bot.intents.message_content:
+            return True
+        if skipped(getattr(message.channel, "name", "") or "", getattr(self.cfg, "skip_channels", "")):
+            return True
+        try:
+            if message.guild is not None and is_private(message.channel, message.guild):
+                return True  # a mod channel
+        except (AttributeError, TypeError):
+            pass
+        return False
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
         if not ((ch := self._channel(message.guild)) and self.cfg.messages) or self._skip_message(message, ch):
             return
+        if not (message.content or message.attachments):
+            return  # a sticker or an embed only: nothing to show
         e = discord.Embed(
             color=discord.Color.orange(),
             description=f"🗑️ Message by {message.author.mention} deleted in {message.channel.mention}",
@@ -102,34 +144,20 @@ class ModLog(commands.Cog):
         e.add_field(name="Message", value=clip(message.content), inline=False)
         if message.attachments:
             e.add_field(name="Attachments", value=clip(", ".join(a.filename for a in message.attachments), 500))
+        e.add_field(name="Posted", value=f"<t:{int(message.created_at.timestamp())}:R>")
         await self._send(ch, e)
 
-    @commands.Cog.listener()
-    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
-        if payload.cached_message is not None:
-            return  # handled above
-        guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
-        if not ((ch := self._channel(guild)) and self.cfg.messages) or payload.channel_id == ch.id:
-            return
-        if not self.bot.intents.message_content:
-            return
-        await self._send(
-            ch,
-            discord.Embed(
-                color=discord.Color.orange(),
-                description=(
-                    f"🗑️ An older message was deleted in <#{payload.channel_id}> (Pingwin hadn't seen it, so the text "
-                    "isn't known)"
-                ),
-            ),
-        )
+    # Deletes of messages Pingwin never saw (older ones, or from before a restart) aren't logged: there's no
+    # text or author to show, and most of them are Pingwin tidying up its own posts.
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
-        if not ((ch := self._channel(after.guild)) and self.cfg.messages) or self._skip_message(after, ch):
+        if not getattr(self.cfg, "edits", False):
             return
-        if before.content == after.content:
-            return  # link previews and pins also count as edits
+        if not ((ch := self._channel(after.guild)) and self.cfg.enabled) or self._skip_message(after, ch):
+            return
+        if minor_edit(before.content, after.content, before.created_at, discord.utils.utcnow()):
+            return
         e = discord.Embed(
             color=discord.Color.gold(),
             description=(
@@ -139,6 +167,22 @@ class ModLog(commands.Cog):
         e.add_field(name="Before", value=clip(before.content), inline=False)
         e.add_field(name="After", value=clip(after.content), inline=False)
         await self._send(ch, e)
+
+
+def minor_edit(before: str, after: str, posted, now) -> bool:
+    """Edits not worth logging: nothing changed (link previews and pins count as edits), a fix within 10
+    minutes of posting, or only a few characters changed."""
+    before, after = before or "", after or ""
+    if before == after:
+        return True
+    if posted is not None and (now - posted).total_seconds() < 600:
+        return True
+    changed = sum(
+        max(i2 - i1, j2 - j1)
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, before, after).get_opcodes()
+        if op != "equal"
+    )
+    return changed <= max(8, len(before) // 10)
 
 
 async def setup(bot: Pingwin) -> None:

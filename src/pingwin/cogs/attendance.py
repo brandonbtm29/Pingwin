@@ -23,6 +23,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from .. import store
+from . import events
 
 if TYPE_CHECKING:
     from ..bot import Pingwin
@@ -245,24 +246,29 @@ class Attendance(commands.GroupCog, group_name="attendance", group_description="
         nowdt = discord.utils.utcnow()
         changed = False
         live_keys = set()
+        rules = await self._repeat_rules(guild)
 
         for event in guild.scheduled_events:
             start = event.start_time
+            if event.status == discord.EventStatus.scheduled:
+                # A repeating event nobody started stays on its old date in Discord: use its next date instead.
+                start = events.effective_start(event, rules.get(event.id), nowdt, self.bot.features.tz)
             if event.status == discord.EventStatus.active or (
                 event.status == discord.EventStatus.scheduled and start <= nowdt <= start + timedelta(hours=2)
             ):
                 key = session_key(event.id, start)
                 live_keys.add(key)
+                ends = event.end_time + (start - event.start_time) if event.end_time else None
                 if key not in sessions:
-                    sessions[key] = self._new_session(event, now)
+                    sessions[key] = self._new_session(event, now, ends)
                     changed = True
                     log.info("Taking attendance for %s", event.name)
                     await self._post_checkin(event, key, sessions[key])
                 s = sessions[key]
                 if not s.get("finalized"):
                     s["name"] = event.name
-                    if event.end_time:
-                        s["ends_at"] = event.end_time.timestamp()
+                    if ends:
+                        s["ends_at"] = ends.timestamp()
 
         by_event = {e.id: e for e in guild.scheduled_events}
         for key, s in sessions.items():
@@ -309,7 +315,18 @@ class Attendance(commands.GroupCog, group_name="attendance", group_description="
     async def _wait(self) -> None:
         await self.bot.wait_until_ready()
 
-    def _new_session(self, event: discord.ScheduledEvent, now: float) -> dict[str, Any]:
+    async def _repeat_rules(self, guild: discord.Guild) -> dict[int, dict]:
+        """The events' repeat rules, from the event reminders (which read them every 10 minutes)."""
+        reminders = self.bot.get_cog("EventReminders")
+        if reminders is None or not hasattr(reminders, "_rules"):
+            return {}
+        try:
+            return await reminders._rules(guild) or {}
+        except Exception:  # the dates from Discord still work
+            log.exception("Attendance: couldn't read the events' repeat rules")
+            return {}
+
+    def _new_session(self, event: discord.ScheduledEvent, now: float, ends: datetime | None) -> dict[str, Any]:
         kind = {discord.EntityType.voice: "voice", discord.EntityType.stage_instance: "stage"}.get(
             event.entity_type, "external"
         )
@@ -320,7 +337,7 @@ class Attendance(commands.GroupCog, group_name="attendance", group_description="
             "channel_id": event.channel_id if kind != "external" else None,
             "creator_id": str(event.creator_id) if event.creator_id else None,
             "started_at": now,
-            "ends_at": event.end_time.timestamp() if event.end_time else None,
+            "ends_at": ends.timestamp() if ends else None,
             "last_voice": now,
             "seconds": {},
             "open": {},

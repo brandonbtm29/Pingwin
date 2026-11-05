@@ -2,7 +2,8 @@
 
 There's the main ping menu plus any extra menus ([[roles.extra]]), such as a time zone picker.
 A menu is either "many" (each button toggles its role) or "one" (picking a role swaps out the
-others in that menu). In a time zone menu each role also sets the member's time zone.
+others in that menu). In a time zone menu each role also sets the member's time zone. Menus with
+more than 10 roles show as a dropdown instead; in a "many" one each pick toggles its role too.
 
 Buttons carry the role ID in their custom_id ("pingwin:role:<id>"), and are registered as dynamic
 items, so menus keep working after the bot restarts.
@@ -83,6 +84,8 @@ class RoleToggleButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pin
 
 
 SELECT_AFTER = 10  # menus with more roles than this show as a dropdown instead of buttons
+# A "many" dropdown toggles each picked role (one you already have is removed), like tapping its button.
+MANY_HINT = "Pick a role to add it. Pick one you already have to remove it."
 
 
 class RoleSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"pingwin:rsel:(?P<menu>[A-Za-z0-9_-]{1,40})"):
@@ -93,7 +96,7 @@ class RoleSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"pingwin:r
         super().__init__(
             discord.ui.Select(
                 custom_id=f"pingwin:rsel:{menu_key}",
-                placeholder="Pick from the list…",
+                placeholder="Pick roles to add or remove…" if many else "Pick from the list…",
                 min_values=0 if many else 1,
                 max_values=len(options) if many else 1,
                 options=options,
@@ -130,14 +133,31 @@ class RoleSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"pingwin:r
             except discord.Forbidden:
                 log.warning("Forbidden updating %s menu roles for %s", menu.key, member)
                 msg = bot.persona.say("no_permission", role=menu.title)
+            if menu.mode != "one":
+                await self._clear_picks(interaction)
         await interaction.followup.send(msg, ephemeral=True)
+
+    async def _clear_picks(self, interaction: discord.Interaction) -> None:
+        """Discord keeps showing the member what they just picked, so next time those would be picked again (and
+        toggled back off). Sending the same dropdown again clears it."""
+        if interaction.message is None:
+            return
+        view = discord.ui.View(timeout=None)
+        view.add_item(RoleSelect(self.menu_key, list(self.item.options), many=True))
+        try:
+            await interaction.message.edit(view=view)
+        except discord.HTTPException as e:
+            log.info("Couldn't clear the picks in the %s dropdown: %s", self.menu_key, e)
 
 
 async def apply_picks(member: discord.Member, menu: MenuConfig, picked: set[int], persona) -> str:
-    """A dropdown answer: the member ends up with exactly the picked roles from this menu."""
+    """A dropdown answer. In a "one" menu the member ends up with just the picked role. In a "many" menu each
+    picked role is toggled (added, or removed if they had it) and the rest are left alone: everyone shares the
+    one dropdown, so it can't show what each member already has, and a role that isn't picked says nothing."""
     pairs = [(entry, role) for entry, role in resolve_menu(member.guild, menu) if role is not None]
-    if menu.mode == "one":
-        picked = set(list(picked)[:1])
+    if menu.mode != "one":
+        return await _toggle_picks(member, pairs, picked, persona)
+    picked = set(list(picked)[:1])
     add = [role for entry, role in pairs if role.id in picked and role not in member.roles]
     drop = [role for entry, role in pairs if role.id not in picked and role in member.roles]
     if drop:
@@ -154,6 +174,40 @@ async def apply_picks(member: discord.Member, menu: MenuConfig, picked: set[int]
     if zone_entry:
         msg += f" Times you type now mean {zones.label(zones.zone(zone_entry.zone))} time."
     return msg
+
+
+async def _toggle_picks(
+    member: discord.Member, pairs: list[tuple[MenuRole, discord.Role]], picked: set[int], persona
+) -> str:
+    """A "many" dropdown answer: each picked role is added, or removed if the member already had it."""
+    chosen = [(entry, role) for entry, role in pairs if role.id in picked]
+    drop = [(entry, role) for entry, role in chosen if role in member.roles]
+    add = [(entry, role) for entry, role in chosen if role not in member.roles]
+    if drop:
+        await member.remove_roles(*(r for _, r in drop), reason="Pingwin role menu: opted out")
+    if add:
+        await member.add_roles(*(r for _, r in add), reason="Pingwin role menu: opted in")
+    log.info(
+        "%s picked from a role list: added %s, removed %s",
+        member,
+        ", ".join(r.name for _, r in add) or "nothing",
+        ", ".join(r.name for _, r in drop) or "nothing",
+    )
+    parts = []
+    if add:
+        parts.append(persona.say("role_added", role=", ".join(r.name for _, r in add), user=member.display_name))
+    if drop:
+        parts.append(persona.say("role_removed", role=", ".join(r.name for _, r in drop), user=member.display_name))
+    # Time zone roles in a "many" menu work like their buttons do.
+    current = zones.get(member.id)
+    if any(e.zone and current and current.key == e.zone for e, _ in drop):
+        zones.set_for(member.id, None)
+        parts.append("I'll use the server's time zone for you now.")
+    zone_entry = next((e for e, _ in add if e.zone), None)
+    if zone_entry:
+        zones.set_for(member.id, zone_entry.zone)
+        parts.append(f"Times you type now mean {zones.label(zones.zone(zone_entry.zone))} time.")
+    return " ".join(parts) or "Nothing changed. Pick a role to add it, or one you have to remove it."
 
 
 async def toggle(member: discord.Member, role: discord.Role, menu: MenuConfig, entry: MenuRole, persona) -> str:
@@ -231,11 +285,7 @@ def role_problems(guild: discord.Guild, role: discord.Role, *, pingable: bool = 
 
 def menu_footer(menu: MenuConfig, persona) -> str:
     if uses_dropdown(menu):
-        return (
-            "Pick one from the list. Pick again any time to change it."
-            if menu.mode == "one"
-            else persona.say("menu_footer")
-        )
+        return "Pick one from the list. Pick again any time to change it." if menu.mode == "one" else MANY_HINT
     if menu.mode == "one":
         return "Pick one. Tap it again to clear it."
     return persona.say("menu_footer")
@@ -246,7 +296,8 @@ def build_menu_embed(menu: MenuConfig | RolesConfig, footer: str) -> discord.Emb
         menu = menu.menus[0]
     lines = [menu.description] if menu.description else []
     if uses_dropdown(menu):
-        lines += ["", "Pick yours from the list below."]
+        hint = "" if menu.mode == "one" else " Picking one you already have removes it."
+        lines += ["", "Pick yours from the list below." + hint]
         embed = discord.Embed(title=menu.title, description="\n".join(lines), color=MENU_COLOR)
         embed.set_footer(text=footer)
         return embed

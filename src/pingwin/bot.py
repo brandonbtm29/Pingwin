@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import random
 import time
 from dataclasses import replace
@@ -18,7 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import updater
-from .config import PROJECT_ROOT, Config, config_path, load_config, load_node
+from .config import PROJECT_ROOT, Config, config_path, load_config, load_node, load_secrets, secrets_path
 from .dashboard.server import Dashboard
 from .failover import Coordinator
 from .persona import Persona, load_persona, persona_path
@@ -102,6 +103,8 @@ class Pingwin(commands.Bot):
         await self._sync_commands()
         failover = self.config.failover
         log.info("This PC is %r; settings from %s", self.node.name, config_path())
+        if failover.warning:
+            log.warning("%s", failover.warning)
         if failover.active and failover.rank(self.node.name) > len(failover.pcs):
             log.warning(
                 "%r isn't in [failover] pcs %s, so it only steps in when every listed PC is offline",
@@ -217,7 +220,7 @@ class Pingwin(commands.Bot):
 
     # ----- settings ------------------------------------------------------
     def _settings_files(self) -> list[Path]:
-        files = [config_path()]
+        files = [config_path(), secrets_path()]
         try:
             files.append(persona_path(self.config.persona))
         except Exception:
@@ -228,7 +231,7 @@ class Pingwin(commands.Bot):
         self._watched = {p: p.stat().st_mtime for p in self._settings_files() if p.exists()}
 
     def _auto_reload(self) -> None:
-        """Pick up edits to config.toml / the persona (e.g. synced by SyncThing) without a restart."""
+        """Pick up edits to config.toml / the persona / secrets.env (e.g. synced by SyncThing) without a restart."""
         current = {p: p.stat().st_mtime for p in self._settings_files() if p.exists()}
         if current == self._watched:
             return
@@ -239,8 +242,21 @@ class Pingwin(commands.Bot):
             log.error("Settings changed but couldn't be loaded, keeping the old ones: %s", e)
             self._watched = current  # don't retry until the file changes again
 
+    def _reload_secrets(self) -> None:
+        try:
+            changed = load_secrets()
+        except Exception as e:  # never let a bad secrets.env stop config.toml from loading
+            log.error("Couldn't read secrets.env, keeping the keys already loaded: %s", e)
+            return
+        if changed:
+            log.info("Keys updated from secrets.env: %s", ", ".join(sorted(changed)))  # names only, never values
+        if "DISCORD_TOKEN" in changed and os.environ.get("DISCORD_TOKEN", "").strip() != self.config.token:
+            log.warning("The Discord token in secrets.env changed; restart Pingwin to use the new one")
+            self.restart_needed = True
+
     def reload_settings(self) -> None:
-        """Reload config.toml and the persona. Raises ConfigError on bad files."""
+        """Reload config.toml, the persona and secrets.env. Raises ConfigError on bad files."""
+        self._reload_secrets()
         config = load_config(require_token=False)
         persona = load_persona(config.persona)
         old = self.config.features
@@ -250,6 +266,8 @@ class Pingwin(commands.Bot):
         ):
             log.warning("A feature change needs different Discord intents; restart Pingwin to apply it")
             self.restart_needed = True
+        if config.failover.warning and config.failover != self.config.failover:
+            log.warning("%s", config.failover.warning)
         self.config = replace(config, token=self.config.token)
         self.persona = persona
         self._remember_settings_files()

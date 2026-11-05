@@ -531,9 +531,23 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
         if role:  # take the birthday role away once their day is over
             for uid, given in list(state.setdefault("role_given", {}).items()):
                 if given != local_key(uid):
-                    member = guild.get_member(int(uid)) or await self._fetch(guild, int(uid))
+                    member, left = await self._member(guild, int(uid))
+                    if member is None and not left:
+                        continue  # couldn't check: try again next time
                     if member and role in member.roles:
-                        await member.remove_roles(role, reason="Pingwin: birthday is over")
+                        try:
+                            await member.remove_roles(role, reason="Pingwin: birthday is over")
+                        except discord.Forbidden as e:
+                            log.warning(
+                                "Couldn't take %s away from %s (%s). Take it off by hand, and drag Pingwin's role "
+                                "above it in Server Settings → Roles.",
+                                role.name,
+                                member,
+                                e,
+                            )
+                        except discord.HTTPException as e:
+                            log.info("Couldn't take %s away from %s yet: %s", role.name, member, e)
+                            continue
                     state["role_given"].pop(uid)
                     changed = True
 
@@ -548,27 +562,55 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
                 if changed:
                     store.save(STATE, state)
                 return
-            uids = [u for u, _ in due]
-            ping = self.bot.role_named(guild, self.cfg.ping_role)
-            mentions = " ".join(f"<@{u}>" for u in uids)
-            text = self.cfg.message.replace("{mentions}", mentions).replace("{mention}", mentions)
-            if ping:
-                text = f"{ping.mention} {text}"
-            await channel.send(
-                text[:2000],
-                allowed_mentions=discord.AllowedMentions(
-                    everyone=False, users=[discord.Object(int(u)) for u in uids], roles=[ping] if ping else False
-                ),
-            )
-            log.info("Posted birthdays for %d member(s)", len(uids))
+            here = []  # (user id, their local date, member)
             for uid, key in due:
-                posted_for[uid] = key
+                member, left = await self._member(guild, int(uid))
+                if left:  # they left the server: forget their birthday
+                    people.pop(uid, None)
+                    changed = True
+                    log.info("Forgot the birthday of %s, who isn't in the server anymore", uid)
+                elif member is not None:
+                    here.append((uid, key, member))
+            if here:
+                uids = [u for u, _, _ in here]
+                ping = self.bot.role_named(guild, self.cfg.ping_role)
+                mentions = " ".join(f"<@{u}>" for u in uids)
+                text = self.cfg.message.replace("{mentions}", mentions).replace("{mention}", mentions)
+                if ping:
+                    text = f"{ping.mention} {text}"
+                try:
+                    await channel.send(
+                        text[:2000],
+                        allowed_mentions=discord.AllowedMentions(
+                            everyone=False,
+                            users=[discord.Object(int(u)) for u in uids],
+                            roles=[ping] if ping else False,
+                        ),
+                    )
+                except discord.HTTPException as e:
+                    log.warning("Couldn't post the birthday shout-out (trying again in a few minutes): %s", e)
+                    if changed:
+                        store.save(STATE, state)
+                    return
+                for uid, key, _ in here:
+                    posted_for[uid] = key
+                store.save(STATE, state)  # saved straight away, so nothing below can make it post twice
+                log.info("Posted birthdays for %d member(s)", len(uids))
                 if role:
-                    member = guild.get_member(int(uid)) or await self._fetch(guild, int(uid))
-                    if member:
-                        await member.add_roles(role, reason="Pingwin: happy birthday")
+                    for uid, key, member in here:
+                        try:
+                            await member.add_roles(role, reason="Pingwin: happy birthday")
+                        except discord.HTTPException as e:
+                            log.warning(
+                                "Couldn't give %s the %s role (Pingwin needs Manage Roles, and its role above "
+                                "that one): %s",
+                                member,
+                                role.name,
+                                e,
+                            )
+                            continue
                         state.setdefault("role_given", {})[uid] = key
-            changed = True
+                changed = True
         for uid in [u for u in posted_for if u not in people]:
             posted_for.pop(uid)
             changed = True
@@ -580,11 +622,19 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
         await self.bot.wait_until_ready()
 
     @staticmethod
-    async def _fetch(guild: discord.Guild, user_id: int) -> discord.Member | None:
+    async def _member(guild: discord.Guild, user_id: int) -> tuple[discord.Member | None, bool]:
+        """(the member, whether they've left). Only Discord saying they're not in the server counts as left;
+        any other error means "try again later"."""
+        member = guild.get_member(user_id)
+        if member is not None:
+            return member, False
         try:
-            return await guild.fetch_member(user_id)
-        except discord.HTTPException:
-            return None
+            return await guild.fetch_member(user_id), False
+        except discord.NotFound:
+            return None, True
+        except discord.HTTPException as e:
+            log.info("Couldn't check whether %s is still in the server: %s", user_id, e)
+            return None, False
 
 
 async def setup(bot: Pingwin) -> None:

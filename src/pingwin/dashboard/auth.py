@@ -226,27 +226,38 @@ def _has_role(member: discord.Member, name: str | None) -> bool:
     return bool(name) and any(r.name.casefold() == name.casefold() for r in member.roles)
 
 
-async def check_member(bot: Pingwin, user_id: int) -> tuple[str | None, str, discord.Member | None]:
-    """What may this person open? Returns (level, reason if nothing, member).
+UNSURE = "unsure"  # member_status: Discord couldn't be asked right now (not a "no")
+DENIED = "denied"  # member_status: Discord says they left the server or don't have the role
 
-    "admin": the whole dashboard (Manage Server, or the dashboard admin role).
-    "member": just the movie pages (members with the gate role, like Friend; anyone if there's no gate).
-    """
-    guild = bot.home_guild
+
+async def member_status(bot: Pingwin, user_id: int) -> tuple[str, str, discord.Member | None]:
+    """Like check_member, but tells "no" apart from "couldn't check": the status is "admin", "member",
+    DENIED (left the server, or lacks the role) or UNSURE (Pingwin isn't connected, or Discord had trouble)."""
+    guild = getattr(bot, "home_guild", None)
     if guild is None:
-        return None, "Pingwin isn't connected to the server right now. Try again in a minute.", None
+        return UNSURE, "Pingwin isn't connected to the server right now. Try again in a minute.", None
     member = guild.get_member(user_id)
     if member is None:
         try:
             member = await guild.fetch_member(user_id)
         except discord.NotFound:
-            return None, f"You're not a member of {guild.name}.", None
-        except discord.HTTPException:
-            return None, "Couldn't check your roles with Discord. Try again in a minute.", None
+            return DENIED, f"You're not a member of {guild.name}.", None
+        except (discord.HTTPException, aiohttp.ClientError, TimeoutError, OSError):
+            return UNSURE, "Couldn't check your roles with Discord. Try again in a minute.", None
     perms = member.guild_permissions
     if perms.administrator or perms.manage_guild or _has_role(member, bot.config.dashboard.admin_role):
         return "admin", "", member
     gate = bot.config.roles.required_role
     if not gate or _has_role(member, gate):
         return "member", "", member
-    return None, f"You're signed in as {member.display_name}, but you need the {gate} role in {guild.name}.", member
+    return DENIED, f"You're signed in as {member.display_name}, but you need the {gate} role in {guild.name}.", member
+
+
+async def check_member(bot: Pingwin, user_id: int) -> tuple[str | None, str, discord.Member | None]:
+    """What may this person open? Returns (level, reason if nothing, member).
+
+    "admin": the whole dashboard (Manage Server, or the dashboard admin role).
+    "member": just the movie pages (members with the gate role, like Friend; anyone if there's no gate).
+    """
+    status, reason, member = await member_status(bot, user_id)
+    return (status if status in ("admin", "member") else None), reason, member

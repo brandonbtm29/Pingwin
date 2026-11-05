@@ -123,6 +123,7 @@ def test_a_voice_event_from_start_to_finish(tmp_path, monkeypatch):
         home_guild=guild,
         text_channel=lambda cid: None,
         loop=None,
+        get_cog=lambda name: None,
     )
 
     async def go():

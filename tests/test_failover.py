@@ -9,8 +9,13 @@ BACKUP = Node("FRIEND-PC")
 CFG = FailoverConfig(True, 1, 30, 120, pcs=("BTM-NOVA", "FRIEND-PC"))
 
 
-def lease(node: Node, seconds_ago: float) -> Lease:
-    return Lease(node.name, NOW - timedelta(seconds=seconds_ago))
+def lease(node: Node) -> Lease:
+    return Lease(node.name, NOW)
+
+
+def lead(held: Lease | None, me: Node, quiet_for: float = 0, warmed_up: bool = True) -> bool:
+    """quiet_for: seconds this PC has seen the lease unchanged (its own monotonic clock)."""
+    return should_lead(held, me, quiet_for, CFG, warmed_up=warmed_up)
 
 
 def test_render_parse_roundtrip():
@@ -25,36 +30,49 @@ def test_parse_ignores_other_messages():
 
 
 def test_first_pc_claims_empty_lease():
-    assert should_lead(None, BACKUP, NOW, CFG)
+    assert lead(None, BACKUP)
+    assert lead(None, MAIN, warmed_up=False)  # nobody to wait for: take it at once
 
 
 def test_holder_keeps_renewing():
-    assert should_lead(lease(BACKUP, 10), BACKUP, NOW, CFG)
+    assert lead(lease(BACKUP), BACKUP, 10)
+    assert lead(lease(MAIN), MAIN, warmed_up=False)  # restarted: our own lease is still ours
 
 
 def test_backup_waits_while_main_checks_in():
-    assert not should_lead(lease(MAIN, 30), BACKUP, NOW, CFG)
+    assert not lead(lease(MAIN), BACKUP, 30)
 
 
 def test_backup_takes_over_when_main_goes_quiet():
-    assert should_lead(lease(MAIN, 121), BACKUP, NOW, CFG)
+    assert lead(lease(MAIN), BACKUP, 121)
+    assert lead(lease(MAIN), BACKUP, 121, warmed_up=False)  # no one is answering: don't wait
 
 
-def test_main_takes_back_from_backup_immediately():
-    assert should_lead(lease(BACKUP, 5), MAIN, NOW, CFG)
+def test_main_takes_back_from_backup_once_warmed_up():
+    assert lead(lease(BACKUP), MAIN, 5)
+    assert not lead(lease(BACKUP), MAIN, 5, warmed_up=False)  # let SyncThing catch up first
+    assert lead(lease(BACKUP), MAIN, 121, warmed_up=False)  # the backup went quiet too
+
+
+def test_lease_age_ignores_the_pcs_clocks():
+    # The wall-clock age of the lease (here "an hour old" by a fast clock) no longer matters, only how long
+    # this PC has seen it unchanged.
+    old = Lease(MAIN.name, NOW - timedelta(hours=1))
+    assert not lead(old, BACKUP, 0)
+    assert lead(old, BACKUP, 121)
 
 
 def test_unlisted_pc_waits_behind_listed_ones():
     extra = Node("SPARE-LAPTOP")
     assert CFG.rank("SPARE-LAPTOP") == 3
-    assert not should_lead(lease(BACKUP, 5), extra, NOW, CFG)
-    assert should_lead(lease(extra, 5), BACKUP, NOW, CFG)
-    assert should_lead(lease(BACKUP, 200), extra, NOW, CFG)  # everyone listed is offline
+    assert not lead(lease(BACKUP), extra, 5)
+    assert lead(lease(extra), BACKUP, 5)
+    assert lead(lease(BACKUP), extra, 200)  # everyone listed is offline
 
 
 def test_names_match_case_insensitively():
     assert CFG.rank("btm-nova") == 1
-    assert should_lead(lease(Node("btm-nova"), 5), MAIN, NOW, CFG)
+    assert lead(lease(Node("btm-nova")), MAIN, 5)
 
 
 def test_describe():

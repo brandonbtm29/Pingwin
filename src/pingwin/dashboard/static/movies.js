@@ -23,10 +23,11 @@ function el(tag, attrs = {}, ...children) {
 }
 function put(node, ...kids) { node.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false)); }
 
-function toast(message, isError = false) {
+function toast(message, isError = false, ms = isError ? 9000 : 5000) {
+  if (!message) return;  // e.g. a signed-out error, which already showed its own toast
   const t = el("div", { class: "toast" + (isError ? " error" : "") }, message);
   $("toasts").append(t);
-  setTimeout(() => t.remove(), isError ? 9000 : 5000);
+  setTimeout(() => t.remove(), ms);
 }
 
 async function api(path, body) {
@@ -34,11 +35,56 @@ async function api(path, body) {
     method: "POST", headers: { "Content-Type": "application/json", "X-Pingwin": "1" }, body: JSON.stringify(body),
   };
   const res = await fetch(path, { credentials: "same-origin", ...opts });
-  let data = {};
-  try { data = await res.json(); } catch { /* not JSON */ }
-  if (res.status === 401) { window.location.reload(); }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+  let reply = {};
+  try { reply = await res.json(); } catch { /* not JSON */ }
+  if (res.status === 401) {
+    const kept = keepReviewDraft();
+    if (body === undefined) window.location.reload();  // the page shows the sign-in step
+    else {
+      // Don't reload under someone's half-written review: say how to sign in; the review comes back after.
+      const viaDiscord = data?.viewer?.kind === "discord";
+      const msg = el("span", {}, viaDiscord ? "Your sign-in ran out, so that wasn't saved." : `${reply.error || "You're signed out."} That wasn't saved.`,
+        kept ? " Your review is kept in this tab and comes back once you're signed in here." : "",
+        viaDiscord ? " " : null, viaDiscord ? el("a", { href: window.location.pathname + window.location.search }, "Sign in again") : null);
+      toast(msg, true, 30000);
+      const err = new Error("");  // the toast above already explains it
+      err.signedOut = true;
+      throw err;
+    }
+  }
+  if (!res.ok) throw new Error(reply.error || `Request failed (${res.status})`);
+  return reply;
+}
+
+// A review that couldn't be sent because the sign-in ran out (kept for this tab only).
+const DRAFT_KEY = "pingwin-review-draft";
+function keepReviewDraft() {
+  if (!data || $("rv-box").hidden || !rvTyped.size) return false;
+  const d = { hid: $("rv-movie").value, as: $("rv-who-wrap").hidden ? "" : $("rv-who").value, guest: $("rv-guest").value,
+    score: $("rv-score").value, comment: $("rv-comment").value, answer: $("rv-answer").value, ask: $("rv-ask").value, typed: [...rvTyped] };
+  try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); return true; } catch { return false; }
+}
+function restoreReviewDraft() {
+  let d = null;
+  try { d = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null"); } catch { return; }
+  if (!d || $("rv-box").hidden) return;  // not signed in as someone who can review yet: keep it for later
+  try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* fine */ }
+  if (data.history.some((h) => h.id === d.hid)) $("rv-movie").value = d.hid;
+  if (!$("rv-who-wrap").hidden && d.as && [...$("rv-who").options].some((o) => o.value === d.as)) {
+    $("rv-who").value = d.as;
+    $("rv-guest-wrap").hidden = d.as !== GUEST;
+    $("rv-guest").value = d.as === GUEST ? d.guest || "" : "";
+  }
+  rvTyped.clear();
+  syncReview();  // point the form at that movie and reviewer, then put the draft back over it
+  for (const [id, v] of [["rv-score", d.score], ["rv-comment", d.comment], ["rv-answer", d.answer], ["rv-ask", d.ask]]) {
+    if (typeof v === "string") $(id).value = v;
+  }
+  for (const id of d.typed || []) rvTyped.add(id);
+  put($("rv-score-badge"), scoreBadge(Number($("rv-score").value), " / 10"));
+  switchTab("reviews");
+  $("rv-box").open = true;
+  toast("Your unsent review is back. Check it and press Post review.");
 }
 
 const fmt = (n) => (n === null || n === undefined ? "–" : Number(n).toFixed(1).replace(/\.0$/, ""));
@@ -124,6 +170,7 @@ async function load() {
   }
   put($("rv-guests"), [...guests.values()].sort((a, b) => a.localeCompare(b)).map((n) => el("option", { value: n })));
   renderPending();
+  restoreReviewDraft();
 }
 
 function fillSeries() {
@@ -804,18 +851,35 @@ function fillReviewForm() {
   $("rv-as-note").textContent = !admin && data.viewer.name ? ` as ${data.viewer.name}` : "";
   syncReview();
 }
-function syncReview() {
+// The form follows the movie and reviewer picked: switching to one that already has a review fills it in.
+// What the person typed themselves stays put otherwise (also across reloads of the data).
+const RV_FIELDS = ["rv-score", "rv-comment", "rv-answer", "rv-ask"];
+const RV_DEFAULT_SCORE = "7";
+const rvTyped = new Set();  // fields changed by hand since the form was last filled in
+let rvAt = null;            // the movie and reviewer the fields belong to
+function existingReview() {
   const h = data.history.find((x) => x.id === $("rv-movie").value);
   const who = reviewer();
-  const mine = h && who ? h.ratings.find((r) => r.key === who) : null;
+  return { h, who, mine: h && who ? h.ratings.find((r) => r.key === who) : null };
+}
+function reviewButtonLabel() { $("rv-go").textContent = existingReview().mine ? "Update review" : "Post review"; }
+function syncReview() {
+  const { h, who, mine } = existingReview();
   $("rv-go").textContent = mine ? "Update review" : "Post review";
-  if (mine) {
-    $("rv-score").value = typeof mine.score === "number" ? mine.score : 7;
-    $("rv-comment").value = mine.comment || "";
-    $("rv-answer").value = mine.answer || "";
-    $("rv-ask").value = mine.ask || "";
-  } else {
-    $("rv-comment").value = ""; $("rv-answer").value = ""; $("rv-ask").value = "";
+  const at = `${$("rv-movie").value}|${who}`;
+  if (at !== rvAt) {
+    rvAt = at;
+    const typed = ["rv-comment", "rv-answer", "rv-ask"].some((id) => rvTyped.has(id) && $(id).value.trim());
+    if (mine && (!typed || window.confirm(`${mine.who || "This person"} already reviewed this movie. Load that review? It replaces what you've typed.`))) {
+      $("rv-score").value = typeof mine.score === "number" ? mine.score : RV_DEFAULT_SCORE;
+      $("rv-comment").value = mine.comment || "";
+      $("rv-answer").value = mine.answer || "";
+      $("rv-ask").value = mine.ask || "";
+      rvTyped.clear();
+    } else if (!mine) {
+      // Nothing to load: keep what was typed, and clear what came from the previous movie's review.
+      for (const id of RV_FIELDS) if (!rvTyped.has(id)) $(id).value = id === "rv-score" ? RV_DEFAULT_SCORE : "";
+    }
   }
   // The question the last reviewer passed on (or the one this person already answered).
   const others = h ? h.ratings.filter((r) => r.key !== who) : [];
@@ -833,6 +897,7 @@ function openReview(hid) {
   $("rv-box").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 $("rv-score").addEventListener("input", () => put($("rv-score-badge"), scoreBadge(Number($("rv-score").value), " / 10")));
+for (const id of RV_FIELDS) $(id).addEventListener("input", () => rvTyped.add(id));
 $("rv-movie").addEventListener("change", syncReview);
 $("rv-who").addEventListener("change", () => {
   store.set("pingwin-review-as", $("rv-who").value);
@@ -840,7 +905,9 @@ $("rv-who").addEventListener("change", () => {
   if (!$("rv-guest-wrap").hidden) $("rv-guest").focus();
   syncReview();
 });
-$("rv-guest").addEventListener("input", syncReview);
+// While a guest's name is being typed only the button changes; their earlier review (if any) loads once the name is done.
+$("rv-guest").addEventListener("input", reviewButtonLabel);
+$("rv-guest").addEventListener("change", syncReview);
 $("rv-go").addEventListener("click", async () => {
   const who = reviewer();
   const isGuest = !$("rv-who-wrap").hidden && $("rv-who").value === GUEST;
@@ -851,6 +918,7 @@ $("rv-go").addEventListener("click", async () => {
     const res = await api("/api/movies/review", { hid: $("rv-movie").value, ...(isGuest ? { guest: guestName() } : { as_user: who }), score: $("rv-score").value,
       comment: $("rv-comment").value, answer: $("rv-q-wrap").hidden ? "" : $("rv-answer").value, ask: $("rv-ask").value });
     $("rv-result").textContent = res.message;
+    rvTyped.clear();  // the fields now hold the saved review, not a draft
     await load();
   } catch (e) { toast(e.message, true); }
   finally { btn.disabled = false; }
@@ -919,6 +987,7 @@ $("p-combine").addEventListener("click", () => {
         for (const r of rows) people[r.key] = /^\d+$/.test(r.key) && as === `@${r.key}` ? "" : as;
         try {
           toast((await api("/api/movies/admin", { action: "people", people })).message);
+          for (const r of rows) pEdits.delete(r.key);  // saved just now; other unsaved rows are kept through load()
           pPicked.clear(); d.close(); await load();
         } catch (e) { toast(e.message, true); }
       } }, "Combine"),
@@ -983,10 +1052,15 @@ function renderPeopleAdmin() {
   $("a-n-people").textContent = loose.length ? String(loose.length) : "";
   syncPicked();
 }
+// People rows changed here and not saved yet, by rater key: { from: what it was, member, name }.
+// They survive re-renders (Combine, Approve, any reload), and Save sends only these.
+const pEdits = new Map();
+const pValue = (e) => (e.member ? `@${e.member}` : e.name.replace(/\s+/g, " ").trim());
 function personRow(r) {
   const own = /^\d+$/.test(r.key);  // rated in Discord: already that member
   const cur = data.people[r.key] || "";
-  const linked = own ? r.key : cur.startsWith("@") ? cur.slice(1) : "";
+  const edit = own ? null : pEdits.get(r.key);
+  const linked = own ? r.key : edit ? edit.member : cur.startsWith("@") ? cur.slice(1) : "";
   const likely = own ? [] : likelyMembers(r.names);
   const opt = (m) => el("option", { value: m.id, selected: m.id === linked }, memberLabel(m));
   const sel = el("select", { class: "p-member", "data-key": r.key, disabled: own, "aria-label": `Discord member for ${[...r.names][0]}` },
@@ -994,9 +1068,15 @@ function personRow(r) {
     likely.length ? el("optgroup", { label: "Likely" }, likely.map(opt)) : null,
     el("optgroup", { label: "Everyone" }, data.members.filter((m) => !likely.includes(m)).map(opt)),
     linked && !data.members.some((m) => m.id === linked) ? el("option", { value: linked, selected: true }, "A former member") : null);
-  const name = el("input", { class: "p-as", "data-key": r.key, list: "p-names", maxlength: "40", value: cur.startsWith("@") ? "" : cur,
+  const name = el("input", { class: "p-as", "data-key": r.key, list: "p-names", maxlength: "40", value: edit ? edit.name : cur.startsWith("@") ? "" : cur,
     placeholder: [...r.names][0], disabled: own || !!linked, "aria-label": `Name for ${[...r.names][0]}` });
-  sel.addEventListener("change", () => { name.disabled = !!sel.value; if (sel.value) name.value = ""; });
+  const remember = () => {
+    const e = pEdits.get(r.key) || { from: cur };
+    e.member = sel.value; e.name = name.value;
+    if (pValue(e) === e.from) pEdits.delete(r.key); else pEdits.set(r.key, e);
+  };
+  sel.addEventListener("change", () => { name.disabled = !!sel.value; if (sel.value) name.value = ""; remember(); });
+  name.addEventListener("input", remember);
   const pick = el("input", { type: "checkbox", checked: pPicked.has(r.key), "aria-label": `Pick ${[...r.names][0]} to combine` });
   pick.addEventListener("change", () => { if (pick.checked) pPicked.add(r.key); else pPicked.delete(r.key); syncPicked(); });
   return el("tr", { class: "p-row" + (pPicked.has(r.key) ? " picked" : ""), "data-key": r.key },
@@ -1007,14 +1087,16 @@ function personRow(r) {
     el("td", {}, name));
 }
 $("p-save").addEventListener("click", async () => {
-  const people = {};
-  document.querySelectorAll(".p-member").forEach((sel) => {
-    if (sel.disabled) return;
-    const typed = document.querySelector(`.p-as[data-key="${CSS.escape(sel.dataset.key)}"]`);
-    people[sel.dataset.key] = sel.value ? `@${sel.value}` : (typed ? typed.value.trim() : "");
-  });
-  try { $("p-result").textContent = (await api("/api/movies/admin", { action: "people", people })).message; await load(); }
-  catch (e) { toast(e.message, true); }
+  // Only the rows changed here: a blank row means "unlink", so sending untouched rows would undo
+  // links another mod made since this page loaded.
+  const sent = new Map(pEdits);
+  const people = Object.fromEntries([...sent].map(([key, e]) => [key, pValue(e)]));
+  if (!sent.size) { $("p-result").textContent = "Nothing changed."; return; }
+  try {
+    $("p-result").textContent = (await api("/api/movies/admin", { action: "people", people })).message;
+    for (const key of sent.keys()) if (pEdits.has(key) && pValue(pEdits.get(key)) === people[key]) pEdits.delete(key);
+    await load();
+  } catch (e) { toast(e.message, true); }
 });
 
 // ---------- pending (mods approve here too) ----------
@@ -1124,7 +1206,7 @@ function renderImdb() {
         el("div", { class: "x-title" }, i.position ? el("span", { class: "x-pos" }, `#${i.position}`) : null,
           i.imdb_id ? el("a", { href: `https://www.imdb.com/title/${i.imdb_id}/`, target: "_blank", rel: "noopener" }, i.title) : el("span", {}, i.title),
           i.year ? el("span", { class: "hint" }, ` (${i.year})`) : null),
-        el("div", { class: "hint" }, [i.added ? `added ${fmtDate(i.added)}` : null, typeof i.your_rating === "number" ? `your rating ${fmt(i.your_rating)}/10` : null].filter(Boolean).join(" · ")),
+        el("div", { class: "hint" }, [i.added ? `added ${fmtDate(i.added)}` : null, typeof i.your_rating === "number" ? `rated ${fmt(i.your_rating)}/10 on this list` : null].filter(Boolean).join(" · ")),
         el("div", { class: "x-status" }, status)));
   }));
   $("x-more").hidden = rows.length <= xLimit;

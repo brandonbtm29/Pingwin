@@ -653,7 +653,7 @@ body.movies-page {
 .movie-links { margin: 0 0 1rem; }
 .linkbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .5rem; }
 .with-action { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
-.with-action select { flex: 1 1 12rem; width: auto; }
+.with-action select, .with-action input { flex: 1 1 12rem; width: auto; }
 .ok-note { color: var(--ok); font-size: .85rem; margin: 0 0 .75rem; }
 @media (max-width: 760px) { .fgroups { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 480px) { .fgrid { grid-template-columns: minmax(0, 1fr); } }

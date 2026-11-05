@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -186,16 +187,24 @@ def test_view_only_link_and_personal_sign_in(tmp_path, data, monkeypatch):  # no
         for _ in range(2):  # Discord's link preview opens it first: that mustn't use the code up
             r = await client.get(f"/movies/login?code={code}", headers=PUBLIC)
             assert r.status == 200 and "Hi, Riley!" in await r.text() and "pingwin_session" not in r.cookies
-        form = {"code": code}
-        r = await client.post("/movies/login", data=form, headers={**PUBLIC, "Origin": "https://evil.example"})
+        page_token = re.search(r'name="token" value="([^"]+)"', await r.text())[1]
+        assert r.cookies[server.LOGIN_COOKIE].value == page_token
+        from_page = {**PUBLIC, "Cookie": f"{server.LOGIN_COOKIE}={page_token}"}
+        form = {"code": code, "token": page_token}
+        r = await client.post("/movies/login", data=form, headers={**from_page, "Origin": "https://evil.example"})
         assert r.status == 403
         # Real browsers send "Origin: null" here (the pages use Referrer-Policy: no-referrer).
-        r = await client.post("/movies/login", data=form, headers={**PUBLIC, "Origin": "null"}, allow_redirects=False)
+        r = await client.post(
+            "/movies/login", data=form, headers={**from_page, "Origin": "null"}, allow_redirects=False
+        )
         assert r.status == 303 and r.headers["Location"] == "/movies"
         session = r.cookies["pingwin_session"].value
         code2 = movieaccess.new_login_code(42, "Riley")
         r = await client.post(
-            "/movies/login", data={"code": code2}, headers={**PUBLIC, "Origin": ORIGIN}, allow_redirects=False
+            "/movies/login",
+            data={"code": code2, "token": page_token},
+            headers={**from_page, "Origin": ORIGIN},
+            allow_redirects=False,
         )
         assert r.status == 303  # the page's own address works too
         me = {**PUBLIC, "Cookie": f"pingwin_session={session}", "X-Pingwin": "1", "Origin": ORIGIN}
@@ -203,7 +212,9 @@ def test_view_only_link_and_personal_sign_in(tmp_path, data, monkeypatch):  # no
         assert body["viewer"]["level"] == "member" and body["viewer"]["user_id"] == "42"
         r = await client.get(f"/movies/login?code={code}", headers=PUBLIC)  # used up
         assert r.status == 403
-        r = await client.post("/movies/login", data=form, headers={**PUBLIC, "Origin": ORIGIN}, allow_redirects=False)
+        r = await client.post(
+            "/movies/login", data=form, headers={**from_page, "Origin": ORIGIN}, allow_redirects=False
+        )
         assert r.status == 403
 
     run(scenario, tmp_path)

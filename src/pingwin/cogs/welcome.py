@@ -95,10 +95,13 @@ class ApprovalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pingw
             status = f"Approved by {interaction.user.display_name}"
             channel = bot.text_channel(cfg.approved_channel)
             if channel and cfg.approved_message:
-                await channel.send(
-                    fill(cfg.approved_message, member),
-                    allowed_mentions=discord.AllowedMentions(users=[member], roles=False),
-                )
+                try:
+                    await channel.send(
+                        fill(cfg.approved_message, member),
+                        allowed_mentions=discord.AllowedMentions(users=[member], roles=False),
+                    )
+                except discord.HTTPException as e:  # they're approved anyway: still update the card
+                    log.warning("Welcome: couldn't post the approved message in #%s: %s", channel.name, e)
         else:
             status = f"Denied by {interaction.user.display_name}"
             if cfg.deny_action == "kick":
@@ -128,10 +131,13 @@ class Welcome(commands.Cog):
             return
         welcome = self.bot.text_channel(self.cfg.welcome_channel)
         if welcome and self.cfg.welcome_message:
-            await welcome.send(
-                fill(self.cfg.welcome_message, member),
-                allowed_mentions=discord.AllowedMentions(users=[member], roles=False),
-            )
+            try:
+                await welcome.send(
+                    fill(self.cfg.welcome_message, member),
+                    allowed_mentions=discord.AllowedMentions(users=[member], roles=False),
+                )
+            except discord.HTTPException as e:  # the mods still get the approval card
+                log.warning("Welcome: couldn't post the welcome for %s in #%s: %s", member, welcome.name, e)
         cards = self.bot.text_channel(self.cfg.approval_channel)
         if cards is None:
             log.warning("Welcome: no approval channel set, or Pingwin can't see it")
@@ -139,7 +145,11 @@ class Welcome(commands.Cog):
         view = discord.ui.View(timeout=None)
         view.add_item(ApprovalButton(member.id, "ok"))
         view.add_item(ApprovalButton(member.id, "no"))
-        msg = await cards.send(embed=approval_card(member), view=view)
+        try:
+            msg = await cards.send(embed=approval_card(member), view=view)
+        except discord.HTTPException as e:
+            log.warning("Welcome: couldn't post the approval card for %s in #%s: %s", member, cards.name, e)
+            return
         state = store.load(STATE)
         state[str(member.id)] = {"card": msg.id, "channel": cards.id, "status": "pending"}
         store.save(STATE, state)

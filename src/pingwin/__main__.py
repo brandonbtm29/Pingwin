@@ -9,9 +9,8 @@ import time
 from logging.handlers import RotatingFileHandler
 
 import discord
-from dotenv import load_dotenv
 
-from .config import PROJECT_ROOT, ConfigError, MissingSettings, data_dir, load_config
+from .config import PROJECT_ROOT, ConfigError, MissingSettings, data_dir, load_config, load_env
 
 EXIT_CONFIG_ERROR = 2  # scripts/run_pingwin.cmd stops instead of restarting on this
 EXIT_ALREADY_RUNNING = 4
@@ -41,8 +40,7 @@ def _single_instance():
 
 
 def _load_env() -> None:
-    load_dotenv(PROJECT_ROOT / ".env")  # per-PC: PINGWIN_DATA, PINGWIN_NODE
-    load_dotenv(data_dir() / "secrets.env")  # shared: DISCORD_TOKEN (doesn't override the above)
+    load_env()  # per-PC .env (PINGWIN_DATA, PINGWIN_NODE), then the shared secrets.env (DISCORD_TOKEN, ...)
 
 
 def _setup_logging() -> None:

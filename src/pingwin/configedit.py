@@ -7,7 +7,9 @@ file is replaced, so a bad value never reaches disk.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
+import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 
@@ -81,6 +83,7 @@ def save_roles(
                 t["title"] = m.title
                 t["description"] = m.description
                 t["mode"] = m.mode
+                t["timezone"] = m.is_timezone
                 t["roles"] = _roles_aot(m.roles)
                 extra_aot.append(t)
         # Arrays of tables have to come after the plain values, and "menu" before "extra" reads best.
@@ -125,6 +128,34 @@ def save_failover(
     return edit_config(change, path)
 
 
+SECRET_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def check_secret(name: str, value: str) -> str:
+    """A secrets.env value as it will be saved: one line, no control characters. Raises ConfigError.
+
+    secrets.env is NAME=value per line and every PC loads it into its environment, so a line break (or any
+    other control character) in a value would let someone add their own lines, like GIT_CONFIG_* settings."""
+    if not SECRET_NAME_RE.fullmatch(name):
+        raise ConfigError(f"{name!r} isn't a setting name secrets.env can hold.")
+    value = value.strip()
+    if any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in value):
+        raise ConfigError(f"{name} can't contain line breaks or other hidden characters. Paste just the key itself.")
+    return value
+
+
+def secret_changes(key: str, values: dict) -> dict[str, str]:
+    """The secrets a Features-tab save would change (True/False/None just mean "set"/"not set": no change)."""
+    from .features import SECTION_BY_KEY
+
+    section = SECTION_BY_KEY.get(key) or {"fields": []}
+    return {
+        f["key"]: values[f["key"]]
+        for f in section["fields"]
+        if f["type"] == "secret" and f["key"] in values and values[f["key"]] not in (None, True, False)
+    }
+
+
 def save_section(key: str, values: dict, path: Path | None = None) -> Config:
     """Save one Features-tab section. Secrets go to secrets.env; everything else to config.toml."""
     from .features import SECTION_BY_KEY, to_toml_value
@@ -132,7 +163,8 @@ def save_section(key: str, values: dict, path: Path | None = None) -> Config:
     section = SECTION_BY_KEY.get(key)
     if section is None:
         raise ConfigError(f"Unknown settings section {key!r}")
-    secrets = {}
+    # Checked before anything is written, so a bad secret doesn't leave half a save behind.
+    secrets = {name: check_secret(name, str(value)) for name, value in secret_changes(key, values).items()}
 
     def change(doc: TOMLDocument) -> None:
         table = _table(doc, key)
@@ -141,8 +173,6 @@ def save_section(key: str, values: dict, path: Path | None = None) -> Config:
                 continue
             value = values[field["key"]]
             if field["type"] == "secret":
-                if value not in (None, True, False):  # True/False just mean "set"/"not set"
-                    secrets[field["key"]] = str(value).strip()
                 continue
             toml_value = to_toml_value(field, value)
             if field["type"] == "rows":
@@ -164,10 +194,9 @@ def save_section(key: str, values: dict, path: Path | None = None) -> Config:
 
 def save_secrets(values: dict[str, str]) -> None:
     """Set (or clear, with "") lines in secrets.env, keeping everything else."""
-    import os
-
     from .config import data_dir
 
+    values = {name: check_secret(name, str(value)) for name, value in values.items()}
     path = data_dir() / "secrets.env"
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     remaining = dict(values)

@@ -11,7 +11,7 @@ import logging
 import os
 import shutil
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,15 +26,56 @@ def state_dir() -> Path:
     return d
 
 
+# State files that couldn't be read (locked, permissions, ...) and so mustn't be overwritten with
+# whatever was made up in their place. Cleared by the next successful load.
+_unreadable: set[str] = set()
+
+
+def set_aside(path: Path, reason: object) -> Path | None:
+    """Move a settings/state file that can't be parsed (e.g. a hand edit with a typo) out of the way as
+    <name>.corrupt-<timestamp>.json, so the next save can't overwrite what was in it. Raises OSError if it can't."""
+    try:
+        if not path.read_bytes().strip():
+            return None  # empty: nothing to keep
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dst = path.with_name(f"{path.stem}.corrupt-{stamp}{path.suffix}")
+        n = 1
+        while dst.exists():
+            n += 1
+            dst = path.with_name(f"{path.stem}.corrupt-{stamp}-{n}{path.suffix}")
+        os.replace(path, dst)
+    except OSError as e:
+        log.warning("%s is damaged (%s) and couldn't be moved aside: %s", path.name, reason, e)
+        raise
+    log.warning(
+        "%s is damaged (%s). Moved it to %s and started fresh; fix it and rename it back to restore it.",
+        path.name,
+        reason,
+        dst.name,
+    )
+    return dst
+
+
 def load(name: str, default: Callable[[], Any] = dict) -> Any:
     path = state_dir() / f"{name}.json"
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
+        _unreadable.discard(name)
         return default()
-    except (OSError, ValueError) as e:
-        log.warning("Couldn't read %s (%s); starting fresh", path.name, e)
+    except ValueError as e:  # broken JSON: keep the file, then carry on without it
+        try:
+            set_aside(path, e)
+            _unreadable.discard(name)
+        except OSError:
+            _unreadable.add(name)
         return default()
+    except OSError as e:  # couldn't read it right now; it may be fine, so don't let a save replace it
+        log.warning("Couldn't read %s (%s); changes to it won't be saved until it can be read", path.name, e)
+        _unreadable.add(name)
+        return default()
+    _unreadable.discard(name)
+    return data
 
 
 def backups_dir() -> Path:
@@ -76,6 +117,9 @@ def backups(name: str) -> list[dict[str, Any]]:
 
 def save(name: str, data: Any) -> None:
     path = state_dir() / f"{name}.json"
+    if name in _unreadable:
+        log.error("Not saving %s: the copy on disk couldn't be read, and saving would replace it", path.name)
+        return
     tmp = path.with_name(path.name + ".pingwin-tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     os.replace(tmp, path)

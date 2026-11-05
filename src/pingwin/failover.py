@@ -6,10 +6,12 @@ commands. The others wait on *standby* and stay quiet.
 The active PC checks in by editing a status message in a mod-only channel
 (the "lease"). If check-ins stop for `takeover_after_seconds` (PC off,
 internet down, crashed), the next PC in `[failover] pcs` takes over. A PC
-earlier in that list takes the job back as soon as it returns.
+earlier in that list takes the job back once it has been online for
+WARMUP_SECONDS, so SyncThing can bring its copy of state/ up to date first.
 
-Discord's own timestamps on the message are used, so it doesn't matter if the
-PCs' clocks disagree a little.
+A lease counts as gone quiet when this PC has seen the very same message,
+unedited, for `takeover_after_seconds` by its own monotonic clock. The PCs'
+clocks are never compared, so it doesn't matter if they disagree.
 """
 
 from __future__ import annotations
@@ -42,6 +44,9 @@ ALERT_HEADER = "⚠️ **Pingwin backup alert**"
 _ALERT_LINE = re.compile(r"^-# alert:(\{.*\})\s*$", re.MULTILINE)
 CHECKIN_EVERY = 30 * 60
 QUIET_AFTER = 65 * 60  # two missed check-ins (plus a little slack) before an alert
+# A PC that comes back (started, woke up, internet back) waits this long online before taking the job back from
+# a lower-ranked PC that's still checking in, so SyncThing can deliver what that PC wrote to state/ meanwhile.
+WARMUP_SECONDS = 3 * 60
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,8 @@ class Lease:
     renewed_at: datetime  # Discord's timestamp of the last check-in
 
     def age(self, now: datetime) -> float:
+        """For display only: compares another PC's clock with Discord's. Takeover decisions use the
+        coordinator's own monotonic measurement instead (see should_lead)."""
         return (now - self.renewed_at).total_seconds()
 
 
@@ -109,6 +116,11 @@ def render_alert(pc: str, last: datetime | None, back: datetime | None = None) -
     return f"{ALERT_HEADER}\n{body}\n-# alert:{payload}"
 
 
+def _alert_open(msg: discord.Message) -> bool:
+    """An alert that hasn't been edited to say the PC checked in again."""
+    return "✅" not in (msg.content or "")
+
+
 def quiet_pcs(pcs: list[str], me: str, checkins: dict[str, datetime], now: datetime) -> list[str]:
     """Listed PCs (other than this one) whose last check-in is missing or too old."""
     out = []
@@ -121,15 +133,22 @@ def quiet_pcs(pcs: list[str], me: str, checkins: dict[str, datetime], now: datet
     return out
 
 
-def should_lead(lease: Lease | None, me: Node, now: datetime, cfg: FailoverConfig) -> bool:
-    """Decide whether this PC should be the active one."""
+def should_lead(
+    lease: Lease | None, me: Node, quiet_for: float, cfg: FailoverConfig, *, warmed_up: bool = True
+) -> bool:
+    """Decide whether this PC should be the active one.
+
+    quiet_for: how long this PC has seen the lease go without a check-in, by its own monotonic clock.
+    warmed_up: this PC has been online for WARMUP_SECONDS, so its shared files have had time to sync.
+    """
     if lease is None:
         return True  # nobody has ever claimed it
     if lease.node.casefold() == me.name.casefold():
         return True  # it's us: keep renewing
-    if lease.age(now) > cfg.takeover_after_seconds:
+    if quiet_for > cfg.takeover_after_seconds:
         return True  # the active PC went quiet
-    return cfg.rank(me.name) < cfg.rank(lease.node)  # we're earlier in the list: take it back
+    # We're earlier in the list: take it back, but only once our copy of state/ has had time to catch up.
+    return warmed_up and cfg.rank(me.name) < cfg.rank(lease.node)
 
 
 class Coordinator:
@@ -147,14 +166,22 @@ class Coordinator:
         self._last_watch: float = 0.0
         self.checkins: dict[str, datetime] = {}  # other PCs' latest check-ins (Discord's timestamps)
         self.quiet: list[str] = []  # PCs that haven't checked in lately
+        # The lease message as last seen, (message id, Discord's edit time), and time.monotonic() when it last
+        # changed: a lease that stays exactly the same for takeover_after_seconds has gone quiet.
+        self._lease_seen: tuple[int, datetime] | None = None
+        self._lease_changed_at = 0.0
+        self._online_since: float | None = None  # time.monotonic() since we've been reaching Discord without a gap
+        self._last_online: tuple[float, float] | None = None  # (time.monotonic(), time.time()) of the last scan
 
     async def tick(self) -> None:
         cfg = self.bot.config.failover
         if not cfg.active:
-            self._set_active(True, "failover is off (single PC)")
+            off = "failover has no status channel" if cfg.missing_channel else "failover is off"
+            self._set_active(True, f"{off} (single PC)")
             self.leader = self.bot.node.name
             return
         if not self.bot.gateway_connected:
+            self._online_since = None
             self._check_stale()
             return
 
@@ -168,8 +195,10 @@ class Coordinator:
         current = messages[0] if messages else None
         lease = parse_lease(current.content, current.edited_at or current.created_at) if current else None
         now = discord.utils.utcnow()
+        warmed_up = self._note_online()
+        quiet_for = self._lease_quiet_for(current)
 
-        if should_lead(lease, self.bot.node, now, cfg):
+        if should_lead(lease, self.bot.node, quiet_for, cfg, warmed_up=warmed_up):
             if not self.active or self.active_since is None:
                 self.active_since = now
             content = render_lease(self.bot.node, cfg.describe(self.bot.node.name), self.active_since, now)
@@ -184,7 +213,7 @@ class Coordinator:
             self.last_lease = Lease(self.bot.node.name, now)
             if lease is None or lease.node.casefold() == self.bot.node.name.casefold():
                 reason = "no one else is active"
-            elif lease.age(now) > cfg.takeover_after_seconds:
+            elif quiet_for > cfg.takeover_after_seconds:
                 reason = f"took over from {lease.node} (it went quiet)"
             else:
                 reason = f"took over from {lease.node} (this PC is earlier in the list)"
@@ -194,8 +223,31 @@ class Coordinator:
             assert lease is not None
             self.leader = lease.node
             self.last_lease = lease
-            self._set_active(False, f"{lease.node} is active")
+            reason = f"{lease.node} is active"
+            if cfg.rank(self.bot.node.name) < cfg.rank(lease.node):
+                reason += f"; this PC takes over after {WARMUP_SECONDS // 60} minutes online, once shared files sync"
+            self._set_active(False, reason)
             await self._check_in(channel, checkins, now)
+
+    def _note_online(self) -> bool:
+        """Called after each successful look at the status channel. True once this PC has been online, without
+        a gap long enough for a backup to have taken over (asleep, internet down), for WARMUP_SECONDS."""
+        mono, wall = time.monotonic(), time.time()
+        if self._last_online is not None:
+            gap = max(mono - self._last_online[0], wall - self._last_online[1])  # monotonic may skip sleep
+            if gap > self.bot.config.failover.heartbeat_seconds * 2 + 10:
+                self._online_since = None
+        self._last_online = (mono, wall)
+        if self._online_since is None:
+            self._online_since = mono
+        return mono - self._online_since >= WARMUP_SECONDS
+
+    def _lease_quiet_for(self, current: discord.Message | None) -> float:
+        """Seconds the lease message has stayed exactly the same, by this PC's monotonic clock."""
+        seen = (current.id, current.edited_at or current.created_at) if current else None
+        if seen != self._lease_seen:
+            self._lease_seen, self._lease_changed_at = seen, time.monotonic()
+        return time.monotonic() - self._lease_changed_at
 
     async def _check_in(self, channel, checkins: dict[str, discord.Message], now: datetime) -> None:
         """On standby: refresh this PC's check-in message every 30 minutes."""
@@ -229,12 +281,13 @@ class Coordinator:
         self.quiet = quiet_pcs(list(cfg.pcs), self.bot.node.name, self.checkins, now)
         try:
             for pc in self.quiet:
-                if pc.casefold() not in alerts:
+                newest = alerts.get(pc.casefold())
+                if newest is None or not _alert_open(newest):  # a resolved alert is about an earlier outage
                     last = next((t for n, t in self.checkins.items() if n.casefold() == pc.casefold()), None)
                     await channel.send(render_alert(pc, last), allowed_mentions=discord.AllowedMentions.none())
                     log.warning("Backup %s hasn't checked in", pc)
             for pc, msg in alerts.items():
-                if pc not in {q.casefold() for q in self.quiet} and "✅" not in msg.content:
+                if pc not in {q.casefold() for q in self.quiet} and _alert_open(msg):
                     back = next((t for n, t in self.checkins.items() if n.casefold() == pc), now)
                     name = parse_tagged(msg.content, _ALERT_LINE) or pc
                     await msg.edit(content=render_alert(name, None, back))
@@ -249,6 +302,7 @@ class Coordinator:
             self._set_active(False, "couldn't check in with Discord; a backup has likely taken over")
 
     async def after_error(self) -> None:
+        self._online_since = None  # couldn't reach Discord properly: warm up again before taking the job back
         self._check_stale()
 
     async def _channel(self, channel_id: int | None) -> discord.abc.Messageable | None:
@@ -273,7 +327,7 @@ class Coordinator:
 
     async def _scan(self, channel: discord.abc.Messageable):
         """Pingwin's messages in the status channel: lease messages (oldest first; the oldest is the
-        real one), each PC's check-in message, and open alerts (newest per PC, by lowercase name)."""
+        real one), each PC's check-in message, and the newest alert per PC (open or resolved, by lowercase name)."""
         status: list[discord.Message] = []
         checkins: dict[str, discord.Message] = {}
         alerts: dict[str, discord.Message] = {}

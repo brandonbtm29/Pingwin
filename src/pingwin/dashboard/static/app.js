@@ -25,6 +25,23 @@ function put(node, ...kids) {
   node.replaceChildren(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false));
 }
 
+// Rebuilding a list drops keyboard focus to <body>. Note which row and control had it, then put it back.
+function focusSpot(list) {
+  const a = document.activeElement;
+  if (!a || a === list || !list.contains(a)) return null;
+  return { row: [...list.children].findIndex((r) => r.contains(a)), tag: a.tagName, label: a.getAttribute("aria-label") };
+}
+function restoreFocus(list, spot, row = spot?.row) {
+  const now = document.activeElement;
+  if (!spot || (now && now !== document.body)) return;  // focus already went somewhere on purpose
+  const rows = list.children;
+  const r = rows[Math.max(0, Math.min(row, rows.length - 1))];
+  if (!r) return;
+  const usable = (x) => !x.disabled && !x.hidden;
+  const same = [...r.querySelectorAll(spot.tag)].find((x) => x.getAttribute("aria-label") === spot.label && usable(x));
+  (same || [...r.querySelectorAll("button, input, select")].find(usable))?.focus();
+}
+
 // Turn "**bold**" from report lines into safe DOM.
 function richText(text) {
   const frag = document.createDocumentFragment();
@@ -97,7 +114,8 @@ async function loadState() {
     featuresWithoutState = false;
     renderFeatures();
   }
-  if (!rolesDirty) { rolesDraft = clone(state.config.roles); bases.roles = state.versions.roles; }
+  // While someone is in the Role menu form, keep the draft its rows are wired to (renderRoles doesn't rebuild them then).
+  if (!rolesDirty && !(rolesDraft && rolesFormFocused())) { rolesDraft = clone(state.config.roles); bases.roles = state.versions.roles; }
   if (!pcsDirty) { pcsDraft = clone(state.config.failover); bases.failover = state.versions.failover; }
   renderHeader();
   renderViewer();
@@ -239,9 +257,11 @@ function buildMenuEditor() {
   buildRoleRows();
 }
 
+const rolesFormFocused = () => !!document.activeElement?.closest("#tab-roles");
+
 function renderRoles() {
   const d = rolesDraft;
-  if (document.activeElement?.closest("#tab-roles")) {
+  if (rolesFormFocused()) {
     // Don't rebuild the form under the cursor during background refreshes.
     refreshRoleBadges();
   } else {
@@ -315,7 +335,9 @@ function buildRoleRows() {
       if (j < 0 || j >= rows.length) return;
       [rows[i], rows[j]] = [rows[j], rows[i]];
       markRolesDirty();
+      const spot = focusSpot(tbody);
       buildRoleRows();
+      restoreFocus(tbody, spot, j);  // keep focus on the row that moved
     };
     tbody.append(el("tr", {},
       el("td", {}, el("div", { class: "move" },
@@ -326,7 +348,11 @@ function buildRoleRows() {
       el("td", {}, el("input", { value: row.description, maxlength: "200", placeholder: m.timezone ? "Optional" : "What they get pinged about", "aria-label": "Description", oninput: update("description") })),
       m.timezone ? el("td", { class: "c-zone" }, zoneSelect(row)) : null,
       el("td", { class: "c-status", "data-badge": i }, roleBadge(row.name, !m.timezone)),
-      el("td", {}, el("button", { class: "btn icon", title: "Remove", "aria-label": "Remove", onclick: () => { rows.splice(i, 1); markRolesDirty(); buildRoleRows(); buildMenuPicker(); } }, "✕")),
+      el("td", {}, el("button", { class: "btn icon", title: "Remove", "aria-label": "Remove", onclick: () => {
+        const spot = focusSpot(tbody);
+        rows.splice(i, 1); markRolesDirty(); buildRoleRows(); buildMenuPicker();
+        if (rows.length) restoreFocus(tbody, spot); else if (spot) $("r-add").focus();
+      } }, "✕")),
     ));
   });
   $("r-add").disabled = rows.length >= MAX_ROLES;
@@ -452,8 +478,10 @@ function renderPcs() {
   buildPcList();
 }
 
-function buildPcList() {
+// Rebuilt every 10 seconds too; focusRow says where keyboard focus goes (default: the same row and button).
+function buildPcList(focusRow) {
   const ol = $("p-list");
+  const spot = focusSpot(ol);
   ol.replaceChildren();
   const me = state.node.toLowerCase();
   const leader = (state.leader || "").toLowerCase();
@@ -462,7 +490,7 @@ function buildPcList() {
       const j = i + delta;
       [pcsDraft.pcs[i], pcsDraft.pcs[j]] = [pcsDraft.pcs[j], pcsDraft.pcs[i]];
       markPcsDirty();
-      buildPcList();
+      buildPcList(j);
     };
     ol.append(el("li", {},
       el("span", { class: "name" }, name),
@@ -479,6 +507,8 @@ function buildPcList() {
   const listed = pcsDraft.pcs.some((p) => p.toLowerCase() === me);
   $("p-add-me").hidden = listed;
   $("p-add-me").textContent = `Add this PC (${state.node})`;
+  if (pcsDraft.pcs.length) restoreFocus(ol, spot, focusRow ?? spot?.row);
+  else if (spot) $("p-new").focus();
 }
 
 // Standby PCs check in every 30 minutes; the answering PC sees those check-ins.
@@ -614,11 +644,21 @@ $("pair-accept").addEventListener("click", async () => {
 // ---------- features -------------------------------------------------------
 let featureData = null;
 const featureDrafts = {};
+const featuresDirty = () => Object.values(featureDrafts).some((d) => d.dirty);
+let featuresSeq = 0;         // only the newest /api/features answer is used
+let featuresForced = false;  // a save asked for a reload that a newer request has taken over
 
 async function loadFeatures(force = false) {
-  if (featureData && !force && Object.values(featureDrafts).some((d) => d.dirty)) return;
+  if (featureData && !force && featuresDirty()) return;
+  const seq = ++featuresSeq;
+  if (force) featuresForced = true;
   const [features] = await Promise.allSettled([api("/api/features"), state ? null : Promise.race([firstState, new Promise((r) => setTimeout(r, 8000))])]);
+  if (seq !== featuresSeq) return;  // an older, slower answer: a newer one is on its way
   if (features.status === "rejected") { toast(features.reason.message, true); return; }
+  // Someone may have started editing while this was loading. (renderFeatures keeps dirty sections anyway.)
+  const forced = featuresForced;
+  featuresForced = false;
+  if (featureData && !forced && featuresDirty()) return;
   featureData = features.value;
   featuresWithoutState = !state;
   $("f-restart").hidden = !featureData.restart_needed;
@@ -662,10 +702,35 @@ function fieldInput(field, value, onChange) {
   else if (t === "number") input = el("input", { type: "number", min: field.min, max: field.max, value: value ?? "", oninput: (e) => onChange(e.target.value) });
   else if (t === "textarea") input = el("textarea", { rows: "3", oninput: (e) => onChange(e.target.value) }, value || "");
   else if (t === "select") { input = el("select", { onchange: (e) => onChange(e.target.value) }, field.options.map(([v, l]) => el("option", { value: v }, l))); input.value = value; }
-  else if (t === "secret") input = el("input", { type: "password", autocomplete: "off", placeholder: value ? "Saved ✓ (type to replace)" : "Not set", oninput: (e) => onChange(e.target.value) });
+  else if (t === "secret") return secretInput(field, value, onChange);
   else if (t === "rows") return rowsInput(field, value || [], onChange);
   else input = el("input", { value: value ?? "", oninput: (e) => onChange(e.target.value) });
   return el("label", {}, field.label, input);
+}
+
+// Secrets come from the server as true/false ("set"/"not set"); sending that back leaves the secret alone,
+// and "" deletes it. So an empty box means "unchanged", and clearing a saved secret takes the Clear button.
+function secretInput(field, saved, onChange) {
+  const hint = saved ? "Saved ✓ (type to replace)" : "Not set";
+  if (state?.viewer && !state.viewer.full_access) {  // keys can only be changed by the PC's owner or full-access admins
+    const locked = el("input", { type: "password", disabled: true, placeholder: hint, "aria-label": field.label });
+    return el("label", {}, field.label, locked, el("span", { class: "hint" }, "Only the PC's owner (or an admin with full access) can change keys."));
+  }
+  const input = el("input", { type: "password", autocomplete: "off", placeholder: hint, "aria-label": field.label,
+    oninput: (e) => onChange(e.target.value.trim() ? e.target.value : saved) });
+  if (!saved) return el("label", {}, field.label, input);
+  let clearing = false;
+  const btn = el("button", { class: "btn small", type: "button", "aria-label": `Clear ${field.label}`, onclick: () => {
+    if (!clearing && !window.confirm(`Remove the saved ${field.label}? It's deleted when you press Save.`)) return;
+    clearing = !clearing;
+    input.value = "";
+    input.disabled = clearing;
+    input.placeholder = clearing ? "Will be removed when you save" : hint;
+    btn.textContent = clearing ? "Undo" : "Clear";
+    btn.setAttribute("aria-label", `${clearing ? "Keep" : "Clear"} ${field.label}`);
+    onChange(clearing ? "" : saved);
+  } }, "Clear");
+  return el("label", {}, field.label, el("div", { class: "with-action" }, input, btn));
 }
 
 // A channel picker with a button that makes a private mod-only channel when none is picked.
@@ -696,8 +761,8 @@ function rowsInput(field, rows, onChange) {
       field.columns.map((col) => {
         const set = (v) => { row[col.key] = v; onChange(rows); };
         let inp;
-        if (col.type === "role") { inp = el("select", { onchange: (e) => set(e.target.value) }, roleOptions(row[col.key])); inp.value = row[col.key] || ""; }
-        else if (col.type === "channel") { inp = el("select", { onchange: (e) => set(e.target.value) }, channelOptions(row[col.key])); inp.value = row[col.key] || ""; }
+        if (col.type === "role") { inp = el("select", { "aria-label": col.label, onchange: (e) => set(e.target.value) }, roleOptions(row[col.key])); inp.value = row[col.key] || ""; }
+        else if (col.type === "channel") { inp = el("select", { "aria-label": col.label, onchange: (e) => set(e.target.value) }, channelOptions(row[col.key])); inp.value = row[col.key] || ""; }
         else if (col.type === "toggle") inp = el("input", { type: "checkbox", class: "cell-check", checked: !!row[col.key], "aria-label": col.label, onchange: (e) => set(e.target.checked) });
         else inp = el("input", { value: row[col.key] || "", "aria-label": col.label, oninput: (e) => set(e.target.value) });
         return el("td", {}, inp);
@@ -797,7 +862,11 @@ function renderFeatures() {
   $("f-guide").href = guideUrl("");
   const box = $("f-sections");
   renderSubtabs();
+  // Sections with unsaved edits stay as they are (same draft, inputs and base version); the rest show the saved settings.
+  const shown = new Map([...box.children].map((n) => [n.dataset.key, n]));
   box.replaceChildren(...featureData.sections.map((section) => {
+    const kept = featureDrafts[section.key]?.dirty && shown.get(section.key);
+    if (kept) return kept;
     const values = JSON.parse(JSON.stringify(featureData.values[section.key]));
     const draft = featureDrafts[section.key] = { values, dirty: false, base: featureData.versions?.[section.key] };
     const saveBtn = el("button", { class: "btn primary", disabled: true }, "Save");
@@ -975,6 +1044,7 @@ async function loadConflicts() {
     el("p", { class: "hint" }, `The other copy was saved ${c.when} (UTC) on the PC whose SyncThing ID starts with ${c.device}.`,
       c.same ? " It's identical to the current one." : ""),
     c.same ? null : el("details", {}, el("summary", {}, "What's different"), el("pre", { class: "diff" }, c.diff)),
+    c.locked ? el("p", { class: "hint" }, "This file holds keys or sign-in links, so only the PC's owner (or an admin with full access) can sort it out.") :
     el("div", { class: "row-actions" },
       el("button", { class: "btn primary", onclick: () => resolveConflict(c.file, "keep_current") }, "Keep the current version"),
       c.same ? null : el("button", { class: "btn", onclick: () => { if (window.confirm(`Replace the current ${c.original} with the other copy?`)) resolveConflict(c.file, "use_other"); } }, "Use the other copy")),
@@ -1059,7 +1129,7 @@ function renderRemote() {
       : el("button", { class: "btn primary", disabled: !!ts.port_taken, onclick: () => remoteAction({ action: "funnel_on" }) }, "Put it online")) : null);
 
   const portal = r.app_id ? `https://discord.com/developers/applications/${r.app_id}/oauth2` : "https://discord.com/developers/applications";
-  const secretInput = el("input", { type: "password", autocomplete: "off", placeholder: r.secret_set ? "Saved ✓ (paste to replace)" : "Paste the Client Secret", oninput: (e) => { remoteDraft.client_secret = e.target.value; markRemote(); } });
+  const secretInput = el("input", { type: "password", autocomplete: "off", "aria-label": "Discord Client Secret", placeholder: r.secret_set ? "Saved ✓ (paste to replace)" : "Paste the Client Secret", oninput: (e) => { remoteDraft.client_secret = e.target.value; markRemote(); } });
   const s3 = stepItem(r.secret_set, "Turn on Sign in with Discord",
     el("ol", { class: "sub-steps" },
       el("li", {}, "Open the ", el("a", { href: portal, target: "_blank", rel: "noreferrer" }, "Developer Portal → OAuth2"), " page for Pingwin."),

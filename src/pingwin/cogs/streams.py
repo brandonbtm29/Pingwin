@@ -200,7 +200,11 @@ class StreamAlerts(commands.Cog):
             keys = [x["key"] for x in live]
             new = [k for k in keys if k not in rec["seen"]]
             if live and new and not rec["live"]:
-                await self.announce(name, live)
+                if not await self.announce(name, live):
+                    continue  # not posted: try again at the next check
+                rec["live"], rec["seen"] = True, (rec["seen"] + new)[-20:]
+                store.save(STATE, state)  # saved straight away, so nothing later can make it post twice
+                continue
             rec["live"] = bool(live)
             rec["seen"] = (rec["seen"] + new)[-20:]
         store.save(STATE, state)
@@ -227,36 +231,42 @@ class StreamAlerts(commands.Cog):
         state = store.load(STATE)
         rec = state.setdefault(f"discord:{member.id}", {"live": False, "at": 0})
         now = time.time()
-        if stopped:
-            rec["live"] = False
-        elif not rec["live"]:
-            rec["live"] = True
-            if now - rec.get("at", 0) > DISCORD_REPEAT_GAP:
+        # "live" is only a note: it isn't checked, because a stream that ended while Pingwin was restarting (or
+        # another PC was answering) never cleared it. Their voice state says this is a new Go Live; only the
+        # repeat gap holds back a second alert.
+        rec["live"] = started
+        if started and now - rec.get("at", 0) > DISCORD_REPEAT_GAP:
+            game = next((a.name for a in getattr(member, "activities", ()) if isinstance(a, discord.Game)), "")
+            live = [
+                {
+                    "platform": "Discord",
+                    "line": f"Watch in {after.channel.mention}",
+                    "title": "",
+                    "game": game,
+                    "url": after.channel.jump_url,
+                }
+            ]
+            if await self.announce(streamer.name or member.display_name, live):
                 rec["at"] = now
-                game = next((a.name for a in getattr(member, "activities", ()) if isinstance(a, discord.Game)), "")
-                live = [
-                    {
-                        "platform": "Discord",
-                        "line": f"Watch in {after.channel.mention}",
-                        "title": "",
-                        "game": game,
-                        "url": after.channel.jump_url,
-                    }
-                ]
-                await self.announce(streamer.name or member.display_name, live)
         store.save(STATE, state)
 
-    async def announce(self, name: str, live: list[dict]) -> None:
+    async def announce(self, name: str, live: list[dict]) -> bool:
+        """Post the alert. False when it couldn't be posted."""
         channel = self.bot.text_channel(self.cfg.channel)
         if channel is None:
             self._warn("channel", "Stream alerts: no channel set, or Pingwin can't see it")
-            return
+            return False
         role = self.bot.role_named(channel.guild, self.cfg.role)
         text = format_alert(self.cfg.message, name, live)
         if role:
             text = f"{role.mention} {text}"
-        await channel.send(text[:2000], allowed_mentions=discord.AllowedMentions(roles=[role] if role else False))
+        try:
+            await channel.send(text[:2000], allowed_mentions=discord.AllowedMentions(roles=[role] if role else False))
+        except discord.HTTPException as e:
+            self._warn(f"send-{channel.id}", "Stream alerts: couldn't post in #%s: %s", channel.name, e)
+            return False
         log.info("%s is live (%s)", name, ", ".join(x["platform"] for x in live))
+        return True
 
 
 async def setup(bot: Pingwin) -> None:
