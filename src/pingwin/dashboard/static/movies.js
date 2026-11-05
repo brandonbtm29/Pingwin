@@ -1111,15 +1111,21 @@ function renderPending() {
       el("button", { class: "btn small primary", onclick: () => decide(r.id, true) }, "Approve"),
       el("button", { class: "btn small danger", onclick: () => decide(r.id, false) }, "Deny")) : el("span", { class: "hint" }, "waiting"))));
 }
-// A movie night Pingwin noticed in voice: movie mods pick which movie it was.
+// A movie night to confirm: what a poll, the franchise queue or /movie tonight said was on, and/or what
+// Pingwin noticed in voice. Movie mods confirm (or pick) the movie, or say the night was skipped.
 function detectedCard(r, admin) {
   const d = r.data;
+  const exp = d.expected;
+  const label = (m) => (m.year ? `${m.title} (${m.year})` : m.title);
   const other = el("input", { placeholder: "Something else: title (year)", maxlength: "100", "aria-label": "Another movie" });
   return el("li", { class: "detected" },
     el("div", {}, el("strong", {}, `🎬 ${evName(r.series)} on ${fmtDate(d.date)}`),
-      el("span", { class: "hint" }, ` · ${d.voice.people} people in voice for about ${dur(d.voice.minutes)}${d.names && d.names.length ? `: ${d.names.join(", ")}` : ""}`)),
+      exp ? el("span", { class: "hint" }, ` · ${d.why || "Up tonight"}: ${label(exp)}`) : null,
+      d.voice ? el("span", { class: "hint" }, ` · ${d.voice.people} people in voice for about ${dur(d.voice.minutes)}${d.names && d.names.length ? `: ${d.names.join(", ")}` : ""}`) : null),
     admin ? [
-      el("div", { class: "hint" }, "Which movie was it? Picking one adds it to the history (hover a choice to see why it's listed)."),
+      exp ? el("div", { class: "row-actions" },
+        el("button", { class: "btn small primary", onclick: () => decide(r.id, true) }, `Yes, we watched ${label(exp)}`)) : null,
+      el("div", { class: "hint" }, exp ? "Watched something else? Pick it (hover a choice to see why it's listed)." : "Which movie was it? Picking one adds it to the history (hover a choice to see why it's listed)."),
       el("div", { class: "d-picks" }, (d.candidates || []).map((c, i) => el("button", { class: "btn small", title: c.why || "", onclick: () => decide(r.id, true, { choice: i }) },
         c.year ? `${c.title} (${c.year})` : c.title))),
       el("div", { class: "row-actions" }, other,

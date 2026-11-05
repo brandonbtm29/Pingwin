@@ -59,14 +59,25 @@ def make_cog():
         await asyncio.Event().wait()
 
     series = NS(name="FF", full_name="Franchise Fridays", role="", channel=5, showtime="Fri 9:30pm", franchises=True)
-    cfg = NS(enabled=True, series=[series], queue_announce_hours=6, rate=False, auto_details=False, omdb_daily=800)
+    cfg = NS(
+        enabled=True,
+        series=[series],
+        queue_announce_hours=6,
+        rate=False,
+        auto_details=False,
+        omdb_daily=800,
+        approval_channel=5,
+    )
     sent = []
 
     class Channel:
         guild = None
+        id = 5
 
-        async def send(self, text, **kw):
-            sent.append(text)
+        async def send(self, text=None, **kw):
+            if text:  # the movie mods' "did it happen?" cards are embeds
+                sent.append(text)
+            return NS(id=len(sent) + 100)
 
     persona = NS(say=lambda key, **v: f"{key}: {v.get('title', '')} {v.get('part', '')}/{v.get('total', '')}")
     bot = NS(
@@ -75,6 +86,7 @@ def make_cog():
         wait_until_ready=never,
         persona=persona,
         text_channel=lambda cid: Channel(),
+        get_channel=lambda cid: None,
         role_named=lambda g, n: None,
     )
     cog = movienight.MovieNight(bot)
@@ -109,8 +121,16 @@ def test_two_fridays_end_to_end(monkeypatch):
         assert sent == ["franchise_next: Aliens (1986) 2/3"]
         await cog.run_queues()
         assert len(sent) == 1  # once
+        mod = NS(display_name="Mod", name="mod")
+
+        async def confirm(day):
+            (rid,) = [r["id"] for r in movies.load()["pending"].values() if r["data"]["date"] == day]
+            return await cog.decide(rid, True, mod)
+
         clock["now"] = datetime(2026, 10, 30, 21, 31, tzinfo=ET)
-        await cog.run_queues()  # it started: logged
+        await cog.run_queues()  # it started: the movie mods are asked
+        assert movies.load()["history"] == []
+        await confirm("2026-10-30")  # a mod confirms it after the movie: logged
         lib = movies.load()
         assert [(movies.label(lib["movies"][e["movie_id"]]), e["date"]) for e in lib["history"]] == [
             ("Aliens (1986)", "2026-10-30")
@@ -119,7 +139,8 @@ def test_two_fridays_end_to_end(monkeypatch):
         await cog.run_queues()
         assert sent[-1] == "franchise_next: Alien 3 (1992) 3/3"
         clock["now"] = datetime(2026, 11, 6, 22, 0, tzinfo=ET)
-        await cog.run_queues()  # last part logged: franchise done
+        await cog.run_queues()
+        await confirm("2026-11-06")  # last part logged: franchise done
         assert sent[-1].startswith("franchise_done")
         assert franchise.finished(store.load(movienight.STATE)["ff"]["queue"])
         clock["now"] = datetime(2026, 11, 13, 16, 0, tzinfo=ET)

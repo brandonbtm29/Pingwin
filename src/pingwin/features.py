@@ -116,7 +116,8 @@ SECTIONS: list[dict[str, Any]] = [
                 "rows",
                 "Which roles to ping",
                 [],
-                "An event pings a role when its name or description contains any of that role's keywords.",
+                "An event pings a role when its name has one of that role's keywords as a whole word (any case; "
+                "game also matches Games). The description is only checked when nothing matches the name.",
                 add_label="+ Add a role",
                 columns=[
                     {"key": "role", "type": "role", "label": "Role"},
@@ -400,7 +401,16 @@ SECTIONS: list[dict[str, Any]] = [
                 half=True,
             ),
             F("multiple", "toggle", "Let people vote for more than one", False, group="Polls", half=True),
-            F("mark_watched", "toggle", "Mark the winner watched", True, group="Polls", half=True),
+            F(
+                "mark_watched",
+                "toggle",
+                "Ask the movie mods to confirm the winner",
+                True,
+                "After the showing, the mods get a card: confirming adds it to the history and marks it watched. "
+                "Skipped weeks stay out of the history.",
+                group="Polls",
+                half=True,
+            ),
             F(
                 "queue_announce_hours",
                 "number",

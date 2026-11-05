@@ -58,7 +58,9 @@ the first menu was posted, so the menu roles themselves (and later ones, like a 
 ## Event reminders
 
 Create an event in Discord as usual (the **Events** button at the top of the channel list). Pingwin reads
-its name and description and pings every role whose keywords appear in it.
+its name and pings every role whose keywords appear in it (the description only counts when nothing
+matches the name, so a Friday event that says "movie night" in its description doesn't ping the Monday
+movie role).
 
 1. Turn on **Event reminders** and pick the channel to post in (for example `#events`).
 2. Under **Which roles to ping**, add a row per role with its keywords, for example:
@@ -68,7 +70,9 @@ its name and description and pings every role whose keywords appear in it.
    | Movie Night | movie, film, cinema |
    | Gamer | game, gaming, lan |
 
-   Keywords match the start of a word, so `game` also matches "Games" and "gaming".
+   Keywords match whole words, any case, and a plural is fine: `game` matches "Game Day" and "Games" but
+   not "Endgame", and `art` doesn't match "Arthur". A two-word keyword like `game day` also matches
+   "Gameday".
 3. Choose whether to announce new events, how many minutes before to remind (0 = don't), whether to post
    when it starts, and whether to also ping people who clicked *Interested*.
 
@@ -175,7 +179,7 @@ Passing `hours` still overrides it.
 | `/pingwin movie nominate series title [year]` | Add a movie to the watchlist (goes to the mods first, if approvals are on) |
 | `/pingwin movie list series` | Show the watchlist |
 | `/pingwin movie remove series movie` | Take one off |
-| `/pingwin movie watched series movie` | Mark watched, or not |
+| `/pingwin movie watched series movie [date] [rate]` | Mark watched (added to the history for `date`, like `11/2`, `Nov 2`, `yesterday` or `monday`; today if left out), or not. No Rate it button unless `rate` is on |
 | `/pingwin movie tonight series title [year]` | Set tonight's movie on a night without a poll |
 | `/pingwin movie history [search]` | What you've watched and how you rated it |
 | `/pingwin movie rate` | Rate the latest movie (if you missed the button) |
@@ -193,10 +197,20 @@ What you control (all on the dashboard):
 - **Poll options come from:** whoever starts the poll ticks the movies from a list, or the oldest
   nominations, or random ones. Plus how many movies go in a poll (2 to 10).
 - **Approvals, Rate it, and how long ratings stay open.**
-- **Poll length, single or multiple votes,** whether the winner is marked watched, and **what happens on a
-  tie** (announce it so a mod decides, or pick one at random).
+- **Poll length, single or multiple votes,** whether the movie mods are asked to confirm the winner, and
+  **what happens on a tie** (announce it so a mod decides, or pick one at random).
 
-The **watchlist** panel on the Features tab lets you mark movies watched, unwatch them, or delete them.
+The watchlists are on the movie pages (the Features tab shows a summary with a link): movie mods can mark a
+movie watched, move it to another watchlist, or remove it there.
+
+### Did movie night happen?
+
+Some weeks get skipped, so nothing joins the history on its own. When a poll picks a movie, the franchise
+queue reaches a part, or someone sets `/pingwin movie tonight`, the movie mods get one card for that night
+in the approval channel (and on the movie pages): **Yes, we watched it** adds it to the history, marks it
+watched and posts the Rate it button (not before the movie is over); picking another movie logs that one
+instead; **We skipped it** leaves the history alone, and a franchise part stays next in line for the following
+week. If the voice check also noticed the night, it adds who was there to the same card.
 
 ### Franchise queues
 
@@ -226,9 +240,8 @@ the movie pages, where mods can approve them too.
 
 ### Rate it
 
-When a movie night ends (the poll winner, or `/pingwin movie tonight`), Pingwin logs it in the history.
-About when the movie finishes (showtime + its runtime), it posts a **Rate it** button in the series'
-channel. Each person gives a score out of 10 and a comment, and can answer the question the previous person
+When a movie mod confirms a movie night (see above), Pingwin logs it in the history and, about when the
+movie finishes (showtime + its runtime), posts a **Rate it** button in the series' channel. Each person gives a score out of 10 and a comment, and can answer the question the previous person
 asked and leave one for the next (like "How many jump scares out of 10?"). The movie pages show each
 question's **From** and **To**. The message keeps a live
 average next to IMDb's, and closes after *Ratings stay open for* hours (48 by default).

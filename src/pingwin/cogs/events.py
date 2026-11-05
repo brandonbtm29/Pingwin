@@ -31,17 +31,29 @@ STATE = "events"
 MISSED_AFTER = timedelta(hours=4)
 
 
-def match_roles(text: str, rules) -> list[str]:
-    """Role names whose keywords appear in the text (at the start of a word, any case)."""
-    found: list[str] = []
-    for rule in rules:
-        if not rule.role or rule.role in found:
-            continue
-        for kw in rule.keywords:
-            if kw and re.search(r"(?<!\w)" + re.escape(kw), text, re.IGNORECASE):
+def keyword_in(keyword: str, text: str) -> bool:
+    """Whether a keyword appears in the text as whole words, any case. A plural is fine ("game" matches
+    "Games") and the words of a phrase can be joined by spaces, dashes or nothing ("game day" matches
+    "Gameday"), but part of another word doesn't count ("art" doesn't match "Arthur")."""
+    words = re.findall(r"\w+", keyword or "")
+    if not words:
+        return False
+    pattern = r"[\s\-_]*".join(re.escape(w) for w in words) + r"(?:'?s|es)?"
+    return re.search(r"(?<!\w)" + pattern + r"(?!\w)", text or "", re.IGNORECASE) is not None
+
+
+def match_roles(text: str, rules, description: str = "") -> list[str]:
+    """Role names whose keywords appear in an event's name (`text`). Only when nothing matches the name is
+    the description checked, so an FFF event that says "movie night" in its description doesn't also ping
+    the MMM role."""
+    for where in (text, description):
+        found: list[str] = []
+        for rule in rules:
+            if rule.role and rule.role not in found and any(keyword_in(kw, where) for kw in rule.keywords):
                 found.append(rule.role)
-                break
-    return found
+        if found:
+            return found
+    return []
 
 
 def reminder_list(cfg) -> list[dict]:
@@ -71,8 +83,7 @@ def due_reminder(
     due = [
         r
         for r in reminders
-        if 0 < minutes_left <= r["minutes"]
-        and (not r["keywords"] or any(re.search(r"(?<!\w)" + re.escape(k), text, re.I) for k in r["keywords"]))
+        if 0 < minutes_left <= r["minutes"] and (not r["keywords"] or any(keyword_in(k, text) for k in r["keywords"]))
     ]
     fresh = [r for r in due if r["minutes"] not in sent]
     if not fresh:
@@ -442,7 +453,7 @@ class EventReminders(commands.Cog):
         guild = event.guild
         roles = [
             r
-            for name in match_roles(f"{event.name}\n{event.description or ''}", self.cfg.rules)
+            for name in match_roles(event.name, self.cfg.rules, event.description or "")
             if (r := self.bot.role_named(guild, name))
         ]
         if (reminder is not None and not reminder["ping"]) or kind == "next":

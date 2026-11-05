@@ -128,7 +128,8 @@ def mark_logged(queue: dict[str, Any] | None, titles: list[str], year: Any, day:
     if item is None or not any(same_movie(item, t, year) for t in titles):
         return None
     item["done"] = day
-    queue["announced_for"] = queue["logged_for"] = day
+    for key in ("announced_for", "logged_for"):  # never back to an earlier showing (the next one may be lined up)
+        queue[key] = max(queue.get(key) or "", day)
     return item
 
 

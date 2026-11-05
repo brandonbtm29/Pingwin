@@ -20,7 +20,7 @@ import random
 import re
 import secrets
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -93,7 +93,11 @@ def describe_request(req: dict[str, Any]) -> str:
     if kind == "remove":
         return f"Take **{d['title']}** off the {req['series']} watchlist"
     if kind == "watched":
-        return f"Mark **{d['title']}** as {'watched' if d.get('watched', True) else 'not watched'} ({req['series']})"
+        if not d.get("watched", True):
+            return f"Mark **{d['title']}** as not watched ({req['series']})"
+        when = f", watched {d['date']}" if d.get("date") else ""
+        rate = " with a Rate it button" if d.get("rate") else ""
+        return f"Mark **{d['title']}** as watched ({req['series']}{when}){rate}"
     if kind == "tonight":
         day = f" ({d['when'][:10]})" if d.get("when") else ""
         return f"Set tonight's {req['series']} movie{day} to **{d['title']}**"
@@ -104,11 +108,13 @@ def describe_request(req: dict[str, Any]) -> str:
         imdb = f" · <https://www.imdb.com/title/{d['imdb_id']}/>" if d.get("imdb_id") else ""
         return f"Add **{d['title']}**{_yr(d)} to the {req['series']} history, watched {d['date']}{imdb}"
     if kind == "detected":
-        v = d.get("voice", {})
-        return (
-            f"{req['series']} on {d['date']}: {v.get('people', '?')} people were in voice for about "
-            f"{_duration(v.get('minutes', 0))}. Which movie was it?"
-        )
+        v = d.get("voice")
+        parts = [f"{req['series']} on {d['date']}"]
+        if d.get("expected"):
+            parts.append(f"{d.get('why') or 'up tonight'}: {d['expected']['title']}{_yr(d['expected'])}")
+        if v:
+            parts.append(f"{v.get('people', '?')} people were in voice for about {_duration(v.get('minutes', 0))}")
+        return ": ".join(parts[:1]) + (" · " + " · ".join(parts[1:]) if parts[1:] else "") + ". Which movie was it?"
     return kind
 
 
@@ -162,6 +168,61 @@ def movie_card(m: dict[str, Any], why: str = "") -> discord.Embed:
     if why:
         e.set_footer(text=why[:200])
     return e
+
+
+_MONTHS = {
+    m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)
+}
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def parse_watch_date(text: str, today: date) -> date | None:
+    """When a movie was watched, from '2026-11-02', '11/2', '11/2/2026', 'Nov 2', 'today', 'yesterday' or a
+    weekday ('monday' = the latest Monday, today included). Dates without a year are the latest one that
+    isn't in the future. None if it can't be read or is in the future."""
+    t = re.sub(r"\s+", " ", (text or "").strip().casefold().replace(",", " "))
+    if not t or t == "today":
+        return today
+    if t == "yesterday":
+        return today - timedelta(days=1)
+    t = re.sub(r"^last ", "", t)
+    if t[:3] in [w[:3] for w in _WEEKDAYS] and re.fullmatch(r"[a-z]+", t):
+        wd = next(i for i, w in enumerate(_WEEKDAYS) if w.startswith(t[:3]))
+        return today - timedelta(days=(today.weekday() - wd) % 7)
+    y = None
+    if m := re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", t):
+        y, mo, d = int(m[1]), int(m[2]), int(m[3])
+    elif m := re.fullmatch(r"(\d{1,2})[/.](\d{1,2})(?:[/.](\d{2}|\d{4}))?", t):
+        mo, d = int(m[1]), int(m[2])
+        y = (int(m[3]) + (2000 if len(m[3]) == 2 else 0)) if m[3] else None
+    elif m := re.fullmatch(r"([a-z]{3})[a-z]*\.? (\d{1,2})(?:st|nd|rd|th)?(?: (\d{4}))?", t):
+        if m[1] not in _MONTHS:
+            return None
+        mo, d, y = _MONTHS[m[1]], int(m[2]), int(m[3]) if m[3] else None
+    else:
+        return None
+    try:
+        when = date(y or today.year, mo, d)
+        if y is None and when > today:
+            when = date(today.year - 1, mo, d)
+    except ValueError:
+        return None
+    return None if when > today else when
+
+
+def _with_first(candidates: list[dict[str, Any]], first: dict[str, Any]) -> list[dict[str, Any]]:
+    """`first` at the top of the candidates, without listing the same movie twice."""
+    rest = [c for c in candidates if not _same_title(c, first["title"], first.get("year"))]
+    return [{k: first.get(k) for k in ("title", "year", "imdb_id", "why") if first.get(k) is not None}, *rest]
+
+
+def _day_label(day: str) -> str:
+    """'2026-11-09' -> 'Mon, Nov 9'."""
+    try:
+        d = date.fromisoformat(day)
+    except (TypeError, ValueError):
+        return str(day)
+    return f"{d:%a}, {d:%b} {d.day}"
 
 
 def _duration(minutes: int) -> str:
@@ -798,18 +859,21 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 q["announced_for"] = show.date().isoformat()
                 store.save(STATE, state)
                 await self._queue_post(s, "franchise_next", q, item, when=show)
-            else:  # "log": the announced showing has started
+            else:  # "log": the announced showing has started: the movie mods confirm it happened
                 last = show - timedelta(days=7)
-                item["done"] = last.date().isoformat()
                 q["logged_for"] = last.date().isoformat()
                 store.save(STATE, state)
-                await self.log_watched(s, item["title"], item.get("year"), when=last)
-                log.info("%s: logged %s from the %s queue", s.name, item["title"], q["name"])
-                if franchise.finished(q):
-                    up_next = data.get("next_franchise")
-                    note = f"**{up_next}** already won the vote, so it's up next. 🍿" if up_next else ""
-                    await self._queue_post(s, "franchise_done", q, None, when=None, note=note)
-                    self._start_next_franchise(s)
+                part, total = franchise.part_number(q, item)
+                m = await self._card_movie(item["title"], item.get("year"), item.get("imdb_id"))
+                runtime = (m or {}).get("runtime") or DEFAULT_RUNTIME
+                await self.ask_night(
+                    s,
+                    last.date().isoformat(),
+                    {k: item.get(k) for k in ("title", "year", "imdb_id") if item.get(k)},
+                    f"Part {part} of {total} of {q['name']} was on",
+                    last.timestamp() + (runtime + 10) * 60,
+                )
+                log.info("%s: asked the movie mods to confirm %s from the %s queue", s.name, item["title"], q["name"])
 
     def _start_next_franchise(self, s) -> None:
         """Start the franchise that already won a poll, once the current one has nothing left to watch."""
@@ -995,8 +1059,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         return f"{info['url']}/movies"
 
     def approval_channel(self) -> discord.TextChannel | None:
-        return self.bot.text_channel(self.cfg.approval_channel) or self.bot.text_channel(
-            self.bot.features.welcome.approval_channel
+        welcome = getattr(self.bot.features, "welcome", None)
+        return self.bot.text_channel(getattr(self.cfg, "approval_channel", None)) or self.bot.text_channel(
+            getattr(welcome, "approval_channel", None)
         )
 
     # ------------------------------------------------------------ changes (with approvals)
@@ -1111,32 +1176,88 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         voice = {"people": len(people), "minutes": voicewatch.minutes_together(sess), "peak": sess.get("peak", 0)}
         lib = movies.load()
         logged = next((e for e in lib["history"] if e.get("date") == day and e.get("series") == s.name), None)
-        if logged is not None:  # already in the history (franchise queue, a Pingwin poll, or a mod)
+        if logged is not None:  # already in the history (a mod logged it)
             logged["voice"] = voice
             movies.save(lib)
             log.info("%s on %s: %d in voice, already logged", s.name, day, len(people))
-            return
-        if any(
-            r.get("kind") == "detected" and r.get("series") == s.name and r["data"].get("date") == day
-            for r in lib["pending"].values()
-        ):
             return
         guild = self.bot.home_guild
         names = []
         for uid in people:
             m = guild.get_member(int(uid)) if guild else None
             names.append(m.display_name if m else "someone")
+        await self._night_request(s, day, voice=voice, names=names)
+        log.info("%s on %s: %d stayed in voice; asked the movie mods which movie", s.name, day, len(people))
+
+    async def ask_night(
+        self, s, day: str, expected: dict[str, Any] | None, why: str, show_end: float | None = None
+    ) -> None:
+        """A poll, the franchise queue or /movie tonight says what's on for a night: ask the movie mods to
+        confirm it once it's over, instead of adding it to the history straight away (some weeks get skipped)."""
+        lib = movies.load()
+        if any(e.get("date") == day and e.get("series") == s.name for e in lib["history"]):
+            return  # a mod already logged that night
+        await self._night_request(s, day, expected=expected, why=why, show_end=show_end)
+
+    def _pending_night(self, lib: dict[str, Any], s, day: str) -> dict[str, Any] | None:
+        return next(
+            (
+                r
+                for r in lib["pending"].values()
+                if r.get("kind") == "detected"
+                and r.get("status") == "pending"
+                and r.get("series") == s.name
+                and r["data"].get("date") == day
+            ),
+            None,
+        )
+
+    async def _night_request(
+        self,
+        s,
+        day: str,
+        *,
+        expected: dict[str, Any] | None = None,
+        why: str = "",
+        show_end: float | None = None,
+        voice: dict[str, Any] | None = None,
+        names: list[str] | None = None,
+    ) -> None:
+        """One "did this movie night happen, and with which movie?" card per series and night. A second
+        source for the same night (the voice check after the poll, or /movie tonight after the poll) adds to
+        that card instead of posting another."""
+        lib = movies.load()
+        req = self._pending_night(lib, s, day)
+        if req is not None:
+            d = req["data"]
+            if expected:
+                d["expected"], d["why"] = expected, why
+                if show_end:
+                    d["show_end"] = show_end
+                d["candidates"] = _with_first(d.get("candidates", []), {**expected, "why": why})
+            if voice:
+                d["voice"], d["names"] = voice, names or []
+            movies.save(lib)
+            await self._refresh_night_card(s, req)
+            return
         try:
             candidates = await self._night_candidates(s, day)
         except Exception:  # a guess list is nice to have; the card still works without it
             log.exception("Couldn't gather likely movies for %s", s.name)
             candidates = []
+        if expected:
+            candidates = _with_first(candidates, {**expected, "why": why})
         rid = secrets.token_hex(4)
+        data: dict[str, Any] = {"date": day, "candidates": candidates[:24]}
+        if expected:
+            data.update(expected=expected, why=why, show_end=show_end)
+        if voice:
+            data.update(voice=voice, names=names or [])
         req = {
             "id": rid,
             "kind": "detected",
             "series": s.name,
-            "data": {"date": day, "candidates": candidates, "voice": voice, "names": names},
+            "data": data,
             "by": 0,
             "by_name": "Pingwin",
             "at": time.time(),
@@ -1144,36 +1265,65 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         }
         channel = self.approval_channel()
         if channel is not None:
-            options = [
-                discord.SelectOption(
-                    label=(f"{c['title']} ({c['year']})" if c.get("year") else c["title"])[:100],
-                    description=(c.get("why") or "")[:100] or None,
-                    value=str(i),
-                )
-                for i, c in enumerate(candidates[:24])
-            ]
-            options.append(discord.SelectOption(label="Something else…", value="other", emoji="✏️"))
-            view = discord.ui.View(timeout=None)
-            view.add_item(NightPick(rid, options))
-            view.add_item(RequestButton(rid, "no", label="We skipped it"))
-            embed = discord.Embed(
-                title=f"🎬 Looks like {series_label(s)} happened!",
-                description=(
-                    f"**{len(people)} people** were in voice for about **{_duration(voice['minutes'])}** on "
-                    f"{day}: {', '.join(names)}.\nWhich movie was it? Picking one adds it to the history and "
-                    "posts the Rate it button."
-                ),
-                color=GOLD,
-            )
+            embed, view = self._night_card(s, req)
             try:
                 msg = await channel.send(embed=embed, view=view)
                 req["card"] = [channel.id, msg.id]
             except discord.HTTPException as e:
                 log.warning("Couldn't post the movie night card: %s", e)
-        lib = movies.load()
-        lib["pending"][rid] = req
-        movies.save(lib)
-        log.info("%s on %s: %d stayed in voice; asked the movie mods which movie", s.name, day, len(people))
+        lib = movies.load()  # re-loaded: posting the card waited on Discord
+        if self._pending_night(lib, s, day) is None:
+            lib["pending"][rid] = req
+            movies.save(lib)
+
+    def _night_card(self, s, req: dict[str, Any]) -> tuple[discord.Embed, discord.ui.View]:
+        d = req["data"]
+        exp, voice = d.get("expected"), d.get("voice")
+        lines = []
+        if exp:
+            lines.append(f"{d.get('why') or 'Up tonight'}: **{exp['title']}**{_yr(exp)}.")
+        if voice:
+            who = f": {', '.join(d.get('names') or [])}" if d.get("names") else ""
+            lines.append(
+                f"**{voice['people']} people** were in voice for about **{_duration(voice['minutes'])}**{who}."
+            )
+        rate = " and posts the Rate it button" if self.cfg.rate else ""
+        if exp:
+            lines.append(
+                f"Once it's over, confirm it: that adds it to the history{rate}. Watched something else? Pick it "
+                "from the list. Didn't happen? Click **We skipped it**."
+            )
+        else:
+            lines.append(f"Which movie was it? Picking one adds it to the history{rate}.")
+        label = f"{series_label(s)} on {_day_label(d['date'])}"
+        title = f"🎬 Did {label} happen?" if exp and not voice else f"🎬 Looks like {label} happened!"
+        embed = discord.Embed(title=title, description="\n".join(lines), color=GOLD)
+        options = [
+            discord.SelectOption(
+                label=(f"{c['title']} ({c['year']})" if c.get("year") else c["title"])[:100],
+                description=(c.get("why") or "")[:100] or None,
+                value=str(i),
+            )
+            for i, c in enumerate(d.get("candidates", [])[:24])
+        ]
+        options.append(discord.SelectOption(label="Something else…", value="other", emoji="✏️"))
+        view = discord.ui.View(timeout=None)
+        if exp:
+            view.add_item(RequestButton(req["id"], "ok", label=f"Yes, we watched {exp['title']}"[:80]))
+        view.add_item(NightPick(req["id"], options))
+        view.add_item(RequestButton(req["id"], "no", label="We skipped it"))
+        return embed, view
+
+    async def _refresh_night_card(self, s, req: dict[str, Any]) -> None:
+        card = req.get("card")
+        channel = self.bot.get_channel(card[0]) if card else None
+        if not isinstance(channel, discord.TextChannel):
+            return
+        embed, view = self._night_card(s, req)
+        try:
+            await channel.get_partial_message(card[1]).edit(embed=embed, view=view)
+        except discord.HTTPException as e:
+            log.info("Couldn't update the movie night card: %s", e)
 
     async def _read_polls(self, s, after: datetime, before: datetime | None = None) -> list[dict[str, Any]]:
         """Discord polls in the movie polls channel (and the series' channel), oldest first."""
@@ -1309,10 +1459,14 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             req["status"], req["decided_by"] = "denied", who
             movies.save(lib)
             msg = f"⏭️ {who} says {req['series']} on {d['date']} was skipped. Nothing was added."
+            if d.get("expected") and self.series(req["series"]) and is_franchise(self.series(req["series"])):
+                msg += f" {d['expected']['title']} stays next in the queue."
         else:
             pick = custom
             if pick is None and choice is not None and 0 <= choice < len(d.get("candidates", [])):
                 pick = d["candidates"][choice]
+            if pick is None and choice is None:
+                pick = d.get("expected")  # "Yes, we watched it"
             if not pick or not str(pick.get("title", "")).strip():
                 return "Pick a movie (or Something else…) first."
             s = self.series(req["series"])
@@ -1328,6 +1482,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 pick.get("imdb_id"),
                 d["date"],
                 rate=bool(self.cfg.rate),
+                rate_after=d.get("show_end"),
             )
             lib = movies.load()
             entry = next((x for x in lib["history"] if x["id"] == e["id"]), None)
@@ -1516,20 +1671,31 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 return "That movie isn't on the list anymore."
             if data.get("watched", True) and n.get("watched"):  # say, set as tonight's movie meanwhile
                 return f"**{n['title']}** is already marked as watched."
-            n["watched"] = discord.utils.utcnow().isoformat() if data.get("watched", True) else None
+            if not data.get("watched", True):
+                n["watched"] = None
+                store.save(STATE, state)
+                return f"**{n['title']}** marked as not watched."
+            day = data.get("date") or datetime.now(self.bot.features.tz).date().isoformat()
+            n["watched"] = datetime.fromisoformat(day).replace(hour=20, tzinfo=UTC).isoformat()
             store.save(STATE, state)
-            if n["watched"]:
-                await self.log_watched(s, n["title"], n.get("year"), when=datetime.now(self.bot.features.tz))
-            return f"**{n['title']}** marked as {'watched' if n['watched'] else 'not watched'}."
+            e, created = await self.add_night(s, n["title"], n.get("year"), None, day, rate=bool(data.get("rate")))
+            rated = " The Rate it button is on its way." if data.get("rate") and self.cfg.rate else ""
+            added = f" Added to the history for {day}." if created else f" It was already in the history for {day}."
+            return f"**{n['title']}** marked as watched.{added}{rated}"
         if kind == "tonight":
             # The showing it was asked for (worked out when it was asked), not the one after the approval.
             when = datetime.fromisoformat(data["when"]) if data.get("when") else self.tonight_showing(s)
-            entry = await self.log_watched(s, data["title"], data.get("year"), when=when)
-            if entry is not None:
-                m = movies.load()["movies"].get(entry["movie_id"]) or {"id": entry["movie_id"], "title": data["title"]}
-                self._night_logged(s, m, entry["date"], data["title"])
-            return f"Tonight's {s.name} movie is **{data['title']}**." + (
-                " I'll ask everyone to rate it afterwards." if entry and self.cfg.rate else ""
+            m = await self._card_movie(data["title"], data.get("year"))
+            runtime = (m or {}).get("runtime") or DEFAULT_RUNTIME
+            expected = {"title": data["title"], **({"year": data["year"]} if data.get("year") else {})}
+            if m and m.get("imdb_id"):
+                expected["imdb_id"] = m["imdb_id"]
+            await self.ask_night(
+                s, when.date().isoformat(), expected, "Set as tonight's movie", when.timestamp() + (runtime + 10) * 60
+            )
+            return (
+                f"Tonight's {s.name} movie is **{data['title']}**. A movie mod confirms it after the movie, "
+                "and then it joins the history" + (" and everyone gets a Rate it button." if self.cfg.rate else ".")
             )
         return "Unknown change."
 
@@ -1571,7 +1737,14 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         return "History updated."
 
     async def add_night(
-        self, s, title: str, year: int | None, imdb_id: str | None, day: str, rate: bool = False
+        self,
+        s,
+        title: str,
+        year: int | None,
+        imdb_id: str | None,
+        day: str,
+        rate: bool = False,
+        rate_after: float | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Add a movie night that already happened (from the movie pages). Returns (entry, newly added).
 
@@ -1589,11 +1762,28 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             lib["history"].append(e)
             lib["history"].sort(key=lambda x: (x.get("date") or "9999", x.get("created", 0)))
         if rate and self.cfg.rate and not e.get("prompt") and getattr(s, "channel", None):
-            e["rate_at"] = time.time()
+            e["rate_at"] = max(time.time(), float(rate_after or 0))  # not before the movie is over
             e["rate_channel"] = s.channel
         movies.save(lib)
         self._night_logged(s, m, day, title)
+        await self._franchise_wrap_up(s)
         return e, created
+
+    async def _franchise_wrap_up(self, s) -> None:
+        """After a franchise's last part is logged: say so (once) and start the franchise that's up next."""
+        if not is_franchise(s):
+            return
+        state = store.load(STATE)
+        data = self._data(state, s)
+        q = data.get("queue")
+        if not franchise.finished(q) or q.get("wrapped"):
+            return
+        q["wrapped"] = True
+        store.save(STATE, state)
+        up_next = data.get("next_franchise")
+        note = f"**{up_next}** already won the vote, so it's up next. 🍿" if up_next else ""
+        await self._queue_post(s, "franchise_done", q, None, when=None, note=note)
+        self._start_next_franchise(s)
 
     def _night_logged(self, s, m: dict[str, Any], day: str, title: str = "") -> None:
         """After a movie night is logged by hand (the movie pages, a voice card, /movie tonight): it comes off
@@ -1620,27 +1810,6 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 hit = True
         if hit:
             store.save(STATE, state)
-
-    async def log_watched(self, s, title: str, year: Any, when: datetime) -> dict[str, Any] | None:
-        """Add a movie night to the history and schedule its Rate it button."""
-        m = await self.details(title, year)
-        lib = movies.load()
-        if m is None:
-            m = movies.upsert_movie(lib, {"title": title, "year": year})
-        day = when.date().isoformat()
-        e = next((x for x in lib["history"] if x.get("date") == day and x["movie_id"] == m["id"]), None)
-        if e is None:
-            e = movies.new_entry(m, day, s.name)
-            lib["history"].append(e)
-        if self.cfg.rate and not e.get("prompt"):
-            runtime = m.get("runtime") or DEFAULT_RUNTIME
-            start = when if when.timestamp() > time.time() - 6 * 3600 else datetime.now(self.bot.features.tz)
-            e["rate_at"] = start.timestamp() + (runtime + 10) * 60
-            if e["rate_at"] < time.time():  # already over: ask now
-                e["rate_at"] = time.time()
-            e["rate_channel"] = s.channel
-        movies.save(lib)
-        return e
 
     # ------------------------------------------------------------ ratings
     def _rater_names(self, lib: dict[str, Any]) -> dict[str, str]:
@@ -1893,8 +2062,19 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         )
 
     @app_commands.command(name="watched", description="Mark a watchlist movie as watched (or not)")
+    @app_commands.describe(
+        date="When you watched it: like 11/2, Nov 2, yesterday or monday (default today)",
+        rate="Also post a Rate it button (default no)",
+    )
     @app_commands.autocomplete(series=series_autocomplete, movie=title_autocomplete)
-    async def watched(self, interaction: discord.Interaction, series: str, movie: str) -> None:
+    async def watched(
+        self,
+        interaction: discord.Interaction,
+        series: str,
+        movie: str,
+        date: app_commands.Range[str, 1, 30] | None = None,
+        rate: bool = False,
+    ) -> None:
         s = await self._check(interaction, series)
         if s is None:
             return
@@ -1902,8 +2082,20 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if n is None:
             await interaction.response.send_message("That movie isn't on the list.", ephemeral=True)
             return
+        day = None
+        if date and not n.get("watched"):
+            when = parse_watch_date(date, datetime.now(self.bot.features.tz).date())
+            if when is None:
+                await interaction.response.send_message(
+                    "I couldn't read that date (or it's in the future). Try 11/2, Nov 2, yesterday or monday.",
+                    ephemeral=True,
+                )
+                return
+            day = when.isoformat()
         await interaction.response.defer(ephemeral=True)
         data = {"id": n["id"], "title": n["title"], "watched": not n.get("watched")}
+        if data["watched"]:
+            data.update(date=day or datetime.now(self.bot.features.tz).date().isoformat(), rate=rate)
         await interaction.followup.send(await self.submit("watched", s.name, data, interaction.user), ephemeral=True)
 
     @app_commands.command(name="tonight", description="Set tonight's movie (for nights without a poll)")
@@ -2266,9 +2458,6 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             return True  # handled meanwhile
         cur["status"] = "done"
         if winner:
-            n = next((x for x in data["nominations"] if x["id"] == winner["id"]), None)
-            if n is not None and self.cfg.mark_watched:
-                n["watched"] = discord.utils.utcnow().isoformat()
             if is_franchise(s) and franchise.next_part(data.get("queue")) is not None:
                 # The current franchise still has parts to go: the winner starts once its last part is logged.
                 data["next_franchise"] = winner["title"]
@@ -2286,10 +2475,19 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             )
         except discord.HTTPException as e:
             log.warning("Couldn't announce the %s winner: %s", s.name, e)
-        if winner and not is_franchise(s):
-            # Logged for the showing the poll was for, so its Rate it button comes after that movie.
+        if winner and not is_franchise(s) and self.cfg.mark_watched:
+            # The movie mods confirm it once that showing is over (it joins the history and gets marked
+            # watched then), so a skipped week doesn't end up in the history.
             when = self._poll_showing(s, cur["ends"])
-            await self.log_watched(s, winner["title"], winner.get("year"), when=when)
+            m = await self._card_movie(winner["title"], winner.get("year"))
+            runtime = (m or {}).get("runtime") or DEFAULT_RUNTIME
+            await self.ask_night(
+                s,
+                when.date().isoformat(),
+                {k: winner.get(k) for k in ("title", "year") if winner.get(k)},
+                "The poll picked",
+                when.timestamp() + (runtime + 10) * 60,
+            )
         log.info("%s poll finished: %s", s.name, text)
         return True
 

@@ -141,6 +141,26 @@ def history():
 
 
 ALIEN = "✅ Alien (1979)\n✅ Aliens (1986)\nAlien 3 (1992)"
+MOD = NS(display_name="Mod", name="mod", id=5)
+
+
+def night_request(series: str, day: str) -> dict:
+    """The pending "did this movie night happen?" card for a night."""
+    return next(
+        r
+        for r in movies.load()["pending"].values()
+        if r["kind"] == "detected" and r["series"] == series and r["data"]["date"] == day and r["status"] == "pending"
+    )
+
+
+async def confirm(cog, series: str, day: str, approve: bool = True, **kw) -> str:
+    """A movie mod clicks "Yes, we watched it" (or "We skipped it") on that night's card."""
+    return await cog.decide(night_request(series, day)["id"], approve, MOD, **kw)
+
+
+def posts(ch) -> list:
+    """What was posted as text (the movie mods' cards are embeds)."""
+    return [t for t in ch.sent if isinstance(t, str)]
 
 
 # 1. A franchise poll's winner waits for the current franchise to finish.
@@ -160,7 +180,9 @@ def test_franchise_poll_winner_waits_for_the_last_part(monkeypatch):
         assert st["queue"]["name"] == "Alien" and st["next_franchise"] == "Halloween"
         assert "Halloween" in cog.queue_embed(s).description
         clock["now"] = datetime(2026, 11, 6, 21, 31, tzinfo=ET)
-        await cog.check()  # it started: part 3 is logged, then Halloween takes over
+        await cog.check()  # it started: the movie mods are asked to confirm part 3
+        assert history() == [] and night_request("FFF", "2026-11-06")["data"]["expected"]["title"] == "Alien 3"
+        await confirm(cog, "FFF", "2026-11-06")  # after the movie: part 3 is logged, then Halloween takes over
         assert history() == [("Alien 3", "2026-11-06")]
         st = store.load(movienight.STATE)["fff"]
         assert st["queue"]["name"] == "Halloween" and st["queue"]["paused"] and "next_franchise" not in st
@@ -181,6 +203,7 @@ def test_franchise_poll_closing_at_showtime_logs_the_last_part_first(monkeypatch
         poll = open_poll(77, ["x", "y"], end_early=True, end_sent=True)
         store.save(movienight.STATE, {"fff": {"nominations": noms, "polls": [poll], "queue": q}})
         await cog.check()
+        await confirm(cog, "FFF", "2026-11-06")
         assert history() == [("Alien 3", "2026-11-06")]
         assert store.load(movienight.STATE)["fff"]["queue"]["name"] == "Halloween"
 
@@ -213,6 +236,9 @@ def test_ending_a_poll_early_logs_it_for_showtime_and_rates_after_it():
         store.save(movienight.STATE, {"mmm": {"nominations": noms, "polls": [poll]}})
         await cog.check()
         show = next_weekly(showtime, discord.utils.parse_time(poll["ends"]).astimezone(ET) - timedelta(hours=6))
+        assert movies.load()["history"] == []  # nothing until a movie mod confirms it
+        assert not store.load(movienight.STATE)["mmm"]["nominations"][1]["watched"]
+        await confirm(cog, "MMM", show.date().isoformat())  # confirmed early: Rate it still waits
         (e,) = movies.load()["history"]
         assert e["date"] == show.date().isoformat() and e["date"] > now.date().isoformat()
         assert e["rate_at"] > show.timestamp() and not e.get("prompt")  # no Rate it before the movie
@@ -236,6 +262,8 @@ def test_tonight_keeps_its_date_and_comes_off_the_watchlist(monkeypatch):
         assert movienight.describe_request(req) == "Set tonight's MMM movie (2026-11-02) to **Arrival**"
         clock["now"] = datetime(2026, 11, 3, 9, 0, tzinfo=ET)  # a mod approves it the next morning
         assert "**Arrival**" in await cog.apply("tonight", "MMM", data, 1)
+        assert history() == []
+        await confirm(cog, "MMM", "2026-11-02")
         assert history() == [("Arrival", "2026-11-02")]
         assert store.load(movienight.STATE)["mmm"]["nominations"][0]["watched"].startswith("2026-11-02")
         msg = await cog.apply("watched", "MMM", {"id": "a", "title": "Arrival", "watched": True}, 1)
@@ -276,7 +304,9 @@ def test_a_nomination_made_while_a_poll_closes_is_kept():
         await cog.check()
         data = store.load(movienight.STATE)["mmm"]
         assert [n["title"] for n in data["nominations"]] == ["Arrival", "Alien", "Heat"]
-        assert data["polls"][0]["status"] == "done" and data["nominations"][1]["watched"]
+        assert data["polls"][0]["status"] == "done" and not data["nominations"][1]["watched"]
+        (req,) = movies.load()["pending"].values()
+        assert req["data"]["expected"]["title"] == "Alien"
 
     asyncio.run(go())
 
@@ -451,15 +481,17 @@ def test_a_part_logged_by_hand_moves_the_queue_on(monkeypatch):
         assert franchise.next_part(store.load(movienight.STATE)["fff"]["queue"])["title"] == "Aliens"
         clock["now"] = datetime(2026, 11, 6, 16, 0, tzinfo=ET)
         await cog.run_queues()
-        assert ch.sent == ["[franchise_next] Aliens (1986)"]
+        assert posts(ch) == ["[franchise_next] Aliens (1986)"]
         clock["now"] = datetime(2026, 11, 6, 20, 0, tzinfo=ET)
         data = {"title": "Aliens", "year": 1986, "when": cog.tonight_showing(s).isoformat()}
         await cog.apply("tonight", "FFF", data, 1)  # set by hand before the movie
         clock["now"] = datetime(2026, 11, 6, 21, 31, tzinfo=ET)
-        await cog.run_queues()
+        await cog.run_queues()  # the queue's own question goes on the same card
+        assert len([r for r in movies.load()["pending"].values() if r["kind"] == "detected"]) == 1
+        await confirm(cog, "FFF", "2026-11-06")
         assert sorted(history()) == [("Alien", "2026-11-04"), ("Alien 3", "2026-11-04"), ("Aliens", "2026-11-06")]
         q = store.load(movienight.STATE)["fff"]["queue"]
-        assert franchise.next_part(q)["title"] == "Alien 3" and len(ch.sent) == 1
+        assert franchise.next_part(q)["title"] == "Alien 3" and len(posts(ch)) == 1
 
     asyncio.run(go())
 
@@ -508,8 +540,10 @@ def test_no_announcements_still_logs_each_part(monkeypatch):
             clock["now"] = when.replace(tzinfo=ET)
             await cog.run_queues()
             await cog.run_queues()
+            if when.hour == 21:
+                await confirm(cog, "FFF", when.date().isoformat())
         assert history() == [("Alien", "2026-11-06"), ("Aliens", "2026-11-13")]
-        assert ch.sent == []  # nothing announced
+        assert posts(ch) == []  # nothing announced
 
     asyncio.run(go())
 
