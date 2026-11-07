@@ -840,3 +840,10 @@ label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; 
 .w-watched li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: .9rem; }
 .w-sum { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
 .w-sum li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+
+/* movie night schedule and breaks */
+.schedule { display: grid; gap: 6px; margin-bottom: 12px; font-size: .92rem; }
+.schedule .breaks { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
+.schedule .row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.schedule input.small { width: auto; min-width: 0; flex: 0 1 140px; font-size: .85rem; padding: 4px 8px; }
+.schedule input[type="number"].small { flex: 0 0 64px; }

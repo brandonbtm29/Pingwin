@@ -1205,7 +1205,14 @@ async def get_movies(request: web.Request) -> web.Response:
                     "movie_id": n.get("movie_id"),
                 }
             )
-        watchlists.append({"series": name, "items": items, "queue": _queue_json(state.get(slug(name), {}), lib)})
+        watchlists.append(
+            {
+                "series": name,
+                "items": items,
+                "queue": _queue_json(state.get(slug(name), {}), lib),
+                "schedule": _schedule_json(next((x for x in all_series if x.name == name), None), state, bot),
+            }
+        )
     from .. import imdblists
 
     noms = {name: state.get(slug(name), {}).get("nominations", []) for name in series}
@@ -1581,6 +1588,27 @@ async def post_movie_review(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "message": "Review updated." if old else "Thanks! Review added. ⭐"})
 
 
+def _schedule_json(s, state: dict[str, Any], bot) -> dict[str, Any] | None:
+    """A series' showtime, its next showing (past any break) and its breaks, for the movie pages."""
+    from datetime import datetime as _dt
+
+    from .. import breaks
+    from ..features import slug
+
+    showtime = getattr(s, "showtime", "") if s is not None else ""
+    if not showtime:
+        return None
+    tz = bot.features.tz if hasattr(bot, "features") else None
+    now = _dt.now(tz)
+    brks = state.get(slug(s.name), {}).get("breaks", [])
+    nxt = breaks.next_showing(showtime, now, brks)
+    out = []
+    for b in breaks.upcoming(brks, now.date()):
+        back = breaks.next_showing(showtime, _dt.fromisoformat(b["until"]).replace(tzinfo=tz), brks)
+        out.append({**b, "text": breaks.describe(b, back), "now": b["from"] <= now.date().isoformat()})
+    return {"showtime": showtime, "next": nxt.isoformat() if nxt else None, "breaks": out}
+
+
 def _queue_json(data: dict[str, Any], lib: dict[str, Any]) -> dict[str, Any] | None:
     """A series' franchise queue for the movie pages, with posters and runtimes where we have them."""
     from .. import franchise
@@ -1818,6 +1846,31 @@ async def post_movie_admin(request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "message": msg})
     if action == "queue":
         return web.json_response(await _queue_action(cog, payload, viewer))
+    if action == "break":
+        if cog is None:
+            raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+        s = cog.series(_str(payload, "series", 50))
+        if s is None:
+            raise ApiError("Pick a series.")
+        op = _str(payload, "op", 10)
+        if op == "end":
+            msg = cog.end_break(s, viewer.name)
+        elif op == "add":
+            from datetime import datetime as _dt
+
+            from ..cogs.movienight import parse_from_date
+
+            weeks = _int(payload, "weeks", 1, 1, 26)
+            start = None
+            if _str(payload, "from", 30):
+                start = parse_from_date(_str(payload, "from", 30), _dt.now(cog.bot.features.tz).date())
+                if start is None:
+                    raise ApiError("Pick a date from today on.")
+            msg = cog.add_break(s, weeks, start, _str(payload, "why", 100), viewer.name)
+        else:
+            raise ApiError("Unknown change.")
+        log.info("Movie night break (%s): %s", viewer.name, msg)
+        return web.json_response({"ok": True, "message": msg})
     if action == "watchlist":
         if cog is None:
             raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)

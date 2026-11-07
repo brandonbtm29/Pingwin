@@ -81,16 +81,19 @@ def finished(queue: dict[str, Any] | None) -> bool:
     return bool(queue and counted(queue) and next_part(queue) is None)
 
 
-def due(queue: dict[str, Any], showtime: datetime, now: datetime, announce_hours: float) -> str | None:
+def due(
+    queue: dict[str, Any], showtime: datetime, now: datetime, announce_hours: float, last: datetime | None = None
+) -> str | None:
     """What to do now for this week's showtime: "announce", "note", "log", "cancel" or None.
 
-    `showtime` is the next showing after `now`; last week's showing is a week earlier.
+    `showtime` is the next showing after `now` (past any break); `last` is the most recent showing by the
+    schedule (a week before `showtime` when not given; with a break in between it's further back).
     "note" is for when no announcement is wanted (`announce_hours` is 0): it just notes the coming showing,
     so the part is still logged when it starts. "cancel" means an announced showing started while the queue
     was paused: it didn't happen, so it mustn't be logged when the queue resumes."""
     if not queue or next_part(queue) is None:
         return None
-    last = showtime - timedelta(days=7)
+    last = last or (showtime - timedelta(days=7))
     started = (
         queue.get("announced_for") == last.date().isoformat()
         and queue.get("logged_for") != last.date().isoformat()

@@ -410,6 +410,7 @@ function renderWatchlists() {
       return el("div", { class: "pc-actions" }, out);
     };
     return el("div", { class: "panel" },
+      w.schedule ? scheduleBlock(w) : null,
       isFranchise || w.queue ? queueBlock(w) : null,
       el("div", { class: "w-head" },
         el("h2", {}, isFranchise ? `${evName(w.series)}: franchises to choose from` : `${evName(w.series)} watchlist`, el("span", { class: "hint" }, ` ${waiting.length} waiting`)),
@@ -455,6 +456,28 @@ function watchedIt(item, series) {
 }
 
 // ---------- franchise queues ----------
+// ---------- schedule and breaks (weeks off) ----------
+function scheduleBlock(w) {
+  const sc = w.schedule;
+  const mod = canMod();
+  const next = sc.next ? new Date(sc.next).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  const weeks = el("input", { type: "number", min: "1", max: "26", value: "1", class: "small", "aria-label": `Weeks of ${evName(w.series)} to skip` });
+  const from = el("input", { placeholder: "From (next one)", maxlength: "30", class: "small", "aria-label": "Starting from which showing, like 11/13 or friday" });
+  const why = el("input", { placeholder: "Why (optional)", maxlength: "100", class: "small", "aria-label": "Why the break" });
+  return el("div", { class: "schedule" },
+    el("div", {}, el("strong", {}, "📅 Next showing: "), next || "none planned", el("span", { class: "hint" }, ` · every ${sc.showtime}`)),
+    sc.breaks.length ? el("ul", { class: "breaks" }, sc.breaks.map((b) => el("li", {}, b.now ? "🏖️ On a break: " : "🗓️ Coming up: ", b.text))) : null,
+    mod ? el("div", { class: "row-actions" },
+      el("span", { class: "hint" }, "Skip"), weeks, el("span", { class: "hint" }, "week(s)"), from, why,
+      el("button", { class: "btn small", onclick: () => breakOp(w.series, "add", { weeks: weeks.value, from: from.value.trim(), why: why.value.trim() }) }, "Skip"),
+      sc.breaks.length ? el("button", { class: "btn small danger", onclick: () => { if (window.confirm(`End ${evName(w.series)}'s break${sc.breaks.length > 1 ? "s" : ""}?`)) breakOp(w.series, "end"); } }, "End break") : null) : null);
+}
+
+async function breakOp(series, op, extra = {}) {
+  try { toast((await api("/api/movies/admin", { action: "break", series, op, ...extra })).message.replace(/\*\*/g, "").replace(/<t:(\d+):F>/g, (_, t) => new Date(t * 1000).toLocaleString())); await load(); }
+  catch (e) { toast(e.message, true); }
+}
+
 async function queueOp(series, op, extra = {}) {
   try { const r = await api("/api/movies/admin", { action: "queue", series, op, ...extra }); if (r.message) toast(r.message); await load(); return r; }
   catch (e) { toast(e.message, true); return null; }

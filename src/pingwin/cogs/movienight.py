@@ -29,7 +29,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import franchise, movieaccess, movies, store, voicewatch
+from .. import breaks, franchise, movieaccess, movies, store, voicewatch
 from ..features import slug
 from ..timeparse import next_weekly
 
@@ -53,7 +53,9 @@ def pick_options(noms: list[dict], how: str, count: int) -> list[dict]:
 SOONEST = timedelta(minutes=5)  # a showtime closer than this means next week's
 
 
-def poll_close(showtime: str, now: datetime, hours: int | None, default_hours: int) -> tuple[datetime, int]:
+def poll_close(
+    showtime: str, now: datetime, hours: int | None, default_hours: int, skips: list[dict[str, Any]] | None = None
+) -> tuple[datetime, int]:
     """When a poll should close, and the whole-hour duration to give Discord (it only takes hours).
 
     Explicit hours win. Otherwise, with a showtime, the poll closes at the next showtime and Pingwin ends
@@ -62,10 +64,10 @@ def poll_close(showtime: str, now: datetime, hours: int | None, default_hours: i
     Lengths are real elapsed time (timestamps), not wall-clock time, so they're right across a DST change.
     """
     if hours is None and showtime:
-        start = next_weekly(showtime, now)
+        start = breaks.next_showing(showtime, now, skips)  # a week off doesn't count
         if start is not None:
             if start.timestamp() - now.timestamp() < SOONEST.total_seconds():
-                start += timedelta(days=7)  # the same time a week later, by the clock
+                start = breaks.next_showing(showtime, start + timedelta(minutes=1), skips) or start
             seconds = start.timestamp() - now.timestamp()
             return start, max(1, min(768, math.ceil(seconds / 3600)))
     h = hours or default_hours
@@ -210,6 +212,39 @@ def parse_watch_date(text: str, today: date) -> date | None:
     return None if when > today else when
 
 
+def parse_from_date(text: str, today: date) -> date | None:
+    """A date from today on, from '11/13', 'Nov 13', '2026-11-13', 'today', 'tomorrow' or a weekday ('friday'
+    = the next Friday, today included). Dates without a year are the next one to come."""
+    t = re.sub(r"\s+", " ", (text or "").strip().casefold().replace(",", " "))
+    if not t or t == "today":
+        return today
+    if t == "tomorrow":
+        return today + timedelta(days=1)
+    t = re.sub(r"^(next|this) ", "", t)
+    if t[:3] in [w[:3] for w in _WEEKDAYS] and re.fullmatch(r"[a-z]+", t):
+        wd = next(i for i, w in enumerate(_WEEKDAYS) if w.startswith(t[:3]))
+        return today + timedelta(days=(wd - today.weekday()) % 7)
+    y = None
+    if m := re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", t):
+        y, mo, d = int(m[1]), int(m[2]), int(m[3])
+    elif m := re.fullmatch(r"(\d{1,2})[/.](\d{1,2})(?:[/.](\d{2}|\d{4}))?", t):
+        mo, d = int(m[1]), int(m[2])
+        y = (int(m[3]) + (2000 if len(m[3]) == 2 else 0)) if m[3] else None
+    elif m := re.fullmatch(r"([a-z]{3})[a-z]*\.? (\d{1,2})(?:st|nd|rd|th)?(?: (\d{4}))?", t):
+        if m[1] not in _MONTHS:
+            return None
+        mo, d, y = _MONTHS[m[1]], int(m[2]), int(m[3]) if m[3] else None
+    else:
+        return None
+    try:
+        when = date(y or today.year, mo, d)
+        if y is None and when < today:
+            when = date(today.year + 1, mo, d)
+    except ValueError:
+        return None
+    return None if when < today else when
+
+
 def _with_first(candidates: list[dict[str, Any]], first: dict[str, Any]) -> list[dict[str, Any]]:
     """`first` at the top of the candidates, without listing the same movie twice."""
     rest = [c for c in candidates if not _same_title(c, first["title"], first.get("year"))]
@@ -265,6 +300,49 @@ class RequestButton(
             await interaction.edit_original_response(content=msg, view=None)
         except discord.HTTPException:
             pass
+
+
+class BreakButton(
+    discord.ui.DynamicItem[discord.ui.Button], template=r"pingwin:mvb:(?P<key>[a-z0-9-]{1,40}):(?P<weeks>\d{1,2})"
+):
+    """On the "franchise finished" card: how many weeks off before the next franchise (0 = carry on)."""
+
+    def __init__(self, key: str, weeks: int) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="No break" if weeks == 0 else f"{weeks} weeks off",
+                style=discord.ButtonStyle.secondary if weeks == 0 else discord.ButtonStyle.primary,
+                custom_id=f"pingwin:mvb:{key}:{weeks}",
+            )
+        )
+        self.key, self.weeks = key, weeks
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match):
+        return cls(match["key"], int(match["weeks"]))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return getattr(interaction.client, "is_active", True)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        if cog is None:
+            return
+        if not cog.is_movie_mod(interaction.user):
+            await interaction.response.send_message("Only movie mods can pick this.", ephemeral=True)
+            return
+        s = cog.series(self.key)
+        if s is None:
+            await interaction.response.send_message("That series isn't set up anymore.", ephemeral=True)
+            return
+        who = getattr(interaction.user, "display_name", interaction.user.name)
+        if self.weeks:
+            msg = cog.add_break(s, self.weeks, None, "between franchises", who)
+        else:
+            nxt = cog.next_showing(s)
+            when = f" on <t:{int(nxt.timestamp())}:F>" if nxt else ""
+            msg = f"No break: {series_label(s)} carries on{when}. ({who})"
+        await interaction.response.edit_message(content=msg, embed=None, view=None)
 
 
 class NightPick(discord.ui.DynamicItem[discord.ui.Select], template=r"pingwin:mvd:(?P<rid>[0-9a-f]+)"):
@@ -838,13 +916,16 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             if not getattr(s, "showtime", ""):
                 continue
             now = datetime.now(self.bot.features.tz)
-            show = next_weekly(s.showtime, now)
+            show = self.next_showing(s, now)  # weeks off are skipped
             if show is None:
                 continue
             state = store.load(STATE)
             data = self._data(state, s)
             q = data.get("queue")
-            what = franchise.due(q, show, now, hours)
+            last = breaks.last_showing(s.showtime, now)
+            what = franchise.due(q, show, now, hours, last=last)
+            if what == "log" and last is not None and breaks.covering(data.get("breaks"), last.date()):
+                what = "cancel"  # a break was added after it was announced: that night didn't happen
             if what is None:
                 continue
             item = franchise.next_part(q)
@@ -860,7 +941,6 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 store.save(STATE, state)
                 await self._queue_post(s, "franchise_next", q, item, when=show)
             else:  # "log": the announced showing has started: the movie mods confirm it happened
-                last = show - timedelta(days=7)
                 q["logged_for"] = last.date().isoformat()
                 store.save(STATE, state)
                 part, total = franchise.part_number(q, item)
@@ -973,7 +1053,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             part, total = franchise.part_number(q, item)
             mark = "✅" if item.get("done") else ("👉" if item is nxt else "▫️")
             lines.append(f"{mark} {part}. {franchise.label(item)}")
-        show = next_weekly(s.showtime, datetime.now(self.bot.features.tz)) if getattr(s, "showtime", "") else None
+        show = self.next_showing(s)
         foot = (
             "Finished! Time to pick the next franchise."
             if nxt is None
@@ -1120,6 +1200,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         for s in self.all_series:
             key = slug(s.name)
             show = voicewatch.current_show(getattr(s, "showtime", "") or "", now_dt)
+            if show is not None and breaks.covering(state.get(key, {}).get("breaks"), show.date()):
+                show = None  # a week off
             day = show.date().isoformat() if show else None
             sess = watch.get(key)
             if sess and sess["day"] != day:  # that night's window has closed
@@ -1194,6 +1276,10 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
     ) -> None:
         """A poll, the franchise queue or /movie tonight says what's on for a night: ask the movie mods to
         confirm it once it's over, instead of adding it to the history straight away (some weeks get skipped)."""
+        skip = breaks.covering(self.series_breaks(s), date.fromisoformat(day))
+        if skip is not None:
+            log.info("%s on %s is in a break, so the movie mods aren't asked about it", s.name, day)
+            return
         lib = movies.load()
         if any(e.get("date") == day and e.get("series") == s.name for e in lib["history"]):
             return  # a mod already logged that night
@@ -1769,6 +1855,102 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         await self._franchise_wrap_up(s)
         return e, created
 
+    # ------------------------------------------------------------ breaks (weeks off)
+    def series_breaks(self, s) -> list[dict[str, Any]]:
+        return list(store.load(STATE).get(slug(s.name), {}).get("breaks", []))
+
+    def skipped(self, s, day: date) -> dict[str, Any] | None:
+        """The break a showing on `day` falls in, if any."""
+        return breaks.covering(self.series_breaks(s), day)
+
+    def next_showing(self, s, after: datetime | None = None) -> datetime | None:
+        """The series' next showing that isn't in a break (None without a showtime)."""
+        after = after or datetime.now(self.bot.features.tz)
+        return breaks.next_showing(getattr(s, "showtime", "") or "", after, self.series_breaks(s))
+
+    def add_break(self, s, weeks: int, start: date | None, why: str = "", by: str = "") -> str:
+        """Skip `weeks` showings, from the first one on or after `start` (default: the next one). Pingwin
+        moves the series' Discord Event to the first showing after it. Returns a line for the mods."""
+        if not getattr(s, "showtime", ""):
+            return f"{series_label(s)} has no showtime, so there's nothing to skip."
+        tz = self.bot.features.tz
+        now = datetime.now(tz)
+        # From a date: that day's showing counts even if it has already started (tonight is off after all).
+        begin = now if start is None else datetime(start.year, start.month, start.day, tzinfo=tz)
+        state = store.load(STATE)
+        data = self._data(state, s)
+        dates = breaks.plan(s.showtime, begin, weeks, data.get("breaks", []))
+        if dates is None:
+            return "I couldn't work out the showings to skip."
+        data["breaks"] = breaks.prune(breaks.add(data.get("breaks", []), *dates, why=why, by=by), now.date())
+        data["event_sync"] = True  # the Discord Event moves to the first showing after the break
+        store.save(STATE, state)
+        self._poke_events()
+        b = breaks.covering(data["breaks"], dates[0])
+        back = breaks.next_showing(s.showtime, now, data["breaks"])
+        log.info("%s: break %s to %s (%s), by %s", s.name, b["from"], b["until"], why or "no reason", by)
+        return f"🏖️ {series_label(s)}: {breaks.describe(b, back)}"
+
+    def end_break(self, s, by: str = "") -> str:
+        """End the current break and cancel the coming ones."""
+        tz = self.bot.features.tz
+        now = datetime.now(tz)
+        state = store.load(STATE)
+        data = self._data(state, s)
+        before = data.get("breaks", [])
+        data["breaks"] = breaks.end(before, now.date())
+        if len(data["breaks"]) == len(before):
+            return f"{series_label(s)} isn't on a break."
+        data["event_sync"] = True
+        store.save(STATE, state)
+        self._poke_events()
+        nxt = breaks.next_showing(getattr(s, "showtime", "") or "", now, data["breaks"])
+        log.info("%s: break ended by %s", s.name, by)
+        return f"✅ {series_label(s)} is back on" + (f": next showing <t:{int(nxt.timestamp())}:F>." if nxt else ".")
+
+    def _poke_events(self) -> None:
+        """Have the event reminders look at the Discord Events again soon (they move them past breaks)."""
+        events = self.bot.get_cog("EventReminders") if hasattr(self.bot, "get_cog") else None
+        if events is not None:
+            events._rules_at = -1e9
+
+    def event_breaks(self, event_name: str) -> tuple[Any, list[dict[str, Any]], bool] | None:
+        """For the event reminders: the series a Discord Event is for, its breaks, and whether a break just
+        changed (so its event should be lined up again even if it isn't in a break now)."""
+        s = self.series_for_event(event_name)
+        if s is None or not getattr(s, "showtime", ""):
+            return None
+        data = store.load(STATE).get(slug(s.name), {})
+        return s, list(data.get("breaks", [])), bool(data.get("event_sync"))
+
+    def event_synced(self, s) -> None:
+        state = store.load(STATE)
+        if self._data(state, s).pop("event_sync", None):
+            store.save(STATE, state)
+
+    async def _ask_break(self, s, q: dict[str, Any]) -> None:
+        """A franchise is done: ask the movie mods how long a break to take before the next one."""
+        channel = self.approval_channel()
+        if channel is None:
+            return
+        key = slug(s.name)
+        view = discord.ui.View(timeout=None)
+        for weeks in (0, 2, 3, 4):
+            view.add_item(BreakButton(key, weeks))
+        up_next = self._data(store.load(STATE), s).get("next_franchise")
+        nxt = self.next_showing(s)
+        lines = [f"**{q['name']}** is finished. Taking a break before the next franchise?"]
+        if up_next:
+            lines.append(f"Up next: **{up_next}**.")
+        if nxt:
+            lines.append(f"Without a break, the next showing is <t:{int(nxt.timestamp())}:F>.")
+        lines.append("Pingwin moves the Discord Event and skips polls and reminders until it's back.")
+        embed = discord.Embed(title=f"🏖️ {series_label(s)}: a break?", description="\n".join(lines), color=GOLD)
+        try:
+            await channel.send(embed=embed, view=view)
+        except discord.HTTPException as e:
+            log.warning("Couldn't ask the movie mods about a break: %s", e)
+
     async def _franchise_wrap_up(self, s) -> None:
         """After a franchise's last part is logged: say so (once) and start the franchise that's up next."""
         if not is_franchise(s):
@@ -1784,6 +1966,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         note = f"**{up_next}** already won the vote, so it's up next. 🍿" if up_next else ""
         await self._queue_post(s, "franchise_done", q, None, when=None, note=note)
         self._start_next_franchise(s)
+        await self._ask_break(s, q)
 
     def _night_logged(self, s, m: dict[str, Any], day: str, title: str = "") -> None:
         """After a movie night is logged by hand (the movie pages, a voice card, /movie tonight): it comes off
@@ -2240,7 +2423,11 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             )
             return
         closes, hours = poll_close(
-            getattr(s, "showtime", ""), datetime.now(self.bot.features.tz), hours, self.cfg.poll_hours
+            getattr(s, "showtime", ""),
+            datetime.now(self.bot.features.tz),
+            hours,
+            self.cfg.poll_hours,
+            self.series_breaks(s),
         )
         question = question or f"{s.name}: what should we watch?"
         if self.cfg.pick == "choose" and len(unwatched) > 2:
@@ -2283,6 +2470,51 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             pass
         self._update_poll(s, p["message_id"], ends=discord.utils.utcnow().isoformat(), end_sent=True)
         await interaction.followup.send("Ending the poll; the winner is announced in a moment.", ephemeral=True)
+
+    @app_commands.command(name="skip", description="Skip weeks of a movie night series (movie mods)")
+    @app_commands.describe(
+        series="Which movie night",
+        weeks="How many showings to skip (default 1)",
+        starting="From which showing: like 11/13, Nov 13 or friday (default the next one)",
+        reason="Optional, like Thanksgiving or between franchises",
+    )
+    @app_commands.autocomplete(series=series_autocomplete)
+    async def skip(
+        self,
+        interaction: discord.Interaction,
+        series: str,
+        weeks: app_commands.Range[int, 1, breaks.MAX_WEEKS] = 1,
+        starting: app_commands.Range[str, 1, 30] | None = None,
+        reason: app_commands.Range[str, 0, 100] | None = None,
+    ) -> None:
+        s = await self._check(interaction, series)
+        if s is None:
+            return
+        if not self.is_movie_mod(interaction.user):
+            await interaction.response.send_message("Only movie mods can skip weeks.", ephemeral=True)
+            return
+        start = None
+        if starting:
+            start = parse_from_date(starting, datetime.now(self.bot.features.tz).date())
+            if start is None:
+                await interaction.response.send_message(
+                    "I couldn't read that date (or it's in the past). Try 11/13, Nov 13 or friday.", ephemeral=True
+                )
+                return
+        who = getattr(interaction.user, "display_name", interaction.user.name)
+        await interaction.response.send_message(self.add_break(s, weeks, start, reason or "", who), ephemeral=True)
+
+    @app_commands.command(name="unskip", description="End a series' break (movie mods)")
+    @app_commands.autocomplete(series=series_autocomplete)
+    async def unskip(self, interaction: discord.Interaction, series: str) -> None:
+        s = await self._check(interaction, series)
+        if s is None:
+            return
+        if not self.is_movie_mod(interaction.user):
+            await interaction.response.send_message("Only movie mods can end a break.", ephemeral=True)
+            return
+        who = getattr(interaction.user, "display_name", interaction.user.name)
+        await interaction.response.send_message(self.end_break(s, who), ephemeral=True)
 
     def _update_poll(self, s, message_id: int, **changes: Any) -> dict | None:
         """Change one poll in the saved state. It re-loads first (with nothing to wait on in between), so
@@ -2398,7 +2630,10 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         """The showing a poll picked the movie for: the series' showtime the poll was closing for (a poll
         ended early on Sunday is still for Monday's showing), else when the poll closed."""
         closed = discord.utils.parse_time(ends).astimezone(self.bot.features.tz)
-        return next_weekly(getattr(s, "showtime", "") or "", closed - timedelta(hours=6)) or closed
+        showing = breaks.next_showing(
+            getattr(s, "showtime", "") or "", closed - timedelta(hours=6), self.series_breaks(s)
+        )
+        return showing or closed
 
     async def finish(self, s, p: dict) -> bool:
         """Close a poll whose time is up: announce the winner, then log it for its showing (or line up the
@@ -2528,5 +2763,5 @@ class ChooseView(discord.ui.View):
 
 
 async def setup(bot: Pingwin) -> None:
-    bot.add_dynamic_items(RequestButton, RateButton, NightPick)
+    bot.add_dynamic_items(RequestButton, RateButton, NightPick, BreakButton)
     await bot.add_cog(MovieNight(bot))

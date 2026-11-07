@@ -188,6 +188,8 @@ Passing `hours` still overrides it.
 | `/pingwin movie franchise series` | Line up a franchise's movies (mods) |
 | `/pingwin movie poll series [hours] [question]` | Start a poll and ping the series' role |
 | `/pingwin movie endpoll series` | End the running poll now |
+| `/pingwin movie skip series [weeks] [starting] [reason]` | Movie mods: skip showings (a week off, or a break between franchises) |
+| `/pingwin movie unskip series` | Movie mods: end a break early |
 
 What you control (all on the dashboard):
 
@@ -202,6 +204,16 @@ What you control (all on the dashboard):
 
 The watchlists are on the movie pages (the Features tab shows a summary with a link): movie mods can mark a
 movie watched, move it to another watchlist, or remove it there.
+
+### Breaks (weeks off)
+
+Skip a week (a holiday) or take a few weeks off (between franchises) with `/pingwin movie skip`, or on the
+movie pages (Watchlists tab, under each series' next showing). While a series is on a break, no poll closes on a
+skipped night, no franchise part is announced or asked about, the voice check doesn't watch, and Pingwin
+moves the series' repeating Discord Event to the first showing after the break, so the event, its reminders
+and the "next one is..." post in the events channel show the real date. **End break** brings it back to the
+next regular showing. When a franchise is finished, the movie mods get a card asking **No break**, **2**,
+**3** or **4 weeks off**.
 
 ### Did movie night happen?
 

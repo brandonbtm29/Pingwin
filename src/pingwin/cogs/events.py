@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands, tasks
 
-from .. import store, voicewatch
+from .. import breaks, store, voicewatch
 
 if TYPE_CHECKING:
     from ..bot import Pingwin
@@ -207,6 +207,32 @@ def local_fix(rule: dict | None, start: datetime, tz) -> datetime | None:
     return None
 
 
+def next_free(rule: dict | None, after: datetime, tz, skip) -> datetime | None:
+    """A repeating event's first date at or after `after`, at the rule's local clock time, whose day isn't
+    skipped (`skip(day)` is true for days in a break). Unlike next_occurrence this can land before the rule's
+    start, so a break that ends early can bring the event back earlier. Daily and single-day weekly rules only."""
+    if not rule or not rule.get("start"):
+        return None
+    try:
+        anchor = datetime.fromisoformat(rule["start"]).astimezone(tz)
+    except ValueError:
+        return None
+    interval = max(1, int(rule.get("interval") or 1))
+    if rule.get("frequency") == 3:
+        step = interval
+    elif rule.get("frequency") == 2 and len(rule.get("by_weekday") or [0]) == 1:
+        step = 7 * interval
+    else:
+        return None
+    k = (after.astimezone(tz).date() - anchor.date()).days // step - 1
+    for i in range(k, k + 200):
+        day = anchor.date() + timedelta(days=i * step)
+        when = _at(day, anchor, tz)
+        if when >= after and not skip(day):
+            return when
+    return None
+
+
 def effective_start(event, rule: dict | None, now: datetime, tz=UTC) -> datetime:
     """When the event is next on: its own start, or for a repeating event stuck on a date nobody started, the
     next date from its rule."""
@@ -261,6 +287,7 @@ class EventReminders(commands.Cog):
         rules = await self._rules(guild)
         tz = self.bot.features.tz
         await self._keep_local_time(guild, now)
+        await self._respect_breaks(guild, now)
         for event in guild.scheduled_events:
             when = effective_start(event, rules.get(event.id), now, tz)
             when = after_move(store.load(STATE).get(str(event.id), {}), when)
@@ -289,6 +316,7 @@ class EventReminders(commands.Cog):
             raw = await self.bot.http.get_scheduled_events(guild.id, False)
             self._rules_cache = {int(e["id"]): e.get("recurrence_rule") for e in raw}
             self._raw_events = raw
+            self._raw_latest = raw
         except (discord.HTTPException, AttributeError, KeyError, TypeError) as e:
             log.info("Couldn't read the events' repeat rules: %s", e)
             self._rules_cache = getattr(self, "_rules_cache", {})
@@ -320,38 +348,90 @@ class EventReminders(commands.Cog):
                     f"{want:%a %H:%M}",
                 )
                 continue
-            payload: dict = {"scheduled_start_time": want.isoformat()}
-            if e.get("scheduled_end_time"):
-                end = datetime.fromisoformat(e["scheduled_end_time"])
-                payload["scheduled_end_time"] = (end + (want - start)).isoformat()
-            keep = ("frequency", "interval", "by_weekday", "by_n_weekday", "by_month", "by_month_day")
-            new_rule = {k: rule.get(k) for k in keep} | {"start": want.isoformat()}
-            # Thu 7:30 PM EDT is Thu 23:30 UTC, but 7:30 PM EST is Fri 00:30 UTC: the rule's weekday moves too.
-            day_shift = (want.astimezone(UTC).date() - start.astimezone(UTC).date()).days
-            new_rule["by_weekday"] = shift_weekdays(new_rule.get("by_weekday"), day_shift)
-            route = discord.http.Route(
-                "PATCH",
-                "/guilds/{guild_id}/scheduled-events/{event_id}",
-                guild_id=guild.id,
-                event_id=e["id"],
-            )
-            reason = "Pingwin: keep the event at its local time after the clock change"
-            try:
-                await self.bot.http.request(route, json=payload | {"recurrence_rule": new_rule}, reason=reason)
-            except discord.HTTPException as err:
-                log.info("Moving %s with its repeat rule didn't work (%s); trying the date alone", e.get("name"), err)
-                try:
-                    await self.bot.http.request(route, json=payload, reason=reason)
-                except discord.HTTPException as err2:
-                    log.warning("Couldn't move %s back to its local time: %s", e.get("name"), err2)
-                    continue
+            if not await self._move_event(
+                guild, e, start, want, "Pingwin: keep the event at its local time after the clock change"
+            ):
+                continue
             self._remember_move(e["id"], start, want)
             log.info(
                 "Moved %s back to %s (its local time) after the clock change",
                 e.get("name"),
                 f"{want:%a %b %d %H:%M %Z}",
             )
-            self._rules_at = -1e9  # read the events again next time
+
+    async def _move_event(self, guild: discord.Guild, e: dict, start: datetime, want: datetime, reason: str) -> bool:
+        """PATCH a repeating event to start at `want` instead of `start`, keeping its repeat rule in step."""
+        rule = e.get("recurrence_rule") or {}
+        payload: dict = {"scheduled_start_time": want.isoformat()}
+        if e.get("scheduled_end_time"):
+            end = datetime.fromisoformat(e["scheduled_end_time"])
+            payload["scheduled_end_time"] = (end + (want - start)).isoformat()
+        keep = ("frequency", "interval", "by_weekday", "by_n_weekday", "by_month", "by_month_day")
+        new_rule = {k: rule.get(k) for k in keep} | {"start": want.isoformat()}
+        # Thu 7:30 PM EDT is Thu 23:30 UTC, but 7:30 PM EST is Fri 00:30 UTC: the rule's weekday moves too.
+        old_utc = datetime.fromisoformat(rule["start"]).astimezone(UTC) if rule.get("start") else start
+        day_shift = (want.astimezone(UTC).weekday() - old_utc.astimezone(UTC).weekday()) % 7
+        day_shift = day_shift - 7 if day_shift > 3 else day_shift
+        new_rule["by_weekday"] = shift_weekdays(new_rule.get("by_weekday"), day_shift)
+        route = discord.http.Route(
+            "PATCH",
+            "/guilds/{guild_id}/scheduled-events/{event_id}",
+            guild_id=guild.id,
+            event_id=e["id"],
+        )
+        try:
+            await self.bot.http.request(route, json=payload | {"recurrence_rule": new_rule}, reason=reason)
+        except discord.HTTPException as err:
+            log.info("Moving %s with its repeat rule didn't work (%s); trying the date alone", e.get("name"), err)
+            try:
+                await self.bot.http.request(route, json=payload, reason=reason)
+            except discord.HTTPException as err2:
+                log.warning("Couldn't move %s: %s", e.get("name"), err2)
+                return False
+        self._rules_at = -1e9  # read the events again next time
+        return True
+
+    async def _respect_breaks(self, guild: discord.Guild, now: datetime) -> None:
+        """A movie night series on a break: move its repeating Discord Event to the first showing after the
+        break, so the event, its reminders and the "next one is..." post show the real date. When a break ends
+        early, the event comes back to the next regular showing."""
+        movie = self.bot.get_cog("MovieNight") if hasattr(self.bot, "get_cog") else None
+        raw = getattr(self, "_raw_latest", None)
+        if movie is None or not raw or not hasattr(movie, "event_breaks"):
+            return
+        tz = self.bot.features.tz
+        tried = self.__dict__.setdefault("_break_moves", set())
+        for e in raw:
+            rule = e.get("recurrence_rule")
+            if e.get("status") != 1 or not rule:  # only scheduled, repeating events
+                continue
+            info = movie.event_breaks(e.get("name") or "")
+            if info is None:
+                continue
+            s, brks, sync = info
+            if not brks and not sync:
+                continue
+            start = datetime.fromisoformat(e["scheduled_start_time"])
+
+            def skip(day, brks=brks):
+                return breaks.covering(brks, day) is not None
+
+            # An unstarted date that's long past counts as over: the event is really on its next one.
+            current = start if now - start <= MISSED_AFTER else next_free(rule, now, tz, lambda d: False) or start
+            want = next_free(rule, now, tz, skip)
+            if not skip(current.date()) and not (sync and want is not None and want < current):
+                if sync:
+                    movie.event_synced(s)
+                continue
+            if want is None or want == start or f"{e['id']}:{start}:{want}" in tried:
+                continue
+            tried.add(f"{e['id']}:{start}:{want}")
+            if not guild.me.guild_permissions.manage_events:
+                log.warning("%s is on a break, but Pingwin needs Manage Events to move its Discord Event", s.name)
+                continue
+            if await self._move_event(guild, e, start, want, "Pingwin: the movie night is on a break"):
+                movie.event_synced(s)
+                log.info("Moved %s to %s, after %s's break", e.get("name"), f"{want:%a %b %d %H:%M %Z}", s.name)
 
     def _remember_move(self, event_id, old: datetime, new: datetime) -> None:
         """Note Pingwin's own clock-change move (in the shared state, so another PC knows too), so the new time
@@ -478,6 +558,7 @@ class EventReminders(commands.Cog):
             text = self.bot.persona.say("event_new", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
         elif kind == "next":
             text = self.bot.persona.say("event_next", event=event.name, when=f"<t:{start}:F> (<t:{start}:R>)")
+            text += self._break_note(event, when)
         elif kind == "reminded":
             text = self._reminder_text(event, reminder, start, info)
         else:
@@ -501,6 +582,17 @@ class EventReminders(commands.Cog):
             record.setdefault(f"reminded:{minutes}", stamp)
         store.save(STATE, state)
         log.info("Event %s: %s (pinged %s)", kind, event.name, ", ".join(r.name for r in roles) or "nobody")
+
+    def _break_note(self, event: discord.ScheduledEvent, when: datetime) -> str:
+        """'🏖️ Taking a break until then (between franchises).' when the week before this date is skipped."""
+        movie = self.bot.get_cog("MovieNight") if hasattr(self.bot, "get_cog") else None
+        info = movie.event_breaks(event.name) if movie is not None and hasattr(movie, "event_breaks") else None
+        if not info:
+            return ""
+        b = breaks.covering(info[1], (when.astimezone(self.bot.features.tz) - timedelta(days=7)).date())
+        if b is None:
+            return ""
+        return "\n🏖️ Taking a break until then" + (f" ({b['why']})." if b.get("why") else ".")
 
     async def _movie_info(self, event: discord.ScheduledEvent, start: int) -> dict | None:
         """For a movie night: where the vote stands (or tonight's franchise part) and the likely movie."""
