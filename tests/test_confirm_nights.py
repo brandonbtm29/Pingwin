@@ -6,7 +6,7 @@ from datetime import date, datetime
 from types import SimpleNamespace as NS
 
 import pytest
-from test_movie_fixes import ET, confirm, fff, history, make_cog, mmm, nom, posts, use_clock
+from test_movie_fixes import ET, confirm, fff, history, make_cog, mmm, night_request, nom, posts, use_clock
 
 from pingwin import franchise, movies, store
 from pingwin.cogs import movienight
@@ -110,3 +110,29 @@ def test_keywords_match_whole_words():
     assert match_roles("FFF", rules, "Our Friday movie night") == ["Franchise fans"]
     assert match_roles("Friday hangout", rules, "Bring a movie") == ["Movie fans"]
     assert match_roles("Arthur", [NS(role="Art", keywords=["art"])]) == []
+
+
+def test_a_night_added_from_the_movie_pages_closes_its_card(monkeypatch):
+    use_clock(monkeypatch, datetime(2026, 11, 3, 1, 0, tzinfo=ET))
+
+    async def go():
+        cog, ch = make_cog([mmm()], voice_check=True, voice_min_people=2, voice_min_minutes=1, rate=True)
+        s = cog.series("MMM")
+        sess = {"day": "2026-11-02", "seconds": {"1": 3600, "2": 3600}, "first_seen": 0, "last_seen": 3600}
+        cog.bot.home_guild = NS(get_member=lambda uid: NS(display_name=f"P{uid}"))
+        await cog._voice_verdict(s, sess)  # people were in voice, but nobody knows which movie
+        (req,) = movies.load()["pending"].values()
+        assert req["status"] == "pending" and not req["data"].get("expected")
+        data = {"title": "Arrival", "year": 2016, "imdb_id": None, "date": "2026-11-02", "rate": False}
+        assert "Added" in await cog.apply("night", "MMM", data, 1)
+        (req,) = movies.load()["pending"].values()
+        assert req["status"] == "approved"  # the card is done
+        (e,) = movies.load()["history"]
+        assert e["voice"]["people"] == 2 and "rate_at" not in e  # who was in voice, and no Rate it
+        # Another night on the pages leaves other nights' cards alone.
+        await cog._voice_verdict(s, {**sess, "day": "2026-10-26"})
+        data = {**data, "title": "Contact", "year": 1997, "date": "2026-10-19"}
+        await cog.apply("night", "MMM", data, 1)
+        assert night_request("MMM", "2026-10-26")["status"] == "pending"
+
+    asyncio.run(go())

@@ -1852,8 +1852,31 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             e["rate_channel"] = s.channel
         movies.save(lib)
         self._night_logged(s, m, day, title)
+        await self._close_night_card(s, day, e["id"], movies.label(m))
         await self._franchise_wrap_up(s)
         return e, created
+
+    async def _close_night_card(self, s, day: str, entry_id: str, label: str) -> None:
+        """A night logged some other way (the movie pages, /movie watched) while its "did it happen?" card was
+        still waiting: the card is done, and who was in voice goes on the history entry."""
+        lib = movies.load()
+        req = self._pending_night(lib, s, day)
+        if req is None:
+            return
+        req["status"], req["decided_by"] = "approved", "logged elsewhere"
+        voice = req["data"].get("voice")
+        entry = next((e for e in lib["history"] if e.get("id") == entry_id), None)
+        if voice and entry is not None and not entry.get("voice"):
+            entry["voice"] = voice
+        movies.save(lib)
+        msg = f"✅ **{label}** was added to the {req['series']} history for {day}, so this night is done."
+        card = req.get("card")
+        channel = self.bot.get_channel(card[0]) if card else None
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.get_partial_message(card[1]).edit(content=msg, embed=None, view=None)
+            except discord.HTTPException:
+                pass
 
     # ------------------------------------------------------------ breaks (weeks off)
     def series_breaks(self, s) -> list[dict[str, Any]]:

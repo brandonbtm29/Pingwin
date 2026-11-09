@@ -222,7 +222,9 @@ queue reaches a part, or someone sets `/pingwin movie tonight`, the movie mods g
 in the approval channel (and on the movie pages): **Yes, we watched it** adds it to the history, marks it
 watched and posts the Rate it button (not before the movie is over); picking another movie logs that one
 instead; **We skipped it** leaves the history alone, and a franchise part stays next in line for the following
-week. If the voice check also noticed the night, it adds who was there to the same card.
+week. If the voice check also noticed the night, it adds who was there to the same card. Adding that night
+another way (the movie pages' **Add a movie night**, or `/pingwin movie watched`) closes its card too, and
+who was in voice goes on the history entry.
 
 ### Franchise queues
 
