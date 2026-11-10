@@ -433,6 +433,17 @@ SECTIONS: list[dict[str, Any]] = [
                 half=True,
                 show_if={"rate": [True]},
             ),
+            F(
+                "voice_ratings",
+                "toggle",
+                "Rate by voice message",
+                True,
+                "Instead of typing, people can send Pingwin a voice message: in a DM, or as a reply to the Rate it "
+                "post. This PC turns it into text with Whisper (free, and the recording never leaves the PC; about "
+                "0.5 GB downloads the first time). They check the score and words, then tap Save.",
+                group="Ratings",
+                show_if={"rate": [True]},
+            ),
             # ---- movie details
             F(
                 "OMDB_API_KEY",

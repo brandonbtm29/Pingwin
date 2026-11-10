@@ -118,7 +118,11 @@
             <p class="qa"><span id="rv-q-from"></span> asked: <em id="rv-q"></em></p>
             <label>Your answer<input id="rv-answer" maxlength="500" placeholder="Optional"></label>
           </div>
-          <label>Ask the next person a question<input id="rv-ask" maxlength="300" placeholder="How many … out of …? (optional)"></label>
+          <div class="grid2">
+            <label>Ask someone a question<input id="rv-ask" maxlength="300" placeholder="How many … out of …? (optional)"></label>
+            <label>Who should answer it?<select id="rv-ask-for"></select>
+              <span class="hint">Pingwin pings them in Discord.</span></label>
+          </div>
           <div class="row-actions"><button class="btn primary" id="rv-go">Post review</button><span class="hint" id="rv-result"></span></div>
         </div>
       </details>

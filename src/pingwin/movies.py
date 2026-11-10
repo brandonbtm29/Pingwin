@@ -457,6 +457,8 @@ def add_rating(
     ask: str = "",
     answered: str = "",
     answered_from: str | None = None,
+    ask_for: str | None = None,
+    ask_for_name: str = "",
 ) -> None:
     entry.setdefault("ratings", {})[key] = {
         "name": name,
@@ -467,6 +469,8 @@ def add_rating(
         "answer": answer.strip(),
         "ask": ask.strip(),  # the question they pass on to the next rater
         "answered_from": answered_from if answered else None,  # rater key of whoever asked them
+        "ask_for": ask_for if ask.strip() else None,  # the member their question is for (None: whoever's next)
+        "ask_for_name": ask_for_name if ask.strip() and ask_for else "",
         "at": time.time(),
     }
 
@@ -572,16 +576,49 @@ def set_people(lib: dict[str, Any], mapping: dict[str, Any]) -> int:
     return changed
 
 
+# The question game: each rater can ask a question, either of one member they pick ("ask_for") or of whoever
+# rates next. A question is answered once someone's rating says it answered it ("answered_from").
+def open_questions(entry: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Questions nobody has answered yet, oldest first: (asker's rater key, their rating)."""
+    ratings = entry.get("ratings", {})
+    done = {r["answered_from"] for r in ratings.values() if r.get("answered") and r.get("answered_from")}
+    return sorted(
+        ((k, r) for k, r in ratings.items() if r.get("ask") and k not in done), key=lambda kv: kv[1].get("at", 0)
+    )
+
+
+def question_for(entry: dict[str, Any], key: str | None) -> tuple[str, str | None]:
+    """The question rater `key` gets in their rating form, and who asked it: the one they already answered
+    (when they change their rating), else one asked of them by name, else the newest one left for whoever
+    rates next. ("", None) when there's none."""
+    mine = entry.get("ratings", {}).get(key or "") or {}
+    if mine.get("answered"):
+        return mine["answered"], mine.get("answered_from")
+    waiting = [(k, r) for k, r in open_questions(entry) if k != key]
+    for k, r in waiting:
+        if key and r.get("ask_for") == key:
+            return r["ask"], k
+    for k, r in reversed(waiting):
+        if not r.get("ask_for"):
+            return r["ask"], k
+    return "", None
+
+
 def open_question(entry: dict[str, Any]) -> str:
-    """The question the most recent rater passed on (for whoever rates next)."""
-    rs = sorted(entry.get("ratings", {}).values(), key=lambda r: r.get("at", 0))
-    return rs[-1].get("ask", "") if rs else ""
+    """The question waiting for whoever rates next (not one asked of someone by name)."""
+    return question_for(entry, None)[0]
 
 
-def open_asker(entry: dict[str, Any], skip: str | None = None) -> str | None:
-    """The rater key of whoever asked the open question (the most recent rater, if they asked one)."""
-    rs = sorted(((k, r) for k, r in entry.get("ratings", {}).items() if k != skip), key=lambda kv: kv[1].get("at", 0))
-    return rs[-1][0] if rs and rs[-1][1].get("ask") else None
+def ask_problem(entry: dict[str, Any], asker: str, target: str) -> str:
+    """Why `asker` can't send their question to member `target` ("" if they can): one question each."""
+    if target == asker:
+        return "you can't ask yourself"
+    theirs = entry.get("ratings", {}).get(target) or {}
+    if theirs.get("answered") and theirs.get("answered_from") != asker:
+        return "they already answered a question for this movie"
+    if any(r.get("ask_for") == target for k, r in open_questions(entry) if k != asker):
+        return "someone else's question is already waiting for them"
+    return ""
 
 
 def question_chain(entry: dict[str, Any], names: dict[str, str]) -> dict[str, dict[str, Any]]:
@@ -602,7 +639,9 @@ def question_chain(entry: dict[str, Any], names: dict[str, str]) -> dict[str, di
             if src in out:
                 out[src]["to"].append(who(k))
     for k, r in ratings.items():
-        if r.get("ask") and not out[k]["to"] and r.get("ask_to"):
+        if r.get("ask") and not out[k]["to"] and r.get("ask_for"):  # asked of a member who hasn't answered yet
+            out[k]["to"] = [names.get(r["ask_for"]) or r.get("ask_for_name") or "someone"]
+        elif r.get("ask") and not out[k]["to"] and r.get("ask_to"):
             out[k]["to"] = [r["ask_to"]]  # as written in the document, for someone who didn't rate
     return out
 

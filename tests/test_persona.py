@@ -72,6 +72,9 @@ def test_every_pingwin_line_fills_in():
         part="2",
         total="4",
         short="FF",
+        target="<@1>",
+        asker="Sam",
+        question="How many eggs?",
     )
     for key in DEFAULT_MESSAGES:
         for template in p.messages[key]:

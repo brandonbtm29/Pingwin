@@ -28,3 +28,4 @@ Thumbs.db
 /install-record.json
 /.dashboard-sessions.json
 /state/
+/models/

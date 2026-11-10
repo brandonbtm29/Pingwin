@@ -48,6 +48,14 @@ movie_rate_prompt = [
     "Lights up! 🎞️ Score it out of 10 and leave a comment. Ratings close {closes}.",
     "The credits have rolled. 🐧 Give it a score out of 10 and a few words before {closes}.",
 ]
+movie_rate_starter = [
+    "🎬 {target}, you're up first for **{title}**! Waddle over and tap **Rate it** to kick things off. 🐧",
+    "🐧 Noot noot, {target}! You get the first word on **{title}**. Tap **Rate it**.",
+]
+movie_question_for = [
+    "❓ {target}, **{asker}** slid a question across the ice about **{title}**: *{question}* 🐧",
+    "🐧 Noot noot, {target}! **{asker}** wants to know about **{title}**: *{question}*",
+]
 movie_summary = [
     "📊 **{title}**: {count}, colony average **{avg}/10**",
     "🐧 The flippers have spoken on **{title}**: {count}, average **{avg}/10**",

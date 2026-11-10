@@ -3,8 +3,9 @@
 * Each series (like MMM or FFF) has its own watchlist, role, channel and weekly showtime.
 * Members' changes (nominations, removals, watched marks, history fixes) can need a mod's OK: Pingwin posts
   a card with Approve / Deny in the mods' channel. Mods' own changes go straight through.
-* After a movie, Pingwin posts a "Rate it" button. Everyone gives a score out of 10, a comment, and can pass
-  a silly question on to the next person. When ratings close, Pingwin posts the group average.
+* After a movie, Pingwin posts a "Rate it" button. Everyone gives a score out of 10, a comment, and can ask
+  a silly question of someone they pick (who gets pinged) or of whoever rates next. Ratings can also come in
+  as voice messages (see cogs.voicerating). When ratings close, Pingwin posts the group average.
 * Movie details (year, runtime, IMDb rating, director, stars, poster) come from OMDb, looked up once.
 
 The watchlists live in state/movienight.json and the library (history, ratings, details, requests) in
@@ -29,7 +30,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import breaks, franchise, movieaccess, movies, store, voicewatch
+from .. import breaks, franchise, movieaccess, movies, store, voicerate, voicewatch
 from ..features import slug
 from ..timeparse import next_weekly
 
@@ -384,6 +385,91 @@ class NightPick(discord.ui.DynamicItem[discord.ui.Select], template=r"pingwin:mv
             pass
 
 
+class StarterPick(discord.ui.DynamicItem[discord.ui.UserSelect], template=r"pingwin:mvf:(?P<rid>[0-9a-f]+)"):
+    """On a "did movie night happen?" card: movie mods can pick who rates first (optional)."""
+
+    def __init__(self, rid: str) -> None:
+        super().__init__(
+            discord.ui.UserSelect(
+                custom_id=f"pingwin:mvf:{rid}", placeholder="Who rates first? (optional)", min_values=0, max_values=1
+            )
+        )
+        self.rid = rid
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.UserSelect, match):
+        return cls(match["rid"])
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return getattr(interaction.client, "is_active", True)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        if cog is None:
+            return
+        if not cog.is_movie_mod(interaction.user):
+            await interaction.response.send_message("Only movie mods can pick this.", ephemeral=True)
+            return
+        values = (interaction.data or {}).get("values") or []
+        guild = interaction.guild
+        member = guild.get_member(int(values[0])) if values and guild is not None else None
+        problem, card = cog.set_night_starter(self.rid, member, picked=bool(values))
+        if problem or card is None:
+            await interaction.response.send_message(problem or "This one was already handled.", ephemeral=True)
+            return
+        await interaction.response.edit_message(embed=card[0], view=card[1])
+
+
+class StarterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pingwin:rst:(?P<hid>[0-9a-f]+)"):
+    """On a Rate it post nobody has rated yet: pick who goes first (optional)."""
+
+    def __init__(self, hid: str) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Pick who starts", emoji="🎬", style=discord.ButtonStyle.secondary, custom_id=f"pingwin:rst:{hid}"
+            )
+        )
+        self.hid = hid
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match):
+        return cls(match["hid"])
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return getattr(interaction.client, "is_active", True)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        if cog is None:
+            return
+        problem = cog.starter_problem(self.hid)
+        if problem:
+            await interaction.response.send_message(problem, ephemeral=True)
+            return
+        view = discord.ui.View(timeout=300)
+        view.add_item(StarterMenu(self.hid))
+        await interaction.response.send_message("Who should rate first? I'll ping them.", view=view, ephemeral=True)
+
+
+class StarterMenu(discord.ui.UserSelect):
+    """The member picker the "Pick who starts" button shows (only to whoever clicked it)."""
+
+    def __init__(self, hid: str) -> None:
+        super().__init__(placeholder="Pick someone", min_values=1, max_values=1)
+        self.hid = hid
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        if cog is None or not self.values:
+            return
+        await interaction.response.defer()
+        msg = await cog.pick_starter(self.hid, self.values[0], interaction.user)
+        try:
+            await interaction.edit_original_response(content=msg, view=None)
+        except discord.HTTPException:
+            pass
+
+
 class OtherNightModal(discord.ui.Modal, title="Which movie was it?"):
     movie = discord.ui.TextInput(label="Title", max_length=100, placeholder="Like The Thing (1982)")
     year = discord.ui.TextInput(label="Year (optional)", max_length=4, required=False)
@@ -438,53 +524,76 @@ async def open_rating(interaction: discord.Interaction, hid: str) -> None:
         await interaction.response.send_message("Ratings for this one have closed.", ephemeral=True)
         return
     movie = lib["movies"].get(entry["movie_id"], {"title": "the movie"})
-    await interaction.response.send_modal(RateModal(hid, movie, entry, str(interaction.user.id)))
+    await interaction.response.send_modal(
+        RateModal(hid, movie, entry, str(interaction.user.id), pick_person=interaction.guild is not None)
+    )
 
 
 PICKED = re.compile(r"(?P<id>(?:tt\d{6,10})?)\|(?P<title>[^|]+)\|(?P<year>\d{4})?")
 
 
 class RateModal(discord.ui.Modal):
-    def __init__(self, hid: str, movie: dict[str, Any], entry: dict[str, Any], uid: str) -> None:
+    def __init__(
+        self,
+        hid: str,
+        movie: dict[str, Any],
+        entry: dict[str, Any],
+        uid: str,
+        draft: dict[str, Any] | None = None,
+        draft_id: str | None = None,
+        pick_person: bool = True,
+    ):
+        """The Rate it form. `draft` fills in a voice message's score and words (`draft_id` is its card, which
+        this form then replaces); `pick_person` is off in DMs, where Discord can't list the server's members."""
         super().__init__(title=f"Rate {movie['title']}"[:45])
-        self.hid = hid
-        mine = entry.get("ratings", {}).get(uid, {})
-        question = movies.open_question({"ratings": {k: v for k, v in entry.get("ratings", {}).items() if k != uid}})
-        self.question = question
-        self.asker = movies.open_asker(entry, skip=uid)
+        self.hid, self.uid, self.draft_id = hid, uid, draft_id
+        mine = {**entry.get("ratings", {}).get(uid, {}), **(draft or {})}  # a voice message's score and words
+        self.question, self.asker = movies.question_for(entry, uid)
         self.score = discord.ui.TextInput(
-            label="Your score out of 10",
             placeholder="Like 7 or 7.5",
             max_length=4,
             default=None if mine.get("score") is None else f"{mine['score']:g}",
         )
         self.comment = discord.ui.TextInput(
-            label="What did you think?",
             style=discord.TextStyle.paragraph,
             required=False,
             max_length=1000,
             default=mine.get("comment") or None,
         )
-        self.add_item(self.score)
-        self.add_item(self.comment)
+        self.add_item(discord.ui.Label(text="Your score out of 10", component=self.score))
+        self.add_item(discord.ui.Label(text="What did you think?", component=self.comment))
         self.answer = None
-        if question:
+        if self.question:
+            asker = (entry.get("ratings", {}).get(self.asker or "") or {}).get("name") or "Someone"
+            q = self.question if len(self.question) <= 100 else self.question[:99] + "…"
             self.answer = discord.ui.TextInput(
-                label="The last person asked you…",
-                placeholder=question[:100],
-                required=False,
-                max_length=300,
-                default=mine.get("answer") or None,
+                required=False, max_length=300, placeholder="Your answer", default=mine.get("answer") or None
             )
-            self.add_item(self.answer)
+            self.add_item(discord.ui.Label(text=f"{asker} asked you"[:45], description=q, component=self.answer))
         self.ask = discord.ui.TextInput(
-            label="Ask the next person a question",
             placeholder="How many ___ out of ___?",
             required=False,
             max_length=200,
             default=mine.get("ask") or None,
         )
-        self.add_item(self.ask)
+        self.add_item(discord.ui.Label(text="Ask someone a question", component=self.ask))
+        self.who = None
+        if not pick_person:
+            return
+        self.who = discord.ui.UserSelect(
+            placeholder="Whoever rates next",
+            min_values=0,
+            max_values=1,
+            required=False,
+            default_values=[discord.Object(int(mine["ask_for"]))] if str(mine.get("ask_for") or "").isdigit() else [],
+        )
+        self.add_item(
+            discord.ui.Label(
+                text="Who should answer it?",
+                description="I'll ping them. Leave it empty for whoever rates next.",
+                component=self.who,
+            )
+        )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         score = movies.parse_score(str(self.score.value))
@@ -498,24 +607,60 @@ class RateModal(discord.ui.Modal):
             await interaction.response.send_message("Ratings for this one have closed.", ephemeral=True)
             return
         user = interaction.user
+        ask = str(self.ask.value or "").strip()
+        picked = self.who.values[0] if self.who is not None and self.who.values else None
+        if self.who is None:  # no picker (a DM): whoever they asked before stays
+            mine = entry.get("ratings", {}).get(self.uid) or {}
+            picked = NamedMember(mine["ask_for"], mine.get("ask_for_name", "")) if mine.get("ask_for") else None
+        ask_for, note = pick_asked(entry, self.uid, ask, picked)
+        answer = str(self.answer.value or "").strip() if self.answer else ""
+        old = dict(entry.get("ratings", {}).get(self.uid) or {})
         movies.add_rating(
             entry,
-            str(user.id),
+            self.uid,
             name=getattr(user, "display_name", user.name),
-            user_id=str(user.id),
+            user_id=self.uid,
             score=score,
             comment=str(self.comment.value or ""),
-            answered=self.question if self.answer else "",
+            answered=self.question if answer else "",
             answered_from=self.asker,
-            answer=str(self.answer.value or "") if self.answer else "",
-            ask=str(self.ask.value or ""),
+            answer=answer,
+            ask=ask,
+            ask_for=str(ask_for.id) if ask_for else None,
+            ask_for_name=getattr(ask_for, "display_name", "") if ask_for else "",
         )
+        if old:
+            entry["ratings"][self.uid]["at"] = old.get("at", time.time())  # keep its place in the question game
         movies.save(lib)
-        await interaction.response.send_message(
-            interaction.client.persona.say("movie_rated", score=f"{score:g}"), ephemeral=True
-        )
+        thanks = interaction.client.persona.say("movie_rated", score=f"{score:g}") + note
+        if self.draft_id:  # from a voice message's card: the card becomes the thank-you
+            voice = interaction.client.get_cog("VoiceRatings")  # type: ignore[union-attr]
+            if voice is not None:
+                voice.forget(self.draft_id)
+            await interaction.response.edit_message(content=thanks, embed=None, view=None)
+        else:
+            await interaction.response.send_message(thanks, ephemeral=True)
         if cog:
-            await cog.refresh_prompt(entry, lib)
+            await cog.after_rating(self.hid, self.uid, old)
+
+
+class NamedMember(SimpleNamespace):
+    """Who a rater asked before, when the form had no picker to ask again."""
+
+    def __init__(self, uid: str, name: str) -> None:
+        super().__init__(id=int(uid), display_name=name or "them", bot=False)
+
+
+def pick_asked(entry: dict[str, Any], uid: str, ask: str, who) -> tuple[Any, str]:
+    """The member a rater's question goes to (None: whoever rates next), and a note when it can't go to the
+    one they picked."""
+    if who is None or not ask:
+        return None, ""
+    problem = "bots don't rate movies" if getattr(who, "bot", False) else movies.ask_problem(entry, uid, str(who.id))
+    if problem:
+        name = getattr(who, "display_name", "them")
+        return None, f"\n-# Your question didn't go to {name}: {problem}. It's waiting for whoever rates next."
+    return who, ""
 
 
 def is_franchise(s) -> bool:
@@ -1381,6 +1526,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             )
         else:
             lines.append(f"Which movie was it? Picking one adds it to the history{rate}.")
+        if self.cfg.rate and d.get("starter"):
+            lines.append(f"🎬 **{d['starter']['name']}** rates first (I'll ping them when the Rate it button is up).")
         label = f"{series_label(s)} on {_day_label(d['date'])}"
         title = f"🎬 Did {label} happen?" if exp and not voice else f"🎬 Looks like {label} happened!"
         embed = discord.Embed(title=title, description="\n".join(lines), color=GOLD)
@@ -1398,7 +1545,29 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             view.add_item(RequestButton(req["id"], "ok", label=f"Yes, we watched {exp['title']}"[:80]))
         view.add_item(NightPick(req["id"], options))
         view.add_item(RequestButton(req["id"], "no", label="We skipped it"))
+        if self.cfg.rate:
+            view.add_item(StarterPick(req["id"]))
         return embed, view
+
+    def set_night_starter(
+        self, rid: str, member, picked: bool = True
+    ) -> tuple[str, tuple[discord.Embed, discord.ui.View] | None]:
+        """A movie mod picks (or clears) who rates first on a night's card. Returns (problem, new card)."""
+        lib = movies.load()
+        req = lib["pending"].get(rid)
+        s = self.series(req["series"]) if req else None
+        if req is None or req.get("status") != "pending" or req.get("kind") != "detected" or s is None:
+            return "This one was already handled.", None
+        if picked and member is None:
+            return "I can't find that person in the server.", None
+        if member is not None and getattr(member, "bot", False):
+            return "Bots don't rate movies.", None
+        if member is None:
+            req["data"].pop("starter", None)
+        else:
+            req["data"]["starter"] = {"uid": str(member.id), "name": member.display_name}
+        movies.save(lib)
+        return "", self._night_card(s, req)
 
     async def _refresh_night_card(self, s, req: dict[str, Any]) -> None:
         card = req.get("card")
@@ -1574,6 +1743,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             entry = next((x for x in lib["history"] if x["id"] == e["id"]), None)
             if entry is not None:
                 entry["voice"] = d.get("voice")
+                if d.get("starter") and not entry.get("ratings") and not entry.get("starter"):
+                    entry["starter"] = {**d["starter"], "by": who}  # pinged when the Rate it button goes up
                 movies.save(lib)
             m = lib["movies"].get(e["movie_id"], {"title": pick["title"]})
             label = f"{m['title']} ({m['year']})" if m.get("year") else m["title"]
@@ -1597,9 +1768,17 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         mod: discord.abc.User,
         choice: int | None = None,
         custom: dict[str, Any] | None = None,
+        starter: str | None = None,
     ) -> str:
         lib = movies.load()
         req = lib["pending"].get(rid)
+        if req is not None and req.get("kind") == "detected" and starter is not None:  # from the movie pages
+            guild = getattr(self.bot, "home_guild", None)
+            member = guild.get_member(int(starter)) if guild is not None and starter.isdigit() else None
+            if member is not None and not member.bot:
+                req["data"]["starter"] = {"uid": str(member.id), "name": member.display_name}
+            elif not starter:
+                req["data"].pop("starter", None)
         if req is None or req.get("status") != "pending":
             return "This one was already handled."
         if req["kind"] == "detected":
@@ -2046,6 +2225,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             if closed
             else self.bot.persona.say("movie_rate_prompt", closes=f"<t:{int(closes)}:R>")
         )
+        if not closed and getattr(self.cfg, "voice_ratings", False) and voicerate.available():
+            desc += "\n🎙️ *Rather say it? Reply here with a voice message, or DM me one.*"
         if lines:
             desc += "\n\n" + "\n".join(lines)
         if avg is not None:
@@ -2055,9 +2236,21 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         embed = discord.Embed(title=f"⭐ {movies.label(movie)}", description=desc[:4000], color=GOLD)
         if movie.get("poster"):
             embed.set_thumbnail(url=movie["poster"])
-        q = movies.open_question(entry)
-        if q and not closed:
-            embed.set_footer(text=f"Next person's question: {q}"[:2000])
+        if not closed:
+            waiting = [
+                names.get(r["ask_for"]) or r.get("ask_for_name") or "someone"
+                for _k, r in movies.open_questions(entry)
+                if r.get("ask_for")
+            ]
+            foot = []
+            if entry.get("starter") and not entry.get("ratings"):
+                foot.append(f"{entry['starter']['name']} goes first")
+            if q := movies.open_question(entry):
+                foot.append(f"Next person's question: {q}")
+            if waiting:
+                foot.append("Questions waiting for " + ", ".join(waiting))
+            if foot:
+                embed.set_footer(text="\n".join(foot)[:2000])
         return embed
 
     async def post_prompt(self, entry: dict[str, Any], lib: dict[str, Any]) -> None:
@@ -2067,16 +2260,80 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             return
         movie = lib["movies"].get(entry["movie_id"], {"title": "the movie"})
         closes = time.time() + self.cfg.rate_hours * 3600
-        view = discord.ui.View(timeout=None)
-        view.add_item(RateButton(entry["id"]))
         try:
-            msg = await channel.send(embed=self._prompt_embed(entry, movie, closes), view=view)
+            msg = await channel.send(embed=self._prompt_embed(entry, movie, closes), view=self._prompt_view(entry))
         except discord.HTTPException as e:
             log.warning("Couldn't post the Rate it button: %s", e)
             entry["prompt"] = {"skipped": True}
             return
         entry["prompt"] = {"channel": channel.id, "message": msg.id, "closes": closes, "closed": False}
         log.info("Asked everyone to rate %s", movie.get("title"))
+        if entry.get("starter") and not entry["starter"].get("ping"):  # picked when the night was confirmed
+            entry["starter"]["ping"] = await self._ping_starter(entry, lib)
+
+    def _prompt_view(self, entry: dict[str, Any]) -> discord.ui.View:
+        """Rate it, plus "Pick who starts" until someone's picked or has rated."""
+        view = discord.ui.View(timeout=None)
+        view.add_item(RateButton(entry["id"]))
+        if not entry.get("starter") and not entry.get("ratings"):
+            view.add_item(StarterButton(entry["id"]))
+        return view
+
+    def starter_problem(self, hid: str) -> str:
+        """Why nobody can pick who rates first anymore ("" while they can)."""
+        entry = next((e for e in movies.load()["history"] if e["id"] == hid), None)
+        p = (entry or {}).get("prompt") or {}
+        if entry is None or not p.get("message") or p.get("closed"):
+            return "Ratings for this one have closed."
+        if entry.get("starter"):
+            return f"{entry['starter']['name']} was already picked to go first."
+        if entry.get("ratings"):
+            return "Someone already started the ratings."
+        return ""
+
+    async def pick_starter(self, hid: str, member, by) -> str:
+        """Someone picked who rates first from the Rate it post: ping them."""
+        if problem := self.starter_problem(hid):
+            return problem
+        if member is None or getattr(member, "bot", False):
+            return "Pick someone in the server (bots don't rate movies)."
+        lib = movies.load()
+        entry = next(e for e in lib["history"] if e["id"] == hid)
+        who = getattr(by, "display_name", getattr(by, "name", ""))
+        entry["starter"] = {"uid": str(member.id), "name": member.display_name, "by": who}
+        movies.save(lib)
+        ping = await self._ping_starter(entry, lib)
+        fresh = movies.load()
+        cur = next((e for e in fresh["history"] if e["id"] == hid), None)
+        if cur is not None and cur.get("starter"):
+            cur["starter"]["ping"] = ping
+            movies.save(fresh)
+            await self.refresh_prompt(cur, fresh)
+        return f"Pinged {member.display_name} to go first." if ping else f"{member.display_name} goes first."
+
+    async def _ping_starter(self, entry: dict[str, Any], lib: dict[str, Any]) -> list[int] | None:
+        """Ping whoever was picked to rate first, under the Rate it post. Returns [channel id, message id]."""
+        st, p = entry["starter"], entry.get("prompt") or {}
+        channel = self.bot.get_channel(p.get("channel")) if p.get("channel") else None
+        if not isinstance(channel, discord.TextChannel):
+            return None
+        movie = lib["movies"].get(entry["movie_id"], {"title": "the movie"})
+        text = self.bot.persona.say("movie_rate_starter", target=f"<@{st['uid']}>", title=movies.label(movie))
+        view = discord.ui.View(timeout=None)
+        view.add_item(RateButton(entry["id"]))
+        try:
+            msg = await channel.send(
+                text[:2000],
+                view=view,
+                reference=channel.get_partial_message(p["message"]).to_reference(fail_if_not_exists=False),
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=[discord.Object(int(st["uid"]))], replied_user=False
+                ),
+            )
+        except discord.HTTPException as e:
+            log.warning("Couldn't ping who rates first: %s", e)
+            return None
+        return [channel.id, msg.id]
 
     async def refresh_prompt(self, entry: dict[str, Any], lib: dict[str, Any]) -> None:
         p = entry.get("prompt") or {}
@@ -2087,10 +2344,115 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         try:
             await channel.get_partial_message(p["message"]).edit(
                 embed=self._prompt_embed(entry, movie, p["closes"], p.get("closed", False)),
-                view=None if p.get("closed") else discord.utils.MISSING,
+                view=None if p.get("closed") else self._prompt_view(entry),
             )
         except discord.HTTPException:
             pass
+
+    # ---------------------------------------------------------- the question game
+    async def after_rating(self, hid: str, key: str, old: dict[str, Any] | None) -> None:
+        """After a rating is saved (the Rate it form, the movie pages, a voice message): ping the member its
+        question is for, show an answer on the ping of the question it answers, and update the Rate it post."""
+        old = old or {}
+        lib = movies.load()
+        entry = next((e for e in lib["history"] if e["id"] == hid), None)
+        r = (entry or {}).get("ratings", {}).get(key)
+        if entry is None or r is None:
+            return
+        names = self._rater_names(lib)
+        same = (old.get("ask"), old.get("ask_for")) == (r.get("ask"), r.get("ask_for"))
+        ping = old.get("ask_msg") if same else None
+        if old.get("ask_msg") and not same:
+            await self._delete_message(old["ask_msg"])  # out of date: the question or who it's for changed
+        if ping is None and r.get("ask") and r.get("ask_for"):
+            ping = await self._ping_question(entry, key, names, lib)
+        if ping != r.get("ask_msg"):
+            fresh = movies.load()
+            cur = next((e for e in fresh["history"] if e["id"] == hid), None)
+            if cur is not None and key in cur.get("ratings", {}):
+                cur["ratings"][key]["ask_msg"] = ping
+                movies.save(fresh)
+        src = r.get("answered_from")
+        if r.get("answer") and src and (src, r.get("answer")) != (old.get("answered_from"), old.get("answer")):
+            asked = entry["ratings"].get(src) or {}
+            if asked.get("ask_msg"):
+                movie = lib["movies"].get(entry["movie_id"], {"title": "the movie"})
+                text = (
+                    f"✅ **{names.get(src) or asked.get('name') or 'Someone'}** asked "
+                    f"**{names.get(key) or r.get('name')}** about **{movies.label(movie)}**: *{r['answered']}*\n"
+                    f"→ {r['answer']}"
+                )
+                await self._edit_message(asked["ask_msg"], text[:2000])
+        st = entry.get("starter") or {}
+        if st.get("uid") == key and st.get("ping") and not st.get("done"):
+            movie = lib["movies"].get(entry["movie_id"], {"title": "the movie"})
+            name = names.get(key) or r.get("name") or st.get("name")
+            await self._edit_message(st["ping"], f"✅ **{name}** kicked off the ratings for **{movies.label(movie)}**.")
+            fresh = movies.load()
+            cur = next((e for e in fresh["history"] if e["id"] == hid), None)
+            if cur is not None and cur.get("starter"):
+                cur["starter"]["done"] = True
+                movies.save(fresh)
+        if (entry.get("prompt") or {}).get("message"):
+            await self.refresh_prompt(entry, movies.load())
+
+    async def _ping_question(
+        self, entry: dict[str, Any], key: str, names: dict[str, str], lib: dict[str, Any]
+    ) -> list[int] | None:
+        """Ping the member a rater's question is for, under the Rate it post (with its button) while ratings
+        are open. Returns [channel id, message id]."""
+        r = entry["ratings"][key]
+        p = entry.get("prompt") or {}
+        is_open = bool(p.get("message")) and not p.get("closed")
+        channel = self.bot.get_channel(p["channel"]) if p.get("channel") else None
+        if not isinstance(channel, discord.TextChannel):
+            s = self.series(entry.get("series") or "")
+            channel = self.bot.text_channel(entry.get("rate_channel") or getattr(s, "channel", None))
+        if channel is None:
+            return None
+        movie = lib["movies"].get(entry["movie_id"], {"title": "the movie"})
+        text = self.bot.persona.say(
+            "movie_question_for",
+            target=f"<@{r['ask_for']}>",
+            asker=names.get(key) or r.get("name") or "Someone",
+            title=movies.label(movie),
+            question=r["ask"],
+        )
+        kw: dict[str, Any] = {
+            "allowed_mentions": discord.AllowedMentions(
+                everyone=False, roles=False, users=[discord.Object(int(r["ask_for"]))], replied_user=False
+            )
+        }
+        if is_open:
+            view = discord.ui.View(timeout=None)
+            view.add_item(RateButton(entry["id"]))
+            kw["view"] = view
+            if p.get("channel") == channel.id:
+                kw["reference"] = channel.get_partial_message(p["message"]).to_reference(fail_if_not_exists=False)
+        else:
+            text += "\n-# Ratings for this one have closed, so answer it on the movie pages (`/pingwin movie page`)."
+        try:
+            msg = await channel.send(text[:2000], **kw)
+        except discord.HTTPException as e:
+            log.warning("Couldn't ping someone about a rating question: %s", e)
+            return None
+        return [channel.id, msg.id]
+
+    async def _edit_message(self, ref: list[int], text: str) -> None:
+        channel = self.bot.get_channel(ref[0])
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.get_partial_message(ref[1]).edit(content=text, view=None)
+            except discord.HTTPException:
+                pass
+
+    async def _delete_message(self, ref: list[int]) -> None:
+        channel = self.bot.get_channel(ref[0])
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.get_partial_message(ref[1]).delete()
+            except discord.HTTPException:
+                pass
 
     async def close_prompt(self, entry: dict[str, Any], lib: dict[str, Any]) -> None:
         p = entry["prompt"]
@@ -2306,7 +2668,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
 
     @app_commands.command(name="tonight", description="Set tonight's movie (for nights without a poll)")
     @app_commands.describe(series="Which movie night", title="The movie", year="Optional, helps find the right one")
-    @app_commands.autocomplete(series=series_autocomplete)
+    @app_commands.autocomplete(series=series_autocomplete, title=catalog_autocomplete)
     async def tonight(
         self,
         interaction: discord.Interaction,
@@ -2317,9 +2679,15 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         s = await self._check(interaction, series)
         if s is None:
             return
+        imdb_id = None
+        picked = PICKED.fullmatch(title)
+        if picked:  # chosen from the suggestions
+            imdb_id = picked["id"] or None
+            title = picked["title"]
+            year = year or (int(picked["year"]) if picked["year"] else None)
         await interaction.response.defer(ephemeral=True)
         when = self.tonight_showing(s)  # now, not when a mod approves it (that could be the next morning)
-        m = await self.details(title, year)
+        m = await self.details(title, year, imdb_id)
         data = {
             "title": m["title"] if m else title.strip(),
             "year": (m or {}).get("year") or year,
@@ -2643,6 +3011,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         cur = next((x for x in lib["history"] if x["id"] == entry["id"]), None)
         if cur is not None:
             cur["prompt"] = entry.get("prompt")
+            if entry.get("starter"):
+                cur["starter"] = entry["starter"]
             movies.save(lib)
 
     @check.before_loop
@@ -2786,5 +3156,5 @@ class ChooseView(discord.ui.View):
 
 
 async def setup(bot: Pingwin) -> None:
-    bot.add_dynamic_items(RequestButton, RateButton, NightPick, BreakButton)
+    bot.add_dynamic_items(RequestButton, RateButton, NightPick, BreakButton, StarterPick, StarterButton)
     await bot.add_cog(MovieNight(bot))

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pingwin"
-version = "0.31.1"
+version = "0.32.0"
 description = "A friendly Discord bot for friends' servers: opt-in ping roles, with polls, game days and stream alerts on the way."
 readme = "README.md"
 license = "MIT"
@@ -28,6 +28,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+# Rate movies by voice message (speech to text on this PC). faster-whisper 1.2 needs PyAV below 16.
+voice = ["faster-whisper>=1.1", "av>=11,<16"]
 
 [project.urls]
 Homepage = "https://github.com/brandonbtm29/Pingwin"

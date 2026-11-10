@@ -33,6 +33,7 @@ EXTENSIONS = (
     "pingwin.cogs.events",
     "pingwin.cogs.birthdays",
     "pingwin.cogs.movienight",
+    "pingwin.cogs.voicerating",
     "pingwin.cogs.gameday",
     "pingwin.cogs.streams",
     "pingwin.cogs.welcome",

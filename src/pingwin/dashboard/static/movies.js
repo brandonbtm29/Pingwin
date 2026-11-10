@@ -61,7 +61,8 @@ const DRAFT_KEY = "pingwin-review-draft";
 function keepReviewDraft() {
   if (!data || $("rv-box").hidden || !rvTyped.size) return false;
   const d = { hid: $("rv-movie").value, as: $("rv-who-wrap").hidden ? "" : $("rv-who").value, guest: $("rv-guest").value,
-    score: $("rv-score").value, comment: $("rv-comment").value, answer: $("rv-answer").value, ask: $("rv-ask").value, typed: [...rvTyped] };
+    score: $("rv-score").value, comment: $("rv-comment").value, answer: $("rv-answer").value, ask: $("rv-ask").value,
+    ask_for: $("rv-ask-for").value, typed: [...rvTyped] };
   try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); return true; } catch { return false; }
 }
 function restoreReviewDraft() {
@@ -77,7 +78,7 @@ function restoreReviewDraft() {
   }
   rvTyped.clear();
   syncReview();  // point the form at that movie and reviewer, then put the draft back over it
-  for (const [id, v] of [["rv-score", d.score], ["rv-comment", d.comment], ["rv-answer", d.answer], ["rv-ask", d.ask]]) {
+  for (const [id, v] of [["rv-score", d.score], ["rv-comment", d.comment], ["rv-answer", d.answer], ["rv-ask", d.ask], ["rv-ask-for", d.ask_for]]) {
     if (typeof v === "string") $(id).value = v;
   }
   for (const id of d.typed || []) rvTyped.add(id);
@@ -876,7 +877,7 @@ function fillReviewForm() {
 }
 // The form follows the movie and reviewer picked: switching to one that already has a review fills it in.
 // What the person typed themselves stays put otherwise (also across reloads of the data).
-const RV_FIELDS = ["rv-score", "rv-comment", "rv-answer", "rv-ask"];
+const RV_FIELDS = ["rv-score", "rv-comment", "rv-answer", "rv-ask", "rv-ask-for"];
 const RV_DEFAULT_SCORE = "7";
 const rvTyped = new Set();  // fields changed by hand since the form was last filled in
 let rvAt = null;            // the movie and reviewer the fields belong to
@@ -898,19 +899,36 @@ function syncReview() {
       $("rv-comment").value = mine.comment || "";
       $("rv-answer").value = mine.answer || "";
       $("rv-ask").value = mine.ask || "";
+      fillAskFor(who, mine.ask_for || "");
       rvTyped.clear();
     } else if (!mine) {
       // Nothing to load: keep what was typed, and clear what came from the previous movie's review.
       for (const id of RV_FIELDS) if (!rvTyped.has(id)) $(id).value = id === "rv-score" ? RV_DEFAULT_SCORE : "";
     }
+    if (!mine || rvTyped.has("rv-ask-for")) fillAskFor(who, $("rv-ask-for").value);
   }
-  // The question the last reviewer passed on (or the one this person already answered).
-  const others = h ? h.ratings.filter((r) => r.key !== who) : [];
-  const last = [...others].reverse().find((r) => r.ask);
-  const q = mine && mine.answered ? { q: mine.answered, from: mine.answered_from || "Someone" } : last ? { q: last.ask, from: last.who } : null;
+  const q = questionFor(h, who);
   $("rv-q-wrap").hidden = !q;
   if (q) { $("rv-q").textContent = q.q; $("rv-q-from").textContent = q.from; }
   put($("rv-score-badge"), scoreBadge(Number($("rv-score").value), " / 10"));
+}
+// The question this person gets (like Pingwin's Rate it form): the one they already answered, else one asked
+// of them by name, else the newest one left for whoever reviews next. A question is done once someone answers it.
+function questionFor(h, who) {
+  const rs = h ? h.ratings : [];
+  const mine = rs.find((r) => r.key === who);
+  if (mine && mine.answered) return { q: mine.answered, from: mine.answered_from || "Someone" };
+  const done = new Set(rs.filter((r) => r.answered && r.answered_from_key).map((r) => r.answered_from_key));
+  const waiting = rs.filter((r) => r.ask && !done.has(r.key) && r.key !== who);
+  const pick = waiting.find((r) => who && r.ask_for === who) || [...waiting].reverse().find((r) => !r.ask_for);
+  return pick ? { q: pick.ask, from: pick.who } : null;
+}
+// Who a question can go to: any member but the reviewer (bots and guests can't be pinged).
+function fillAskFor(who, keep) {
+  const list = (data.members || []).filter((m) => m.id !== who);
+  put($("rv-ask-for"), el("option", { value: "" }, "Whoever reviews next"),
+    list.map((m) => el("option", { value: m.id }, memberLabel(m))));
+  $("rv-ask-for").value = list.some((m) => m.id === keep) ? keep : "";
 }
 function openReview(hid) {
   switchTab("reviews");
@@ -939,7 +957,8 @@ $("rv-go").addEventListener("click", async () => {
   btn.disabled = true;
   try {
     const res = await api("/api/movies/review", { hid: $("rv-movie").value, ...(isGuest ? { guest: guestName() } : { as_user: who }), score: $("rv-score").value,
-      comment: $("rv-comment").value, answer: $("rv-q-wrap").hidden ? "" : $("rv-answer").value, ask: $("rv-ask").value });
+      comment: $("rv-comment").value, answer: $("rv-q-wrap").hidden ? "" : $("rv-answer").value, ask: $("rv-ask").value,
+      ask_for: $("rv-ask").value.trim() ? $("rv-ask-for").value : "" });
     $("rv-result").textContent = res.message;
     rvTyped.clear();  // the fields now hold the saved review, not a draft
     await load();
@@ -1141,23 +1160,29 @@ function detectedCard(r, admin) {
   const exp = d.expected;
   const label = (m) => (m.year ? `${m.title} (${m.year})` : m.title);
   const other = el("input", { placeholder: "Something else: title (year)", maxlength: "100", "aria-label": "Another movie" });
+  // Optional: who rates first (Pingwin pings them when the Rate it button goes up).
+  const starter = el("select", { "aria-label": "Who rates first" }, el("option", { value: "" }, "Anyone"),
+    (data.members || []).map((m) => el("option", { value: m.id }, memberLabel(m))));
+  starter.value = d.starter && (data.members || []).some((m) => m.id === d.starter.uid) ? d.starter.uid : "";
+  const yes = (extra = {}) => decide(r.id, true, { ...extra, starter: starter.value });
   return el("li", { class: "detected" },
     el("div", {}, el("strong", {}, `🎬 ${evName(r.series)} on ${fmtDate(d.date)}`),
       exp ? el("span", { class: "hint" }, ` · ${d.why || "Up tonight"}: ${label(exp)}`) : null,
       d.voice ? el("span", { class: "hint" }, ` · ${d.voice.people} people in voice for about ${dur(d.voice.minutes)}${d.names && d.names.length ? `: ${d.names.join(", ")}` : ""}`) : null),
     admin ? [
       exp ? el("div", { class: "row-actions" },
-        el("button", { class: "btn small primary", onclick: () => decide(r.id, true) }, `Yes, we watched ${label(exp)}`)) : null,
+        el("button", { class: "btn small primary", onclick: () => yes() }, `Yes, we watched ${label(exp)}`)) : null,
       el("div", { class: "hint" }, exp ? "Watched something else? Pick it (hover a choice to see why it's listed)." : "Which movie was it? Picking one adds it to the history (hover a choice to see why it's listed)."),
-      el("div", { class: "d-picks" }, (d.candidates || []).map((c, i) => el("button", { class: "btn small", title: c.why || "", onclick: () => decide(r.id, true, { choice: i }) },
+      el("div", { class: "d-picks" }, (d.candidates || []).map((c, i) => el("button", { class: "btn small", title: c.why || "", onclick: () => yes({ choice: i }) },
         c.year ? `${c.title} (${c.year})` : c.title))),
       el("div", { class: "row-actions" }, other,
         el("button", { class: "btn small primary", onclick: () => {
           const m = other.value.trim().match(/^(.*?)\s*(?:\((\d{4})\))?$/);
           if (!m || !m[1]) return toast("Type the movie's title.", true);
-          decide(r.id, true, { title: m[1], year: m[2] || "" });
+          yes({ title: m[1], year: m[2] || "" });
         } }, "Log it"),
-        el("button", { class: "btn small danger", onclick: () => decide(r.id, false) }, "We skipped it"))] : el("div", { class: "hint" }, "Waiting for a movie mod to say which movie it was."));
+        el("button", { class: "btn small danger", onclick: () => decide(r.id, false) }, "We skipped it")),
+      el("label", { class: "inline hint" }, "Who rates first? ", starter)] : el("div", { class: "hint" }, "Waiting for a movie mod to say which movie it was."));
 }
 async function decide(id, approve, extra = {}) {
   try { toast((await api("/api/movies/admin", { action: "decide", id, approve, ...extra })).message.replace(/\*\*/g, "")); await load(); } catch (e) { toast(e.message, true); }

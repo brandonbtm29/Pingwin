@@ -255,10 +255,30 @@ the movie pages, where mods can approve them too.
 ### Rate it
 
 When a movie mod confirms a movie night (see above), Pingwin logs it in the history and, about when the
-movie finishes (showtime + its runtime), posts a **Rate it** button in the series' channel. Each person gives a score out of 10 and a comment, and can answer the question the previous person
-asked and leave one for the next (like "How many jump scares out of 10?"). The movie pages show each
-question's **From** and **To**. The message keeps a live
-average next to IMDb's, and closes after *Ratings stay open for* hours (48 by default).
+movie finishes (showtime + its runtime), posts a **Rate it** button in the series' channel. Each person
+gives a score out of 10 and a comment. The message keeps a live average next to IMDb's, and closes after
+*Ratings stay open for* hours (48 by default).
+
+**Who goes first (optional):** a movie mod can pick who rates first on the night's "did it happen?" card
+(or on the movie pages), and until someone's picked or has rated, the Rate it post has a **Pick who starts**
+button anyone can use. Pingwin pings that person under the Rate it post; everyone else can still rate.
+
+**The question game:** each rater can ask a question (like "How many jump scares out of 10?") and pick
+**who should answer it**. Pingwin pings that person under the Rate it post with their own Rate it button,
+and their form shows the question; once they answer, the ping shows the answer. Leave the person empty and
+the question goes to whoever rates next. Everyone gets one question to answer per movie, so Pingwin says so
+if the person you pick already has one. The Rate it post's footer shows whose questions are still waiting,
+and the movie pages show each question's **From** and **To** (the review form there has the same picker).
+
+**Rate by voice:** instead of typing, send Pingwin a **voice message**, in a DM or as a reply to the Rate it
+post (or a question ping). Pingwin turns it into text on the PC it runs on, finds the score you said ("I'd
+give it a seven and a half", "8 out of 10"), and replies with a card: **Save**, **Edit** (the Rate it form,
+filled in, to fix the score or words, answer a question or ask one), **Other movie** when two are open, or
+**Cancel**. Only the person who spoke can save it, and nothing is saved until they do. The speech-to-text is
+[Whisper](https://github.com/SYSTRAN/faster-whisper), free and offline: the recording never leaves the PC,
+and isn't kept. Install it with `pip install "pingwin[voice]"`; the model
+(about 0.5 GB) downloads into the `models` folder the first time someone uses it. Turn it off with *Rate by
+voice message* under Ratings.
 
 ### Movie details (OMDb)
 

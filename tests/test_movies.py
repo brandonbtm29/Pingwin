@@ -399,7 +399,31 @@ def test_questions_know_who_asked_whom(tmp_path, monkeypatch):
 def test_discord_ratings_remember_who_asked():
     e = {"ratings": {}}
     movies.add_rating(e, "1", name="Sam", score=8, ask="How many flies?")
-    asker = movies.open_asker(e, skip="2")
-    movies.add_rating(e, "2", name="Alex", score=7, answer="Three", answered="How many flies?", answered_from=asker)
+    question, asker = movies.question_for(e, "2")
+    assert question == "How many flies?"
+    movies.add_rating(e, "2", name="Alex", score=7, answer="Three", answered=question, answered_from=asker)
     chain = movies.question_chain(e, {"1": "Sam", "2": "Alex"})
     assert chain["2"]["from"] == "Sam" and chain["1"]["to"] == ["Alex"]
+
+
+def test_questions_asked_of_someone_by_name():
+    e = {"ratings": {}}
+    movies.add_rating(e, "1", name="Sam", score=8, ask="How many flies?", ask_for="3", ask_for_name="Jo")
+    # Not for whoever rates next: Alex doesn't get it, Jo does.
+    assert movies.question_for(e, "2") == ("", None) and movies.open_question(e) == ""
+    assert movies.question_for(e, "3") == ("How many flies?", "1")
+    assert movies.question_chain(e, {})["1"]["to"] == ["Jo"]
+    movies.add_rating(e, "2", name="Alex", score=7, ask="Best scream?")  # for whoever's next
+    assert movies.question_for(e, "3") == ("How many flies?", "1")  # asked by name comes first
+    assert movies.question_for(e, "4") == ("Best scream?", "2")
+    # One question each: Jo has one waiting, and you can't ask yourself.
+    assert "already waiting" in movies.ask_problem(e, "2", "3")
+    assert movies.ask_problem(e, "1", "3") == "" and "yourself" in movies.ask_problem(e, "2", "2")
+    movies.add_rating(e, "3", name="Jo", score=9, answered="How many flies?", answered_from="1", answer="Six")
+    assert "already answered" in movies.ask_problem(e, "2", "3")
+    assert movies.question_for(e, "3") == ("How many flies?", "1")  # changing her rating keeps it
+    assert movies.question_chain(e, {"3": "Jo"})["1"]["to"] == ["Jo"]
+    assert [k for k, _ in movies.open_questions(e)] == ["2"]
+    # A skipped question stays open for the next person.
+    movies.add_rating(e, "4", name="Kim", score=5)
+    assert movies.question_for(e, "5") == ("Best scream?", "2")

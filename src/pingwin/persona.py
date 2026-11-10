@@ -26,6 +26,8 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "movie_nominated": "🎬 **{title}** joined the {series} watchlist (suggested by {by}).",
     "movie_rated": "Thanks! You gave it **{score}/10**. ⭐",
     "movie_rate_prompt": "How was it? Rate it out of 10 and say what you thought. Ratings close {closes}.",
+    "movie_rate_starter": "🎬 {target}, you're up first for **{title}**! Tap **Rate it** to kick things off.",
+    "movie_question_for": "❓ {target}, **{asker}** has a question for you about **{title}**: *{question}*",
     "movie_summary": "📊 **{title}**: {count}, group average **{avg}/10**",
     "movie_poll_none": "🍿 The {series} poll closed with no votes.",
     "movie_poll_tie": "🍿 It's a tie between {names}! A mod will pick (`/pingwin movie tonight`).",

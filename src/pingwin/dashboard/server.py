@@ -1162,6 +1162,8 @@ async def get_movies(request: web.Request) -> web.Response:
                         "asked_by": r.get("asked_by") or None,
                         "ask_to": chain[k]["to"],
                         "answered_from": chain[k]["from"],
+                        "ask_for": r.get("ask_for") or None,  # rater keys, so the form knows whose question is whose
+                        "answered_from_key": r.get("answered_from") if r.get("answered") else None,
                     }
                     for k, r in ratings
                 ],
@@ -1246,7 +1248,8 @@ async def get_movies(request: web.Request) -> web.Response:
             "members": sorted(
                 (
                     {"id": str(m.id), "name": m.display_name, "username": m.name, "global": m.global_name or ""}
-                    for m in (guild.members if guild is not None and mod else [])
+                    # Mods enter reviews for members; signed-in members pick who their question is for.
+                    for m in (guild.members if guild is not None and (mod or viewer.user_id) else [])
                     if not m.bot
                 ),
                 key=lambda x: x["name"].casefold(),
@@ -1560,9 +1563,19 @@ async def post_movie_review(request: web.Request) -> web.Response:
     if e is None:
         raise ApiError("That movie night isn't in the history anymore.", 404)
     old = e.get("ratings", {}).get(key)
-    question = old.get("answered", "") if old else movies.open_question(e)
-    asker = old.get("answered_from") if old else movies.open_asker(e, skip=key)
+    question, asker = movies.question_for(e, key)
     answer = _str(payload, "answer", 500)
+    ask = _str(payload, "ask", 300)
+    ask_for, ask_for_name = str(payload.get("ask_for") or "").strip(), ""
+    if ask_for and ask:  # their question is for one member, who gets pinged
+        target = guild.get_member(int(ask_for)) if guild is not None and ask_for.isdigit() else None
+        if target is None or target.bot:
+            raise ApiError("Pick who your question is for (someone in the server), or leave it for whoever's next.")
+        problem = movies.ask_problem(e, key, ask_for)
+        if problem and not (old and old.get("ask_for") == ask_for):
+            raise ApiError(f"Your question can't go to {target.display_name}: {problem}.")
+        ask_for_name = target.display_name
+    old = dict(old) if old else None
     movies.add_rating(
         e,
         key,
@@ -1573,19 +1586,24 @@ async def post_movie_review(request: web.Request) -> web.Response:
         answered=question if answer else "",
         answered_from=asker,
         answer=answer,
-        ask=_str(payload, "ask", 300),
+        ask=ask,
+        ask_for=ask_for if ask_for_name else None,
+        ask_for_name=ask_for_name,
     )
     if old:
         e["ratings"][key]["at"] = old.get("at", time.time())  # keep its place in the question chain
     movies.save(lib)
     log.info("Movie review %s on the movie pages (%s for %s)", "changed" if old else "added", viewer.name, name)
     cog = _movie_cog(bot)
-    if cog is not None and (e.get("prompt") or {}).get("message"):
+    if cog is not None:
         try:
-            await cog.refresh_prompt(e, lib)
+            await cog.after_rating(e["id"], key, old)
         except discord.HTTPException:
             pass
-    return web.json_response({"ok": True, "message": "Review updated." if old else "Thanks! Review added. ⭐"})
+    msg = "Review updated." if old else "Thanks! Review added. ⭐"
+    if ask_for_name and (not old or old.get("ask_for") != ask_for or old.get("ask") != ask):
+        msg += f" I pinged {ask_for_name} with your question."
+    return web.json_response({"ok": True, "message": msg})
 
 
 def _schedule_json(s, state: dict[str, Any], bot) -> dict[str, Any] | None:
@@ -1993,6 +2011,7 @@ async def post_movie_admin(request: web.Request) -> web.Response:
             _Mod(),
             choice=int(choice) if isinstance(choice, int) or str(choice or "").isdigit() else None,
             custom=custom,
+            starter=str(payload.get("starter") or "").strip() if "starter" in payload else None,
         )
         return web.json_response({"ok": True, "message": msg})
     raise ApiError("Unknown action")
