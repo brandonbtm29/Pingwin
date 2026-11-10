@@ -67,6 +67,7 @@ STATIC = Path(__file__).with_name("static")
 STATIC_FILES = {
     "app.js": "text/javascript",
     "movies.js": "text/javascript",
+    "toc.js": "text/javascript",
     "style.css": "text/css",
     "icon.svg": "image/svg+xml",
 }

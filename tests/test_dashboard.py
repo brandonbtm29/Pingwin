@@ -8,7 +8,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from pingwin.config import load_config
-from pingwin.dashboard.server import COOKIE, create_app
+from pingwin.dashboard.server import COOKIE, STATIC, create_app
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY = "k" * 32
@@ -116,5 +116,9 @@ def test_security_headers_and_static_files():
         assert "frame-ancestors 'none'" in r.headers["Content-Security-Policy"]
         r = await client.get("/static/../server.py", headers=SIGNED_IN)
         assert r.status == 404
+        r = await client.get("/static/toc.js", headers=SIGNED_IN)  # the "On this page" list, on both pages
+        assert r.status == 200 and "text/javascript" in r.headers["Content-Type"]
+        for page in ("index.html", "movies.html"):
+            assert '<script src="/static/toc.js">' in (STATIC / page).read_text(encoding="utf-8")
 
     run(scenario)

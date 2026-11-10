@@ -68,7 +68,7 @@
           <div class="row-actions"><button class="btn primary" id="n-go">Add to the history</button></div>
         </div>
       </details>
-      <div class="panel">
+      <div class="panel" data-toc="All movie nights">
         <div class="row-actions filters">
           <input id="h-search" type="search" placeholder="Search titles, directors, stars, years…" aria-label="Search">
           <select id="h-series" aria-label="Series"></select>
@@ -126,7 +126,7 @@
           <div class="row-actions"><button class="btn primary" id="rv-go">Post review</button><span class="hint" id="rv-result"></span></div>
         </div>
       </details>
-      <div class="panel">
+      <div class="panel" data-toc="Reviews">
         <div class="row-actions filters">
           <input id="r-search" type="search" placeholder="Search reviews and movies…" aria-label="Search reviews">
           <select id="r-person" aria-label="Person"></select>
@@ -147,7 +147,7 @@
         </div>
         <p class="hint" id="r-count"></p>
       </div>
-      <div class="people-cards" id="r-people"></div>
+      <div class="people-cards" id="r-people" data-toc="People"></div>
       <div class="panel" id="r-summary" hidden></div>
       <ul class="review-list" id="r-list"></ul>
       <div class="row-actions center"><button class="btn" id="r-more" hidden>Show more</button></div>
@@ -212,7 +212,7 @@
     </section>
 
     <section id="tab-imdb" class="tab" hidden>
-      <div class="panel">
+      <div class="panel" data-toc="This IMDb list">
         <div class="chips" id="x-lists" role="group" aria-label="IMDb list"></div>
         <p class="hint" id="x-meta"></p>
         <div class="stat-tiles" id="x-counts"></div>
@@ -364,5 +364,6 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <div class="tip" id="tip" role="tooltip" hidden></div>
   <script src="/static/movies.js"></script>
+  <script src="/static/toc.js"></script>
 </body>
 </html>

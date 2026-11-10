@@ -87,6 +87,10 @@ browser with six tabs:
 - **PCs & failover:** turn failover on, pick the status channel, order the PCs
 - **Logs:** this PC's recent log, live
 
+Long pages have an **On this page** list in the empty space on the left (a **☰ Sections** button on smaller
+screens) to jump to any section, and every section folds up with the ▾ next to its title; each browser
+remembers what you folded. The movie pages work the same way.
+
 Every PC running Pingwin has its own dashboard. Changes save to the shared `config.toml`, so they reach
 every PC. The page only answers on that PC (`127.0.0.1:8787`; change it under `[dashboard]`), and
 `open_dashboard.cmd` signs you in with a key kept in the project folder.
