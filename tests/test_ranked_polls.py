@@ -182,3 +182,19 @@ def test_a_tie_goes_to_the_mods(monkeypatch):
         assert ch.sent[-1].startswith("[movie_poll_tie]") and movies.load()["pending"] == {}
 
     asyncio.run(go())
+
+
+def test_polls_go_to_the_polls_channel(monkeypatch):
+    async def go():
+        cog, events, noms = setup_poll(monkeypatch)
+        polls = TextChan(2)
+        cog.cfg.polls_channel, cog.cfg.multiple = 2, False
+        cog.bot.text_channel = lambda cid: {1: events, 2: polls}.get(cid)
+        inter = NS(user=NS(id=5), channel=events, followup=NS(send=lambda *a, **k: asyncio.sleep(0)))
+        closes = discord.utils.utcnow() + timedelta(hours=3)
+        await cog.start_poll(inter, cog.series("MMM"), noms, 3, "Pick!", closes, ranked=True)
+        await cog.start_poll(inter, cog.series("MMM"), noms, 3, "Pick!", closes)  # a Discord poll too
+        assert len(polls.kw) == 2 and events.kw == [] and "poll" in polls.kw[1]
+        assert {p["channel_id"] for p in store.load(movienight.STATE)["mmm"]["polls"]} == {2}
+
+    asyncio.run(go())

@@ -3036,7 +3036,12 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         closes: datetime | None = None,
         ranked: bool = False,
     ) -> discord.Message | None:
-        channel = self.bot.text_channel(s.channel) or interaction.channel
+        # The polls channel when there is one (like #polls), else the series' own channel.
+        channel = (
+            self.bot.text_channel(getattr(self.cfg, "polls_channel", None))
+            or self.bot.text_channel(s.channel)
+            or interaction.channel
+        )
         closes = closes or discord.utils.utcnow() + timedelta(hours=hours)
         early = closes < discord.utils.utcnow() + timedelta(hours=hours) - timedelta(minutes=1)
         if ranked:

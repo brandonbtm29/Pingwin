@@ -245,8 +245,8 @@ SECTIONS: list[dict[str, Any]] = [
                 "Announcements go to",
                 None,
                 "Franchise queue posts (tonight's part, a finished franchise) and new watchlist suggestions, "
-                "for example #events. Blank = each series' own channel. Polls and Rate it buttons stay in the "
-                "series' channel.",
+                "for example #events. Blank = each series' own channel. Rate it buttons stay in the series' "
+                "channel, and polls go where *Polls go to* says.",
             ),
             # ---- voice check
             F(
@@ -285,12 +285,12 @@ SECTIONS: list[dict[str, Any]] = [
             F(
                 "polls_channel",
                 "channel",
-                "Your movie polls are in",
+                "Polls go to",
                 None,
-                "Optional. Pingwin reads the polls there (like Horror or Not Horror, then a movie for each) to "
-                "suggest which movie it was.",
-                group="Voice check",
-                show_if={"voice_check": [True]},
+                "Where Pingwin posts movie polls, like #polls. Blank = each series' own channel. Pingwin also reads "
+                "the polls there (like Horror or Not Horror, then a movie for each) for event reminders and to "
+                "suggest which movie a night was.",
+                group="Polls",
             ),
             # ---- who can do what
             F(

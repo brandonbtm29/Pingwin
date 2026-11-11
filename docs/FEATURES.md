@@ -93,7 +93,7 @@ Under **More reminders**, add as many as you like, each with:
 due at once, only the nearest one is sent.
 
 **Movie nights:** when an event is for a movie night series (its short or full name is in the event's name),
-reminders say where the vote stands, from the polls in *Your movie polls are in* (Features → Movie night): for
+reminders say where the vote stands, from the polls in *Polls go to* (Features → Movie night): for
 example "🗳️ **Horror** is ahead (3–2), so it's looking like **Monster Squad**.", or both sides' movies on a tie.
 It follows Horror / Not Horror rounds: this week's genre poll picks the side, and that side's latest movie
 poll picks the movie. For a franchise queue it's tonight's part instead. **Vote nudges in reminders**
@@ -194,7 +194,7 @@ Passing `hours` still overrides it.
 | `/pingwin movie page` | The movie pages: the view-only link and your own sign-in link |
 | `/pingwin movie queue series` | Where a franchise series is up to |
 | `/pingwin movie franchise series` | Line up a franchise's movies (mods) |
-| `/pingwin movie poll series [hours] [question] [ranked]` | Start a poll and ping the series' role (`ranked` for a ranked-choice poll; the default is the series' *Ranked polls* box) |
+| `/pingwin movie poll series [hours] [question] [ranked]` | Start a poll and ping the series' role, in *Polls go to* (or the series' channel). `ranked` for a ranked-choice poll; the default is the series' *Ranked polls* box |
 | `/pingwin movie endpoll series` | End the running poll now |
 | `/pingwin movie skip series [weeks] [starting] [reason]` | Movie mods: skip showings (a week off, or a break between franchises) |
 | `/pingwin movie unskip series` | Movie mods: end a break early |
@@ -402,7 +402,7 @@ series' showtime, so nobody has to remember to log the movie:
    *At least this many people* stayed for *For at least (minutes)* (3 and 45 by default).
 3. If the night is already in the history (a franchise queue part, a Pingwin poll, or someone added it), it just
    notes the turnout. Otherwise the movie mods get a card in the approvals channel asking **Which movie was
-   it?** The menu lists likely picks: the franchise queue's next part, poll winners from *Your movie polls are in*
+   it?** The menu lists likely picks: the franchise queue's next part, poll winners from *Polls go to*
    and the series' channel (it follows Horror / Not Horror rounds: the winning side's latest movie poll comes
    first), then recent watchlist suggestions. *Something else…* lets a mod type it, and **We skipped it** closes
    the card. The same choices are under *Waiting for a mod* on the movie pages.
