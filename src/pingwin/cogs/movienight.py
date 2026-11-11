@@ -30,7 +30,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import breaks, franchise, movieaccess, movies, store, voicerate, voicewatch
+from .. import breaks, franchise, movieaccess, movies, rankedvote, store, voicerate, voicewatch
 from ..features import slug
 from ..timeparse import next_weekly
 
@@ -470,6 +470,90 @@ class StarterMenu(discord.ui.UserSelect):
             pass
 
 
+ORDINALS = ("1st", "2nd", "3rd", "4th", "5th")
+
+
+class RankedVoteButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pingwin:rcv:(?P<pid>[0-9a-f]+)"):
+    """The Vote button on a ranked-choice poll."""
+
+    def __init__(self, pid: str) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Vote", emoji="🗳️", style=discord.ButtonStyle.primary, custom_id=f"pingwin:rcv:{pid}"
+            )
+        )
+        self.pid = pid
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match):
+        return cls(match["pid"])
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return getattr(interaction.client, "is_active", True)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        found = cog.find_ranked(self.pid) if cog else None
+        if (
+            found is None
+            or found[1]["status"] != "open"
+            or discord.utils.utcnow() >= discord.utils.parse_time(found[1]["ends"])
+        ):
+            await interaction.response.send_message("This poll has closed.", ephemeral=True)
+            return
+        s, p = found
+        await interaction.response.send_modal(RankedModal(p, str(interaction.user.id), is_franchise(s)))
+
+
+class RankedModal(discord.ui.Modal):
+    """Rank a ranked-choice poll's options: 1st choice, 2nd choice, and so on (only the first is needed)."""
+
+    def __init__(self, p: dict[str, Any], uid: str, franchises: bool = False) -> None:
+        super().__init__(title="Rank your picks")
+        self.pid, self.uid = p["pid"], uid
+        mine = p.get("ballots", {}).get(uid, [])
+        labels = p.get("labels", {})
+        ranks = max(1, min(int(p.get("ranks") or 3), rankedvote.MAX_RANKS, len(p["options"])))
+        thing = "franchise" if franchises else "movie"
+        self.picks: list[discord.ui.Select] = []
+        for i in range(ranks):
+            current = mine[i] if i < len(mine) else None
+            pick = discord.ui.Select(
+                placeholder=f"Pick a {thing}" if i == 0 else "Optional",
+                min_values=1 if i == 0 else 0,
+                max_values=1,
+                required=i == 0,
+                options=[
+                    discord.SelectOption(label=labels.get(c, "?")[:100], value=c, default=c == current)
+                    for c in p["options"][:25]
+                ],
+            )
+            self.picks.append(pick)
+            self.add_item(
+                discord.ui.Label(
+                    text=f"{ORDINALS[i]} choice", description="Your favorite" if i == 0 else None, component=pick
+                )
+            )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        chosen = [p.values[0] for p in self.picks if p.values]
+        if cog is None:
+            return
+        problem, p = cog.save_ballot(self.pid, self.uid, chosen)
+        if problem or p is None:
+            await interaction.response.send_message(problem, ephemeral=True)
+            return
+        ballot = p["ballots"][self.uid]
+        labels = p.get("labels", {})
+        text = "🗳️ Got it! Your ranking: " + " · ".join(f"{i}. {labels.get(c, '?')}" for i, c in enumerate(ballot, 1))
+        if len(ballot) < len(chosen):
+            text += "\n-# You picked the same one twice, so it counts once, in its highest spot."
+        text += "\n-# Vote again any time before the poll closes to change it."
+        await interaction.response.send_message(text, ephemeral=True)
+        cog.refresh_ranked_soon(self.pid)
+
+
 class OtherNightModal(discord.ui.Modal, title="Which movie was it?"):
     movie = discord.ui.TextInput(label="Title", max_length=100, placeholder="Like The Thing (1982)")
     year = discord.ui.TextInput(label="Year (optional)", max_length=4, required=False)
@@ -722,6 +806,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         self.http: aiohttp.ClientSession | None = None
         self._search_cache: dict[tuple[str, int | None], tuple[float, list[dict[str, Any]]]] = {}
         self._filling = asyncio.Lock()
+        self._ranked_refresh: set[str] = set()  # ranked polls whose message is about to show new counts
+        self._tasks: set[asyncio.Task] = set()
         self.check.start()
         self.fill_loop.start()
 
@@ -1603,6 +1689,24 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                     )
             except discord.HTTPException as e:
                 log.info("Couldn't read polls in #%s: %s", ch.name, e)
+        # Ranked polls aren't Discord polls: where each stands (the runoff so far, or its final count).
+        for rp in self._data(store.load(STATE), s).get("polls", []):
+            if rp.get("kind") != "ranked" or not rp.get("created"):
+                continue
+            at = discord.utils.parse_time(rp["created"]).timestamp()
+            if at < after.timestamp() or (before is not None and at > before.timestamp()):
+                continue
+            final = (rp.get("result") or {}).get("final") or rankedvote.instant_runoff(
+                rp.get("ballots", {}), rp["options"]
+            )["final"]
+            labels = rp.get("labels", {})
+            polls.append(
+                {
+                    "q": rp.get("question", ""),
+                    "answers": [(labels.get(c, "?"), final.get(c, 0)) for c in rp["options"]],
+                    "at": at,
+                }
+            )
         polls.sort(key=lambda p: p["at"])
         return polls
 
@@ -2786,6 +2890,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         series="Which movie night",
         hours="How long the poll runs (default: until the series' showtime)",
         question="What the poll asks (optional)",
+        ranked="Ranked choice: people rank their top picks (default: the series' setting)",
     )
     @app_commands.autocomplete(series=series_autocomplete)
     async def poll(
@@ -2794,6 +2899,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         series: str,
         hours: app_commands.Range[int, 1, 768] | None = None,
         question: app_commands.Range[str, 1, 300] | None = None,
+        ranked: bool | None = None,
     ) -> None:
         s = await self._check(interaction, series)
         if s is None:
@@ -2821,8 +2927,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             self.series_breaks(s),
         )
         question = question or f"{s.name}: what should we watch?"
+        ranked = bool(getattr(s, "ranked", False)) if ranked is None else ranked
         if self.cfg.pick == "choose" and len(unwatched) > 2:
-            view = ChooseView(self, s, unwatched, hours, question, interaction.user.id, closes)
+            view = ChooseView(self, s, unwatched, hours, question, interaction.user.id, closes, ranked)
             await interaction.response.send_message(
                 f"Pick up to {min(self.cfg.poll_options, len(unwatched))} movies for the poll:",
                 view=view,
@@ -2833,7 +2940,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             data["nominations"], "random" if self.cfg.pick == "random" else "oldest", self.cfg.poll_options
         )
         await interaction.response.defer(ephemeral=True)
-        msg = await self.start_poll(interaction, s, picks, hours, question, closes)
+        msg = await self.start_poll(interaction, s, picks, hours, question, closes, ranked)
         if msg:
             await interaction.followup.send(f"Poll posted: {msg.jump_url}", ephemeral=True)
 
@@ -2927,10 +3034,13 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         hours: int,
         question: str,
         closes: datetime | None = None,
+        ranked: bool = False,
     ) -> discord.Message | None:
         channel = self.bot.text_channel(s.channel) or interaction.channel
         closes = closes or discord.utils.utcnow() + timedelta(hours=hours)
         early = closes < discord.utils.utcnow() + timedelta(hours=hours) - timedelta(minutes=1)
+        if ranked:
+            return await self._start_ranked(interaction, s, channel, picks, question, closes, early)
         poll = discord.Poll(question=question[:300], duration=timedelta(hours=hours), multiple=self.cfg.multiple)
         for n in picks:
             t = n["title"] + (f" ({n['year']})" if n.get("year") else "")
@@ -2962,6 +3072,150 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         store.save(STATE, state)
         log.info("%s poll started with %d movies", s.name, len(picks))
         return msg
+
+    # ------------------------------------------------------------ ranked-choice polls
+    async def _start_ranked(self, interaction, s, channel, picks, question, closes, early) -> discord.Message | None:
+        """A ranked-choice poll: Pingwin's own message with a Vote button (Discord polls can't rank)."""
+        pid = secrets.token_hex(4)
+        record = {
+            "kind": "ranked",
+            "pid": pid,
+            "question": question[:250],
+            "labels": {n["id"]: n["title"] + (f" ({n['year']})" if n.get("year") else "") for n in picks},
+            "ranks": max(2, min(int(getattr(self.cfg, "ranked_choices", 3) or 3), rankedvote.MAX_RANKS)),
+            "ballots": {},
+            "channel_id": channel.id,
+            "options": [n["id"] for n in picks],
+            "ends": closes.astimezone(discord.utils.utcnow().tzinfo).isoformat(),
+            "created": discord.utils.utcnow().isoformat(),
+            "status": "open",
+            "by": interaction.user.id,
+        }
+        role = self.bot.role_named(channel.guild, s.role)
+        ts = int(closes.timestamp())
+        note = f"Voting closes <t:{ts}:F> (<t:{ts}:R>)" + (", right when the movie starts. 🍿" if early else ".")
+        view = discord.ui.View(timeout=None)
+        view.add_item(RankedVoteButton(pid))
+        try:
+            msg = await channel.send(
+                content=((role.mention + " ") if role else "") + note,
+                embed=self.ranked_embed(s, record),
+                view=view,
+                allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
+            )
+        except discord.HTTPException as e:
+            await interaction.followup.send(f"Couldn't post the poll in #{channel.name}: {e.text or e}", ephemeral=True)
+            return None
+        record["message_id"] = msg.id
+        state = store.load(STATE)
+        self._data(state, s)["polls"].append(record)
+        store.save(STATE, state)
+        log.info("%s ranked poll started with %d options", s.name, len(picks))
+        return msg
+
+    def ranked_embed(self, s, p: dict[str, Any], result: dict[str, Any] | None = None) -> discord.Embed:
+        """The poll message: each option's first-choice votes so far, or once closed the final count and how
+        the rounds went."""
+        labels = p.get("labels", {})
+        counts = result["final"] if result else rankedvote.first_choices(p.get("ballots", {}), p["options"])
+        top = max(counts.values(), default=0) or 1
+        lines = []
+        for c in p["options"]:
+            n = counts.get(c, 0)
+            filled = round(8 * n / top)
+            won = result is not None and c in result["winners"]
+            lines.append(f"`{'█' * filled}{'░' * (8 - filled)}` **{n}** · {'🏆 ' if won else ''}{labels.get(c, '?')}")
+        desc = "\n".join(lines)
+        thing = "franchise" if is_franchise(s) else "movie"
+        voters = len([b for b in p.get("ballots", {}).values() if b])
+        if result is not None:
+            if len(result["rounds"]) > 1:
+                desc += "\n\n**How the count went**\n" + rankedvote.rounds_text(result, lambda c: labels.get(c, "?"))
+            footer = f"Ranked choice · {voters} voted · closed"
+        else:
+            footer = (
+                f"Ranked choice: tap Vote to rank up to {p.get('ranks', 3)}. The bars are first choices. If no "
+                f"{thing} gets more than half, the last one drops out and its votes go to their next choice. "
+                f"{voters} voted so far."
+            )
+        title = f"🗳️ {p.get('question') or 'Poll'}" + (" (closed)" if result is not None else "")
+        embed = discord.Embed(title=title[:256], description=desc[:4000], color=GOLD)
+        embed.set_footer(text=footer[:2000])
+        return embed
+
+    def find_ranked(self, pid: str) -> tuple[Any, dict[str, Any]] | None:
+        state = store.load(STATE)
+        for s in self.all_series:
+            for p in self._data(state, s).get("polls", []):
+                if p.get("pid") == pid:
+                    return s, p
+        return None
+
+    def save_ballot(self, pid: str, uid: str, ranking: list[str]) -> tuple[str, dict[str, Any] | None]:
+        """Save someone's ranking (replacing their last one). Returns (problem, the poll)."""
+        state = store.load(STATE)
+        for s in self.all_series:
+            for p in self._data(state, s).get("polls", []):
+                if p.get("pid") != pid:
+                    continue
+                if p["status"] != "open" or discord.utils.utcnow() >= discord.utils.parse_time(p["ends"]):
+                    return "This poll has closed.", None
+                ballot = rankedvote.clean(ranking, p["options"])
+                if not ballot:
+                    return "Pick at least your first choice.", None
+                p.setdefault("ballots", {})[uid] = ballot
+                store.save(STATE, state)
+                return "", p
+        return "I can't find that poll anymore.", None
+
+    def refresh_ranked_soon(self, pid: str, delay: float = 2.0) -> None:
+        """Show the new counts on the poll message, a moment later (votes in a burst make one edit)."""
+        if pid in self._ranked_refresh:
+            return
+        self._ranked_refresh.add(pid)
+
+        async def go() -> None:
+            await asyncio.sleep(delay)
+            self._ranked_refresh.discard(pid)
+            found = self.find_ranked(pid)
+            if found is None or found[1]["status"] != "open":
+                return
+            s, p = found
+            channel = self.bot.get_channel(p["channel_id"])
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    await channel.get_partial_message(p["message_id"]).edit(embed=self.ranked_embed(s, p))
+                except discord.HTTPException:
+                    pass
+
+        task = asyncio.create_task(go())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _finish_ranked(self, s, p: dict[str, Any]) -> bool:
+        """Close a ranked poll: count it, show the result on the poll, and announce the winner."""
+        result = rankedvote.instant_runoff(p.get("ballots", {}), p["options"])
+        channel = self.bot.get_channel(p["channel_id"])
+        if not isinstance(channel, discord.TextChannel):
+            self._update_poll(s, p["message_id"], status="gone")
+            return True
+        msg = channel.get_partial_message(p["message_id"])
+        try:
+            await msg.edit(embed=self.ranked_embed(s, p, result), view=None)
+        except discord.HTTPException as e:
+            log.warning("Couldn't show the %s ranked poll's result: %s", s.name, e)
+        final, rounds = result["final"], len(result["rounds"])
+        active = sum(final.values())
+
+        def votes_for(pick: str) -> str:
+            n = final.get(pick, 0)
+            if rounds > 1:
+                return f"{n} of {active} votes after {rounds} rounds"
+            return f"{n} of {result['voters']} first-choice votes"
+
+        return await self._announce_winner(
+            s, p, channel, msg, result["winners"], votes_for, {"result": {k: result[k] for k in ("winners", "final")}}
+        )
 
     @tasks.loop(seconds=20)
     async def check(self) -> None:
@@ -3034,6 +3288,8 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
 
         This waits on Discord (and OMDb) along the way, so `p` is only read here: changes are saved by
         re-loading the state right before saving, which keeps nominations made in the meantime."""
+        if p.get("kind") == "ranked":
+            return await self._finish_ranked(s, p)
         channel = self.bot.get_channel(p["channel_id"])
         try:
             msg = await channel.fetch_message(p["message_id"])
@@ -3059,23 +3315,37 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             return False  # Discord is still counting
         answers = sorted(poll.answers, key=lambda a: a.id)
         counts = [(p["options"][i], a.vote_count) for i, a in enumerate(answers) if i < len(p["options"])]
-        top = winners(counts)
+
+        def votes_for(pick: str) -> str:
+            votes = dict(counts)[pick]
+            return f"{votes} vote{'s' if votes != 1 else ''}"
+
+        return await self._announce_winner(s, p, channel, msg, winners(counts), votes_for)
+
+    async def _announce_winner(
+        self, s, p: dict, channel, msg, top: list[str], votes_for, save: dict | None = None
+    ) -> bool:
+        """After a poll closes: announce the winner (or a tie), then line up the next franchise or ask the
+        movie mods to confirm the night. `top` is the options with the most votes, `votes_for(id)` how many."""
         noms = {n["id"]: n for n in self._data(store.load(STATE), s)["nominations"]}
+        labels = p.get("labels", {})
+
+        def title_of(i: str) -> str:
+            return (noms.get(i) or {}).get("title") or labels.get(i) or "the winner"
+
         role = self.bot.role_named(channel.guild, s.role)
         winner = None
         if not top:
             text = self.bot.persona.say("movie_poll_none", series=series_label(s))
         elif len(top) > 1 and self.cfg.tie == "mods":
-            names = " and ".join(f"**{noms[i]['title']}**" for i in top if i in noms)
+            names = " and ".join(f"**{title_of(i)}**" for i in top)
             text = self.bot.persona.say("movie_poll_tie", names=names)
         else:
             pick = random.choice(top) if len(top) > 1 else top[0]
-            votes = dict(counts)[pick]
-            title = noms[pick]["title"] if pick in noms else "the winner"
             extra = " (picked at random from a tie)" if len(top) > 1 else ""
             key = "franchise_poll_winner" if is_franchise(s) else "movie_poll_winner"
             text = self.bot.persona.say(
-                key, title=title, votes=f"{votes} vote{'s' if votes != 1 else ''}", extra=extra, series=series_label(s)
+                key, title=title_of(pick), votes=votes_for(pick), extra=extra, series=series_label(s)
             )
             winner = noms.get(pick)
         # Save the result: re-loaded first, with nothing to wait on before saving.
@@ -3085,6 +3355,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if cur is None or cur.get("status") != "open":
             return True  # handled meanwhile
         cur["status"] = "done"
+        cur.update(save or {})
         if winner:
             if is_franchise(s) and franchise.next_part(data.get("queue")) is not None:
                 # The current franchise still has parts to go: the winner starts once its last part is logged.
@@ -3124,11 +3395,19 @@ class ChooseView(discord.ui.View):
     """Lets whoever started the poll pick which watchlist movies go in it."""
 
     def __init__(
-        self, cog: MovieNight, s, unwatched: list[dict], hours: int, question: str, owner: int, closes=None
+        self,
+        cog: MovieNight,
+        s,
+        unwatched: list[dict],
+        hours: int,
+        question: str,
+        owner: int,
+        closes=None,
+        ranked: bool = False,
     ) -> None:
         super().__init__(timeout=600)
         self.cog, self.s, self.hours, self.question, self.owner = cog, s, hours, question, owner
-        self.closes = closes
+        self.closes, self.ranked = closes, ranked
         self.noms = {n["id"]: n for n in unwatched}
         limit = min(cog.cfg.poll_options, len(unwatched), 25)
         select = discord.ui.Select(
@@ -3150,11 +3429,13 @@ class ChooseView(discord.ui.View):
         ids = interaction.data.get("values", [])
         picks = [self.noms[i] for i in ids if i in self.noms]
         await interaction.response.edit_message(content="Posting the poll…", view=None)
-        msg = await self.cog.start_poll(interaction, self.s, picks, self.hours, self.question, self.closes)
+        msg = await self.cog.start_poll(interaction, self.s, picks, self.hours, self.question, self.closes, self.ranked)
         if msg:
             await interaction.edit_original_response(content=f"Poll posted: {msg.jump_url}")
 
 
 async def setup(bot: Pingwin) -> None:
-    bot.add_dynamic_items(RequestButton, RateButton, NightPick, BreakButton, StarterPick, StarterButton)
+    bot.add_dynamic_items(
+        RequestButton, RateButton, NightPick, BreakButton, StarterPick, StarterButton, RankedVoteButton
+    )
     await bot.add_cog(MovieNight(bot))

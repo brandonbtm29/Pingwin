@@ -219,6 +219,7 @@ SECTIONS: list[dict[str, Any]] = [
                     {"key": "channel", "type": "channel", "label": "Channel"},
                     {"key": "showtime", "type": "text", "label": "Showtime"},
                     {"key": "franchises", "type": "toggle", "label": "Franchise queue"},
+                    {"key": "ranked", "type": "toggle", "label": "Ranked polls"},
                 ],
             ),
             F(
@@ -401,6 +402,18 @@ SECTIONS: list[dict[str, Any]] = [
                 half=True,
             ),
             F("multiple", "toggle", "Let people vote for more than one", False, group="Polls", half=True),
+            F(
+                "ranked_choices",
+                "number",
+                "Ranked polls: choices to rank (2-5)",
+                3,
+                "For a series with Ranked polls ticked (or /pingwin movie poll ranked:True): people rank their top "
+                "picks, and the count is an instant runoff.",
+                min=2,
+                max=5,
+                group="Polls",
+                half=True,
+            ),
             F(
                 "mark_watched",
                 "toggle",
@@ -852,7 +865,7 @@ def to_toml_value(field: dict[str, Any], value: Any) -> Any:
                 else:
                     v = str(v or "").strip()
                 row[col["key"]] = v
-            if any(v for k, v in row.items() if k != "franchises"):
+            if any(v for k, v in row.items() if k not in ("franchises", "ranked")):
                 rows.append(row)
         return rows
     return "" if value is None else str(value)

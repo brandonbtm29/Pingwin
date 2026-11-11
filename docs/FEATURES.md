@@ -169,6 +169,14 @@ particular series (its polls go to the channel they're started in). Members nomi
 movies, then a mod (or whoever you allow) turns the watchlist into a native Discord poll. When the poll
 ends, Pingwin replies with the winner.
 
+**Ranked-choice polls:** tick *Ranked polls* on a series (or start one with `ranked:True`) and Pingwin posts
+its own poll instead of a Discord one, since Discord's can't rank. Everyone taps **Vote** and ranks their top
+picks (*Ranked polls: choices to rank*, 3 by default, up to 5); voting again changes their ranking. While it's
+open, the poll shows each option's first-choice votes. When it closes, it's counted as an instant runoff:
+if no option has more than half the votes, the last one drops out and its votes go to each voter's next
+choice, round after round. The poll then shows the winner and how each round went, and the winner goes
+through the same steps as a Discord poll's (ties, the movie mods' card, franchise queues).
+
 **Showtimes:** give a series a weekly showtime, like `Mon 8:30pm` (in the time zone under *General*). Then
 `/pingwin movie poll` closes the poll exactly when the movie starts, and the poll message shows the closing time
 in everyone's own time zone. (Discord polls can only run whole hours, so Pingwin ends it early at showtime.)
@@ -186,7 +194,7 @@ Passing `hours` still overrides it.
 | `/pingwin movie page` | The movie pages: the view-only link and your own sign-in link |
 | `/pingwin movie queue series` | Where a franchise series is up to |
 | `/pingwin movie franchise series` | Line up a franchise's movies (mods) |
-| `/pingwin movie poll series [hours] [question]` | Start a poll and ping the series' role |
+| `/pingwin movie poll series [hours] [question] [ranked]` | Start a poll and ping the series' role (`ranked` for a ranked-choice poll; the default is the series' *Ranked polls* box) |
 | `/pingwin movie endpoll series` | End the running poll now |
 | `/pingwin movie skip series [weeks] [starting] [reason]` | Movie mods: skip showings (a week off, or a break between franchises) |
 | `/pingwin movie unskip series` | Movie mods: end a break early |
