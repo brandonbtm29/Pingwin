@@ -2,9 +2,10 @@
 
 ## Reporting a vulnerability
 
-Please **don't** put the details of a security problem in a public issue. Instead,
-[open an issue](https://github.com/brandonbtm29/Pingwin/issues) that only says you have one to report
-(no details), and I'll set up a private way for you to send it. I'll reply within a week.
+Please **don't** put the details of a security problem in a public issue. Report it privately instead:
+on GitHub, open the repo's **Security** tab and click
+[**Report a vulnerability**](https://github.com/brandonbtm29/Pingwin/security/advisories/new). Only the
+maintainer sees it. I'll reply within a week.
 
 Things that count as security issues here:
 
@@ -23,6 +24,12 @@ Things that count as security issues here:
 ## Hardening already in place
 
 - Pingwin only hands out roles listed in `config.toml`, matched by name, even if an old menu points elsewhere
+- Roles set up by name (the dashboard admin role, movie mods, the gate role) count only as the highest role
+  with that name, so a lower copy someone makes and gives themselves doesn't work
+- The shared `secrets.env` only sets key names (like `OMDB_API_KEY`) on each PC, never settings other
+  programs read (like `GIT_CONFIG_*` or `PYTHONPATH`), and the updater's git ignores `GIT_*` settings
+- A personal movie-page link opens only the movie pages, even for an admin
+- Exported reviews can't run as spreadsheet formulas, and text members write can't ping roles
 - Ping roles are created with no permissions; `/pingwin rolemenu check` warns about roles that have any
 - Mod commands use Discord's own permissions (`Manage Roles`, `Manage Server`); movie night's also accept
   the *Movie mods* role
