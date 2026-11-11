@@ -129,7 +129,7 @@ class GameDay(commands.GroupCog, group_name="gameday", group_description="Game d
         start = parse_when(text, now)
         if start is None or start <= now:
             await interaction.response.send_message(
-                f"I couldn't understand **{when}** as a future time. Try `fri 8pm`, `tomorrow 7:30pm`, "
+                f"I couldn't understand **{when[:100]}** as a future time. Try `fri 8pm`, `tomorrow 7:30pm`, "
                 "`10/24 8pm`, `in 2 hours`, or add a zone like `sat 7pm CT`.",
                 ephemeral=True,
             )
@@ -161,7 +161,7 @@ class GameDay(commands.GroupCog, group_name="gameday", group_description="Game d
             content=role.mention if role else None,
             embed=card(game),
             view=buttons(gid),
-            allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
+            allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False),
         )
         game["message"] = msg.id
         state = store.load(STATE)

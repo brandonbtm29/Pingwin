@@ -351,20 +351,20 @@ def test_series_names_from_full_names():
 QUESTION_DOC = """The Fly
 Date watched: 1/5/2026
 Sam (8/10): Gross in the best way.
-* To Alina: How many teleporters out of ten?
+* To Jordan: How many teleporters out of ten?
 Alex (7/10): Loved the ending.
-Alina (9/10): Five teleporters.
-To ellie from alina and sebastian: Moms crawling across the ceiling?
-Ellie (6/10): Fine.
+Jordan (9/10): Five teleporters.
+To morgan from jordan and casey: Moms crawling across the ceiling?
+Morgan (6/10): Fine.
 """
 
 
 def test_questions_know_who_asked_whom(tmp_path, monkeypatch):
     monkeypatch.setenv("PINGWIN_DATA", str(tmp_path))
     secs = movies.parse_ratings_doc(QUESTION_DOC)
-    sam, alex, alina, ellie = secs[0]["ratings"]
-    assert sam["ask_to"] == "Alina" and sam["ask"].startswith("How many teleporters")
-    assert alina["ask_to"] == "Ellie" and alina["asked_by"] == "Alina & Sebastian"
+    sam, alex, jordan, morgan = secs[0]["ratings"]
+    assert sam["ask_to"] == "Jordan" and sam["ask"].startswith("How many teleporters")
+    assert jordan["ask_to"] == "Morgan" and jordan["asked_by"] == "Jordan & Casey"
     lib = movies.load()
     sheet = [
         {
@@ -383,10 +383,10 @@ def test_questions_know_who_asked_whom(tmp_path, monkeypatch):
     movies.import_history(lib, sheet, secs, ["MMM"])
     e = lib["history"][0]
     chain = movies.question_chain(e, movies.rater_names(lib))
-    assert chain["name:sam"]["to"] == ["Alina"]
-    assert chain["name:alina"]["from"] == "Sam"  # Sam's question skipped Alex and went to Alina
+    assert chain["name:sam"]["to"] == ["Jordan"]
+    assert chain["name:jordan"]["from"] == "Sam"  # Sam's question skipped Alex and went to Jordan
     assert chain["name:alex"]["from"] is None
-    assert chain["name:ellie"]["from"] == "Alina & Sebastian"
+    assert chain["name:morgan"]["from"] == "Jordan & Casey"
     # Ratings imported before questions were linked get linked on the next import.
     for r in e["ratings"].values():
         r.pop("answered_from")
@@ -427,3 +427,12 @@ def test_questions_asked_of_someone_by_name():
     # A skipped question stays open for the next person.
     movies.add_rating(e, "4", name="Kim", score=5)
     assert movies.question_for(e, "5") == ("Best scream?", "2")
+
+
+def test_exported_reviews_cant_run_formulas():
+    lib = {"movies": {}, "history": [], "pending": {}}
+    m = movies.upsert_movie(lib, {"title": "Alien", "year": 1979})
+    e = movies.new_entry(m, "2026-10-23", "FFF")
+    movies.add_rating(e, "1", name="Sam", score=8, comment='=HYPERLINK("https://example.invalid","x")')
+    lib["history"].append(e)
+    assert "'=HYPERLINK" in movies.reviews_csv(lib, {}) and movies._cell("-5 stars") == "'-5 stars"

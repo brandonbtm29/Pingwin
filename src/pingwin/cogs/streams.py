@@ -261,7 +261,10 @@ class StreamAlerts(commands.Cog):
         if role:
             text = f"{role.mention} {text}"
         try:
-            await channel.send(text[:2000], allowed_mentions=discord.AllowedMentions(roles=[role] if role else False))
+            await channel.send(
+                text[:2000],
+                allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False),
+            )
         except discord.HTTPException as e:
             self._warn(f"send-{channel.id}", "Stream alerts: couldn't post in #%s: %s", channel.name, e)
             return False

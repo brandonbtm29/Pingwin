@@ -14,7 +14,9 @@ Two kinds of settings:
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import socket
 import tomllib
 from dataclasses import dataclass
@@ -54,6 +56,24 @@ def _local_env() -> Path:
     return PROJECT_ROOT / ".env"  # per-PC, never synced
 
 
+log = logging.getLogger("pingwin.config")
+
+# secrets.env is shared with every PC, so only key-like names are loaded from it: DISCORD_TOKEN,
+# PINGWIN_GUILD_ID and names ending in _KEY, _TOKEN, _SECRET or _ID. A PC that can write the file must not be
+# able to set things other programs read, like GIT_CONFIG_* (which can run commands) or PYTHONPATH.
+SECRET_NAME = re.compile(r"DISCORD_TOKEN|PINGWIN_GUILD_ID|[A-Z][A-Z0-9_]*_(?:KEY|TOKEN|SECRET|ID)")
+UNSAFE_PREFIXES = (
+    "GIT_", "PYTHON", "PIP_", "LD_", "DYLD_", "SSL_", "SSH_", "REQUESTS_", "CURL_", "HTTP", "NODE_", "NPM_",
+    "PINGWIN_DATA", "PINGWIN_CONFIG", "PINGWIN_NODE", "PINGWIN_DASHBOARD", "PINGWIN_SYNCTHING",
+)  # fmt: skip
+
+
+def secret_name_ok(name: str) -> bool:
+    """Whether secrets.env may set this name."""
+    return bool(SECRET_NAME.fullmatch(name)) and not name.startswith(UNSAFE_PREFIXES)
+
+
+_skipped_names: set[str] = set()
 _inherited_env: frozenset[str] | None = None  # names set before Pingwin loaded any file (Windows, the shell)
 _from_secrets: dict[str, str] = {}  # what this process put in os.environ from secrets.env
 
@@ -83,7 +103,16 @@ def load_secrets() -> list[str]:
     path = secrets_path()
     if not path.exists():
         return []
-    values = {k: v for k, v in dotenv_values(path, encoding="utf-8").items() if v is not None}
+    values = {}
+    for k, v in dotenv_values(path, encoding="utf-8").items():
+        if v is None:
+            continue
+        if not secret_name_ok(k):
+            if k not in _skipped_names:
+                _skipped_names.add(k)
+                log.warning("secrets.env: ignoring %s (only key names like OMDB_API_KEY are loaded from it)", k)
+            continue
+        values[k] = v
     local = _local_env()
     keep = _inherited_env | (set(dotenv_values(local, encoding="utf-8")) if local.exists() else set())
     changed: list[str] = []

@@ -430,7 +430,7 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="Bir
         rows = self._others()
         keep = [r for r in rows if r["name"].casefold() != name.strip().casefold()]
         if len(keep) == len(rows):
-            await interaction.response.send_message(f"There's no birthday saved for **{name}**.", ephemeral=True)
+            await interaction.response.send_message(f"There's no birthday saved for **{name[:100]}**.", ephemeral=True)
             return
         self._save_others(keep)
         await interaction.response.send_message(f"Removed **{name}**.", ephemeral=True)

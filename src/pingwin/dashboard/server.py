@@ -54,6 +54,7 @@ from .auth import (
     check_member,
     client_secret,
     exchange_code,
+    has_named_role,
     member_status,
 )
 from .setup_check import checklist, gather_facts, summarize
@@ -206,7 +207,10 @@ async def identify(request: web.Request) -> Viewer | None:
         avatar=item.get("avatar"),
         sid=item["sid"],
         level=item.get("level", "admin"),
-        full_access=bool(cfg and cfg.remote_full_access) and item.get("level", "admin") == "admin",
+        full_access=bool(cfg and cfg.remote_full_access)
+        and item.get("level", "admin") == "admin"
+        and not item.get("movies_only"),
+        movies_only=bool(item.get("movies_only")),
     )
 
 
@@ -278,7 +282,7 @@ async def guard(request: web.Request, handler):
                     max_age=180 * 86400,
                 )
                 return _secure(request, response)
-        elif not viewer.is_admin and request.path not in MEMBER_PATHS:
+        elif (not viewer.is_admin or viewer.movies_only) and request.path not in MEMBER_PATHS:
             if request.path.startswith("/api/"):
                 return _secure(request, web.json_response({"error": "That's for admins."}, status=403))
             raise web.HTTPFound("/movies")
@@ -518,6 +522,8 @@ async def movies_login(request: web.Request) -> web.StreamResponse:
         "name": member.display_name if member else found["name"],
         "avatar": found.get("avatar"),
         "level": level,
+        # The link is for the movie pages: forwarding it mustn't hand over the dashboard, even an admin's.
+        "movies_only": True,
     }
     token = request.app[SESSIONS].create(user)
     log.info("%s signed in to the movie pages with a personal link (%s)", user["name"], level)
@@ -1114,7 +1120,7 @@ def is_movie_mod(request: web.Request) -> bool:
         role = getattr(bot.config.features.movienight, "mod_role", "") or ""
     guild = _guild(bot) if role else None
     member = guild.get_member(int(viewer.user_id)) if guild is not None else None
-    return bool(member and any(r.name.casefold() == role.casefold() for r in member.roles))
+    return bool(member and has_named_role(member, role))
 
 
 def _series_names(bot: Any) -> list[str]:
@@ -1125,6 +1131,21 @@ def _series_names(bot: Any) -> list[str]:
 
     mine = [s.name for s in bot.config.features.movienight.series if s.name] if hasattr(bot, "config") else []
     return [*mine, GENERAL.name]
+
+
+def _hide_discord_ids(history: list[dict[str, Any]], secret: str) -> None:
+    """For the shared view-only link: raters' Discord user IDs become stand-ins (the same person gets the same
+    one, so reviews still group by person), and no member links."""
+
+    def anon(k: Any) -> Any:
+        if not isinstance(k, str) or not k.isdigit():
+            return k  # a guest's "name:..." key, or nothing
+        return "p" + hmac.new(secret.encode(), k.encode(), "sha256").hexdigest()[:12]
+
+    for h in history:
+        for r in h["ratings"]:
+            r["key"], r["who_id"] = anon(r["key"]), None
+            r["ask_for"], r["answered_from_key"] = anon(r.get("ask_for")), anon(r.get("answered_from_key"))
 
 
 async def get_movies(request: web.Request) -> web.Response:
@@ -1172,6 +1193,8 @@ async def get_movies(request: web.Request) -> web.Response:
                 "voice": e.get("voice"),
             }
         )
+    if viewer.level == "viewer":
+        _hide_discord_ids(history, request.app[KEY])
     state = store.load(WATCH)
     cog = _movie_cog(bot)
     if cog is not None:
@@ -1245,7 +1268,7 @@ async def get_movies(request: web.Request) -> web.Response:
             "backups": store.backups(movies.STATE) if mod else [],
             "search_budget": cog.search_budget() if cog is not None and hasattr(cog, "search_budget") else None,
             "pending": pending,
-            "people": lib.get("people", {}),
+            "people": lib.get("people", {}) if mod else {},
             "members": sorted(
                 (
                     {"id": str(m.id), "name": m.display_name, "username": m.name, "global": m.global_name or ""}
@@ -1570,6 +1593,11 @@ async def post_movie_review(request: web.Request) -> web.Response:
     ask_for, ask_for_name = str(payload.get("ask_for") or "").strip(), ""
     if ask_for and ask:  # their question is for one member, who gets pinged
         target = guild.get_member(int(ask_for)) if guild is not None and ask_for.isdigit() else None
+        if target is None and guild is not None and ask_for.isdigit():  # the member list isn't kept
+            try:
+                target = await guild.fetch_member(int(ask_for))
+            except (discord.HTTPException, aiohttp.ClientError, TimeoutError):
+                target = None
         if target is None or target.bot:
             raise ApiError("Pick who your question is for (someone in the server), or leave it for whoever's next.")
         problem = movies.ask_problem(e, key, ask_for)
@@ -1685,10 +1713,16 @@ def _export_url(url: str, kind: str) -> str:
     return f"https://docs.google.com/document/d/{m[2]}/export?format=txt"
 
 
+FETCH_LIMIT = 4 * 1024 * 1024  # a movie log or ratings document is far smaller
+
+
 async def _fetch_text(url: str) -> str:
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as http:
         async with http.get(url) as r:
-            text = await r.text(encoding="utf-8", errors="replace")
+            raw = await r.content.read(FETCH_LIMIT + 1)
+            if len(raw) > FETCH_LIMIT:
+                raise ApiError("That file is too big to import (over 4 MB).")
+            text = raw.decode("utf-8", errors="replace")
             if r.status != 200 or "text/html" in r.headers.get("Content-Type", ""):
                 raise ApiError(
                     "Google wouldn't share that file with Pingwin. Set it to 'Anyone with the link can view' "
@@ -1753,10 +1787,11 @@ async def post_movie_admin(request: web.Request) -> web.Response:
             doc_text = await _fetch_text(_export_url(str(payload["doc_url"]), "doc"))
         if not sheet_text and not doc_text:
             raise ApiError("Give a spreadsheet and/or a ratings document.")
-        sheet = movies.parse_sheet(sheet_text) if sheet_text else []
+        # Parsing is plain CPU work: off the bot's event loop, so Discord and the dashboard keep answering.
+        sheet = await asyncio.to_thread(movies.parse_sheet, sheet_text) if sheet_text else []
         lib = movies.load()
         titles = {movies.norm(r["title"]) for r in sheet} | {movies.norm(m["title"]) for m in lib["movies"].values()}
-        doc = movies.parse_ratings_doc(doc_text, titles) if doc_text else []
+        doc = await asyncio.to_thread(movies.parse_ratings_doc, doc_text, titles) if doc_text else []
         guild = _guild(bot)
         members = {
             str(m.id): f"{m.display_name} {m.name} {m.global_name or ''}" for m in (guild.members if guild else [])
@@ -1913,6 +1948,16 @@ async def post_movie_admin(request: web.Request) -> web.Response:
             cid = str(payload.get("channel_id") or "")
             if not cid.isdigit():
                 raise ApiError("Pick a channel.")
+            # Only a channel of this server, and (unless it's the PC's owner) one the mod can post in themselves.
+            channel = bot.get_channel(int(cid))
+            guild = _guild(bot)
+            if guild is None or getattr(getattr(channel, "guild", None), "id", None) != guild.id:
+                raise ApiError("Pick a channel of this server.")
+            if viewer.kind != "owner":
+                member = await _need_who(request)
+                perms = channel.permissions_for(member)
+                if not (perms.view_channel and perms.send_messages):
+                    raise ApiError("You can only post the link in a channel you can post in yourself.", 403)
             msg = await cog.post_share_link(int(cid))
             return web.json_response({"ok": True, "message": msg, **_share_info(cog)})
         if action == "share_reset" and cog is not None:

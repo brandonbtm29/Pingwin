@@ -36,7 +36,7 @@ class TimeZones(commands.GroupCog, group_name="timezone", group_description="You
         tz = zones.zone(zone)
         if tz is None:
             await interaction.response.send_message(
-                f"I don't know the time zone **{zone}**. Pick one from the list.", ephemeral=True
+                f"I don't know the time zone **{zone[:100]}**. Pick one from the list.", ephemeral=True
             )
             return
         zones.set_for(interaction.user.id, tz.key)

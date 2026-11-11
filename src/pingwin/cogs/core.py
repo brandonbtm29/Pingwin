@@ -11,6 +11,7 @@ from discord.ext import commands
 
 from .. import __version__
 from ..config import ConfigError
+from ..dashboard.auth import has_named_role
 
 if TYPE_CHECKING:
     from ..bot import Pingwin
@@ -49,7 +50,7 @@ class Core(commands.GroupCog, group_name="pingwin", group_description="Pingwin: 
         allowed = isinstance(member, discord.Member) and (
             member.guild_permissions.manage_guild
             or member.guild_permissions.administrator
-            or (role and any(r.name.casefold() == role.casefold() for r in member.roles))
+            or has_named_role(member, role)
         )
         if not allowed:
             need = "Manage Server" + (f" or the {role} role" if role else "")

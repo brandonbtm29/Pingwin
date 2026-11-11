@@ -1,11 +1,12 @@
 # Pingwin settings, shared by every PC that runs Pingwin.
 # Lives in the shared settings folder (see PINGWIN_DATA in .env) as config.toml.
 # Edits are picked up automatically within a minute (or run /pingwin reload).
-# Run /rolemenu post again if you changed the menu.
+# After changing a menu, click Update posted menus on the dashboard (or run /pingwin rolemenu refresh).
 # Edit it on one PC at a time so SyncThing doesn't create conflict copies.
 
 [bot]
-# Which personality file in personas/ to use (without .toml).
+# Which personality to use (a file name without .toml): one in the settings folder's personas/,
+# or a bundled one (pingwin, deadpan).
 persona = "pingwin"
 # Your server ID (right-click the server icon -> Copy Server ID; needs Developer Mode on).
 # Makes slash commands show up instantly. 0 = register globally (slower).
@@ -80,14 +81,14 @@ description = "Game days and planning"
 # description = "Every #polls vote, not just movie polls"
 #
 # [[roles.menu]]
-# name = "Beanbag Buddy"
+# name = "Hangout Buddy"
 # emoji = "🫘"
-# description = "Someone's hanging out in Beanbag Chairs, come chill"
+# description = "Someone's hanging out in voice, come chill"
 #
 # [[roles.menu]]
-# name = "Study Hall Scholar"
+# name = "Study Buddy"
 # emoji = "📝"
-# description = "Study and focus sessions in Study Hall"
+# description = "Study and focus sessions in voice"
 #
 # [[roles.menu]]
 # name = "Birthday Brigade"
@@ -104,6 +105,6 @@ description = "Game days and planning"
 # emoji = "🏞️"
 # description = "IRL outings and meetups"
 
-# Optional features (event reminders, birthdays, movie night, game day, stream alerts,
-# welcome and approval, mod log) each get their own section, like [events] or [movienight].
+# Optional features (event reminders, birthdays, movie night, game day, stream alerts, event
+# attendance, welcome and approval, mod log) each get their own section, like [events] or [movienight].
 # The easiest way to set them up is the dashboard's Features tab. See docs/FEATURES.md.

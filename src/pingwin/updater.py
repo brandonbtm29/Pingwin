@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 log = logging.getLogger("pingwin.updater")
@@ -12,8 +13,10 @@ log = logging.getLogger("pingwin.updater")
 
 async def _git(root: Path, *args: str, timeout: float = 60) -> tuple[int, str]:
     try:
+        # GIT_* settings (like GIT_CONFIG_*, which can run commands) don't come along.
+        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
         proc = await asyncio.create_subprocess_exec(
-            "git", *args, cwd=root, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            "git", *args, cwd=root, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
         )
     except FileNotFoundError:
         return 127, "git is not installed"

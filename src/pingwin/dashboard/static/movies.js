@@ -25,7 +25,10 @@ function put(node, ...kids) { node.replaceChildren(...kids.flat(Infinity).filter
 
 function toast(message, isError = false, ms = isError ? 9000 : 5000) {
   if (!message) return;  // e.g. a signed-out error, which already showed its own toast
-  const t = el("div", { class: "toast" + (isError ? " error" : "") }, message);
+  // A movie dialog sits above the whole page, so messages go inside the open one (or they'd be hidden under it).
+  const host = document.querySelector("dialog[open]") || document.body;
+  if ($("toasts").parentNode !== host) host.append($("toasts"));
+  const t = el("div", { class: "toast" + (isError ? " error" : ""), title: "Click to close", onclick: (e) => { if (!e.target.closest("a")) t.remove(); } }, message);
   $("toasts").append(t);
   setTimeout(() => t.remove(), ms);
 }
@@ -116,7 +119,8 @@ const canMod = () => !!(data && data.viewer && data.viewer.movie_mod);
 async function load() {
   try { data = await api("/api/movies"); } catch (e) { $("m-sub").textContent = e.message; return; }
   const v = data.viewer;
-  $("m-sub").textContent = `${data.history.length} movie nights` + (data.history.length ? ` since ${fmtDate(data.history[data.history.length - 1].date || data.history.find((h) => h.date)?.date)}` : "");
+  const firstNight = data.history.map((h) => h.date).filter(Boolean).sort()[0];
+  $("m-sub").textContent = `${data.history.length} movie nights` + (firstNight ? ` since ${fmtDate(firstNight)}` : "");
   const nReviews = data.history.reduce((t, h) => t + h.ratings.length, 0);
   const nPeople = new Set(data.history.flatMap((h) => h.ratings.map((r) => (r.who || "").toLowerCase()))).size;
   const hours = Math.round(data.history.reduce((t, h) => t + (h.movie.runtime || 0), 0) / 60);
@@ -133,10 +137,10 @@ async function load() {
   const mod = canMod();  // movie night tools (admins and movie mods)
   const guest = v && v.level === "viewer";
   $("m-guest").hidden = !guest;
-  $("rv-box").hidden = guest;
+  $("rv-box").hidden = guest || !data.history.length;  // nothing to review yet
   $("w-suggest").hidden = guest;
   document.body.classList.toggle("guest", !!guest);
-  $("m-dashboard").hidden = !admin;
+  $("m-dashboard").hidden = !admin || !!v.movies_only;  // a personal movie-page link opens only these pages
   $("m-admin-tab").hidden = !mod;
   $("o-note").textContent = data.omdb
     ? "Pingwin fills in genre, poster, plot, director, writers and stars by itself, a few at a time. This button does a bigger batch now."
@@ -254,7 +258,7 @@ function renderHistory() {
       histSort = { key: c.key, dir: c.key === histSort.key ? (histSort.dir === "asc" ? "desc" : "asc") : (c.num || c.key === "date" ? "desc" : "asc") };
       renderHistory();
     } }, c.label, c.key === histSort.key ? (histSort.dir === "asc" ? " ▲" : " ▼") : ""))));
-  put($("h-rows"), rows.map((h) => el("tr", { class: "clickable", tabindex: "0", onclick: () => showMovie(h), onkeydown: (e) => { if (e.key === "Enter") showMovie(h); } },
+  put($("h-rows"), rows.map((h) => el("tr", { class: "clickable", tabindex: "0", onclick: () => showMovie(h), onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); showMovie(h); } } },
     cols.map((c) => el("td", { class: [`c-${c.key}`, c.num ? "num" : "", c.cls || ""].join(" ").trim() }, c.cell(h))))));
 }
 
@@ -1220,7 +1224,10 @@ function xStatus(i) { return i.watched.length ? "watched" : i.lists.length ? "li
 function renderImdb() {
   const lists = data.imdb_lists || [];
   $("m-imdb-tab").hidden = !lists.length;
-  if (!lists.length) return;
+  if (!lists.length) {
+    if (!$("tab-imdb").hidden) switchTab("history");  // the last list was removed (or a remembered tab)
+    return;
+  }
   const cur = lists.find((l) => l.id === xList) || lists[0];
   xList = cur.id;
   put($("x-lists"), lists.length > 1 ? lists.map((l) => el("button", { class: "chip", "aria-pressed": String(l.id === cur.id),

@@ -53,6 +53,7 @@ class Viewer:
     sid: str = ""  # a short, stable id for this sign-in (for "who else is here")
     full_access: bool = False  # may manage backup PCs and remote access
     level: str = "admin"  # "admin" (the dashboard) or "member" (only the movie pages)
+    movies_only: bool = False  # signed in with a personal movie-page link: the movie pages only, even for admins
 
     @property
     def is_admin(self) -> bool:
@@ -67,6 +68,7 @@ class Viewer:
             "avatar": self.avatar,
             "sid": self.sid,
             "full_access": self.full_access,
+            "movies_only": self.movies_only,
         }
 
 
@@ -106,6 +108,7 @@ class Sessions:
             "name": user.get("name") or "Someone",
             "avatar": user.get("avatar"),
             "level": user.get("level", "admin"),
+            "movies_only": bool(user.get("movies_only")),
             "created": now,
             "expires": now + SESSION_SECONDS,
             "checked": now,
@@ -222,8 +225,24 @@ async def exchange_code(client_id: str, code: str, redirect_uri: str) -> dict[st
     return {"id": me["id"], "name": me.get("global_name") or me.get("username") or "Someone", "avatar": avatar}
 
 
-def _has_role(member: discord.Member, name: str | None) -> bool:
-    return bool(name) and any(r.name.casefold() == name.casefold() for r in member.roles)
+def has_named_role(member: Any, name: str | None) -> bool:
+    """Whether a member has the role with this name. Roles are set up by name, so with several roles of the
+    same name only the highest one counts: someone who can manage roles can make a low copy of a role and
+    give it to themselves, but can't get the real one that way."""
+    if not name:
+        return False
+    key = name.casefold()
+    guild_roles = getattr(getattr(member, "guild", None), "roles", None)
+    if not guild_roles:  # no server to compare with (tests): by name
+        return any(r.name.casefold() == key for r in member.roles)
+    same = [r for r in guild_roles if r.name.casefold() == key]
+    if not same:
+        return False
+    top = max(same, key=lambda r: getattr(r, "position", 0))
+    return any(getattr(r, "id", None) == getattr(top, "id", None) for r in member.roles)
+
+
+_has_role = has_named_role
 
 
 UNSURE = "unsure"  # member_status: Discord couldn't be asked right now (not a "no")

@@ -50,7 +50,10 @@ function richText(text) {
 }
 
 function toast(message, isError = false) {
-  const t = el("div", { class: "toast" + (isError ? " error" : "") }, message);
+  // A movie dialog sits above the whole page, so messages go inside the open one (or they'd be hidden under it).
+  const host = document.querySelector("dialog[open]") || document.body;
+  if ($("toasts").parentNode !== host) host.append($("toasts"));
+  const t = el("div", { class: "toast" + (isError ? " error" : ""), title: "Click to close", onclick: (e) => { if (!e.target.closest("a")) t.remove(); } }, message);
   $("toasts").append(t);
   setTimeout(() => t.remove(), isError ? 9000 : 5000);
 }
@@ -132,6 +135,10 @@ function setPill(kind, text) {
 
 function renderHeader() {
   const g = state.guild;
+  // Signed in with Discord without full access: Stop and adding backup PCs are for the PC's owner.
+  const owner = !state.viewer || state.viewer.full_access;
+  document.querySelectorAll('[data-action="stop"]').forEach((b) => { b.hidden = !owner; });
+  $("pair-panel").hidden = !owner;
   $("server-line").textContent = g ? `${g.name} · ${state.node}` : `${state.node} · not connected to a server yet`;
   if (!state.connected) setPill("offline", "Disconnected");
   else if (state.active) setPill("active", "Answering");
@@ -185,7 +192,7 @@ function addAllZones() {
   }
   if (!added) return toast("Every time zone is already in this menu.");
   markRolesDirty(); buildMenuPicker(); buildRoleRows();
-  toast(`Added ${added} time zones. Save, then use Create missing roles and Refresh posted menus.`);
+  toast(`Added ${added} time zones. Save, then use Create missing roles and Update posted menus.`);
 }
 
 function currentMenu() {
@@ -1025,6 +1032,8 @@ $("stale-reload").addEventListener("click", async () => {
   }
   $("roles-dirty").hidden = !rolesDirty;
   $("pcs-dirty").hidden = !pcsDirty;
+  $("roles-save").disabled = !rolesDirty;
+  $("pcs-save").disabled = !pcsDirty;
   document.activeElement?.blur();
   await loadState();
   if (currentTab === "features") await loadFeatures(true);
@@ -1134,8 +1143,8 @@ function renderRemote() {
     el("ol", { class: "sub-steps" },
       el("li", {}, "Open the ", el("a", { href: portal, target: "_blank", rel: "noreferrer" }, "Developer Portal → OAuth2"), " page for Pingwin."),
       el("li", {}, "Under ", el("strong", {}, "Redirects"), ", click Add Redirect and paste ",
-        r.redirect_uri ? el("code", {}, r.redirect_uri) : "this PC's address (shown once Tailscale is on)", " ",
-        r.redirect_uri ? copyButton(r.redirect_uri) : null, ". Click ", el("strong", {}, "Save Changes"), "."),
+        r.redirect_uri ? el("code", {}, r.redirect_uri) : "this PC's address (shown once Tailscale is on)",
+        r.redirect_uri ? [" ", copyButton(r.redirect_uri)] : null, ". Click ", el("strong", {}, "Save Changes"), "."),
       el("li", {}, "Copy the ", el("strong", {}, "Client Secret"), " (click Reset Secret if it's hidden; that doesn't affect the bot token) and paste it here:")),
     manage ? el("div", { class: "row-actions" }, secretInput) : null);
 

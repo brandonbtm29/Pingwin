@@ -2,16 +2,21 @@
 
 ## Reporting a vulnerability
 
-Please **don't** open a public issue for security problems. Use GitHub's
-"Report a vulnerability" button (Security tab → Advisories) to report privately.
-I'll reply within a week.
+Please **don't** put the details of a security problem in a public issue. Instead,
+[open an issue](https://github.com/brandonbtm29/Pingwin/issues) that only says you have one to report
+(no details), and I'll set up a private way for you to send it. I'll reply within a week.
 
 Things that count as security issues here:
 
 - Any way for a member to get a role that isn't in the menu, or to use the menu without the gate role
-- Any way for a non-mod to run `/pingwin rolemenu` or `/pingwin reload|restart`
+- Any way for a non-mod to run `/pingwin rolemenu` or `/pingwin reload|restart`, or to approve movie
+  night changes without being a movie mod
 - Any way to reach or change the dashboard from another device or website without signing in, or to sign in
   without Manage Server (or the dashboard admin role)
+- Any way for a member signed in to the movie pages, or someone with the view-only link, to open the rest of
+  the dashboard, or for the view-only link to change anything
+- Any way to sign in as someone else (like a personal sign-in link working twice or after it expires),
+  or to save someone else's voice rating
 - Any way for a signed-in co-admin to manage backup PCs or remote access when full access is off
 - The bot token or other secrets showing up in logs, messages or the repo
 
@@ -19,14 +24,19 @@ Things that count as security issues here:
 
 - Pingwin only hands out roles listed in `config.toml`, matched by name, even if an old menu points elsewhere
 - Ping roles are created with no permissions; `/pingwin rolemenu check` warns about roles that have any
-- Mod commands use Discord's own permission checks (`Manage Roles`, `Manage Server`)
-- No privileged gateway intents: Pingwin can't read message content or the member list
+- Mod commands use Discord's own permissions (`Manage Roles`, `Manage Server`); movie night's also accept
+  the *Movie mods* role
+- Privileged gateway intents only when a feature needs them: with Welcome and the mod log off, Pingwin can't
+  read message content or the member list
 - The dashboard listens on 127.0.0.1 only, checks the Host header, needs a key cookie (HttpOnly,
   SameSite=Strict), and requires a custom header plus a matching Origin for every change
 - When it's put online with Tailscale Funnel, Funnel requests (marked by Tailscale, which strips
   look-alike headers) only accept Discord sign-in sessions, never the local key. Sign-in uses the
-  `identify` scope, checks membership and Manage Server (or the admin role) at sign-in and every
-  5 minutes, and stores only hashes of session tokens
+  `identify` scope, checks membership and Manage Server (or the admin role, or the member role for the
+  movie pages only) at sign-in and every 5 minutes, and stores only hashes of session tokens
+- The view-only movie link can only read the movie pages. Personal sign-in links work once, for 15 minutes,
+  and opening one (like a link preview does) doesn't use it up
+- Voice ratings are turned into text on the PC itself; recordings aren't sent anywhere or kept
 - The token lives outside the repo; CI and the pre-commit hook scan for leaked secrets
 
 ## Running Pingwin on someone else's PC

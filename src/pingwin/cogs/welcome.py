@@ -92,6 +92,11 @@ class ApprovalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pingw
                     f"I can't give {role.name}: drag my role above it in Server Settings → Roles.", ephemeral=True
                 )
                 return
+            except discord.HTTPException as e:
+                await interaction.followup.send(
+                    f"Discord didn't let me give {role.name}: {e.text or e}", ephemeral=True
+                )
+                return
             status = f"Approved by {interaction.user.display_name}"
             channel = bot.text_channel(cfg.approved_channel)
             if channel and cfg.approved_message:
@@ -110,7 +115,12 @@ class ApprovalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pingw
                     status += " (kicked)"
                 except discord.Forbidden:
                     status += " (couldn't kick: needs Kick Members)"
-        await interaction.message.edit(embed=approval_card(member, status), view=None)
+                except discord.HTTPException:
+                    status += " (couldn't kick: Discord had trouble)"
+        try:
+            await interaction.message.edit(embed=approval_card(member, status), view=None)
+        except discord.HTTPException as e:
+            log.warning("Welcome: couldn't update the approval card: %s", e)
         state.setdefault(str(self.uid), {})["status"] = status
         store.save(STATE, state)
         log.info("%s: %s", member, status)

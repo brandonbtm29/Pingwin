@@ -13,6 +13,7 @@ import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import discord
 from discord import app_commands
@@ -73,7 +74,7 @@ class Pingwin(commands.Bot):
             intents=intents,
             help_command=None,
             tree_cls=PingwinTree,
-            allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True),
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True),
         )
         self.config: Config = config
         self.persona: Persona = load_persona(config.persona)
@@ -228,12 +229,23 @@ class Pingwin(commands.Bot):
             pass
         return files
 
+    def _fingerprints(self) -> dict[Path, Any]:
+        """Each settings file's time and contents: a file rewritten within the clock's resolution (two saves
+        in a row, a quick sync) still counts as changed."""
+        out: dict[Path, Any] = {}
+        for p in self._settings_files():
+            try:
+                out[p] = (p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest())
+            except OSError:
+                continue
+        return out
+
     def _remember_settings_files(self) -> None:
-        self._watched = {p: p.stat().st_mtime for p in self._settings_files() if p.exists()}
+        self._watched = self._fingerprints()
 
     def _auto_reload(self) -> None:
         """Pick up edits to config.toml / the persona / secrets.env (e.g. synced by SyncThing) without a restart."""
-        current = {p: p.stat().st_mtime for p in self._settings_files() if p.exists()}
+        current = self._fingerprints()
         if current == self._watched:
             return
         try:
@@ -300,7 +312,9 @@ class Pingwin(commands.Bot):
     def is_mod(self, member: discord.abc.User, mod_role: str | None = None) -> bool:
         if not isinstance(member, discord.Member):
             return False
-        if mod_role and any(r.name.casefold() == mod_role.casefold() for r in member.roles):
+        from .dashboard.auth import has_named_role
+
+        if has_named_role(member, mod_role):
             return True
         perms = member.guild_permissions
         return perms.manage_roles or perms.manage_guild or perms.administrator

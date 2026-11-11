@@ -1,0 +1,8 @@
+# gitleaks settings for the CI secret scan: the default rules, minus known false positives.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Time zone names in tests (zones.zone(...).key == ...), and an old note about them"
+regexTarget = "line"
+regexes = ['''zones\.zone\("[^"]*"\)\.key\s*==''', '''\.key == "[^"]*"`\), not a secret''']

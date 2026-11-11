@@ -1,9 +1,10 @@
 """Pingwin: a friendly Discord bot for friends' servers."""
 
-__version__ = "0.34.1"
+__version__ = "0.35.0"
 REPO_URL = "https://github.com/brandonbtm29/Pingwin"
 # Manage Roles, Change Nickname, View Channels, Send Messages, Send Messages in Threads, Embed Links,
-# Read Message History, Mention All Roles (to ping roles), Create Polls, Pin Messages
+# Read Message History, Mention All Roles (to ping roles), Create Polls, Pin Messages, Manage Events (keeping
+# repeating events at their local time, which is on by default, and moving movie nights past breaks)
 INVITE_PERMISSIONS = (
     (1 << 28)
     | (1 << 26)
@@ -15,6 +16,7 @@ INVITE_PERMISSIONS = (
     | (1 << 17)
     | (1 << 49)
     | (1 << 51)
+    | (1 << 33)
 )
 
 

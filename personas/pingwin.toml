@@ -1,5 +1,6 @@
-# Pingwin's default personality. Copy this file to make a new one
-# (e.g. personas/grumpy.toml), then set persona = "grumpy" in config.toml.
+# Pingwin's default personality. To make a new one, copy this file into a personas folder in the
+# shared settings folder (e.g. personas/grumpy.toml), then set persona = "grumpy" in config.toml.
+# (Pingwin looks there first, then here. Editing this file itself stops this PC's auto-updates.)
 #
 # Each message can be one string or a list of strings (Pingwin picks one at random).
 # Placeholders: {role} role name, {user} member's display name, {name} bot name,
@@ -27,8 +28,8 @@ role_missing = "Hmm, I can't find that role anymore. Ask a mod to repost the men
 no_permission = "My flippers can't reach **{role}**. A mod needs to move my role higher in the list."
 menu_footer = "Pingwin 🐧 · tap again to opt out"
 about = [
-    "I'm {name}, the clubhouse penguin. 🐧 I hand out roles, wish happy birthdays, run movie nights (polls, ratings and the history), game days, event reminders and stream alerts. Try `/pingwin` or `-pingwin help`.",
-    "Noot noot! I'm {name}. 🐧 Roles, birthdays, movie nights, game days, event reminders, stream alerts: if it happens in the clubhouse, I've probably got a flipper in it. Try `/pingwin` or `-pingwin help`.",
+    "I'm {name}, the clubhouse penguin. 🐧 I hand out roles, wish happy birthdays, run movie nights (polls, ratings and the history), game days, event reminders and stream alerts. Type `/pingwin` to see what I can do.",
+    "Noot noot! I'm {name}. 🐧 Roles, birthdays, movie nights, game days, event reminders, stream alerts: if it happens in the clubhouse, I've probably got a flipper in it. Type `/pingwin` to see what I can do.",
 ]
 reloaded = "Fresh fish! Settings and personality reloaded. 🐟"
 

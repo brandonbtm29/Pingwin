@@ -136,7 +136,9 @@ def check_secret(name: str, value: str) -> str:
 
     secrets.env is NAME=value per line and every PC loads it into its environment, so a line break (or any
     other control character) in a value would let someone add their own lines, like GIT_CONFIG_* settings."""
-    if not SECRET_NAME_RE.fullmatch(name):
+    from .config import secret_name_ok
+
+    if not SECRET_NAME_RE.fullmatch(name) or not secret_name_ok(name):
         raise ConfigError(f"{name!r} isn't a setting name secrets.env can hold.")
     value = value.strip()
     if any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in value):

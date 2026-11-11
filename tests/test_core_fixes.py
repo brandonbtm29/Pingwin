@@ -107,7 +107,7 @@ def test_unreadable_menus_file_is_not_replaced(data, monkeypatch):
 
 
 # ------------------------------------------------------------ secrets.env reloads
-NAMES = ("PINGWIN_TEST_KEY", "PINGWIN_TEST_OTHER", "PINGWIN_TEST_LOCAL", "PINGWIN_TEST_INHERITED")
+NAMES = ("PINGWIN_TEST_KEY", "PINGWIN_TEST_OTHER_KEY", "PINGWIN_TEST_LOCAL_KEY", "PINGWIN_TEST_INHERITED_KEY")
 
 
 @pytest.fixture
@@ -115,10 +115,10 @@ def secrets(data, monkeypatch, tmp_path):
     for name in NAMES:  # whatever the test sets is undone afterwards
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)
-    monkeypatch.setenv("PINGWIN_TEST_INHERITED", "from-windows")
+    monkeypatch.setenv("PINGWIN_TEST_INHERITED_KEY", "from-windows")
     project = tmp_path / "project"
     project.mkdir()
-    (project / ".env").write_text("PINGWIN_TEST_LOCAL=this-pc\n", encoding="utf-8")
+    (project / ".env").write_text("PINGWIN_TEST_LOCAL_KEY=this-pc\n", encoding="utf-8")
     monkeypatch.setattr(config, "_local_env", lambda: project / ".env")
     monkeypatch.setattr(config, "_inherited_env", None)
     monkeypatch.setattr(config, "_from_secrets", {})
@@ -133,21 +133,25 @@ def secrets(data, monkeypatch, tmp_path):
 
 
 def test_secrets_reload_updates_adds_and_removes(secrets):
-    secrets("PINGWIN_TEST_KEY=one\nPINGWIN_TEST_LOCAL=shared\nPINGWIN_TEST_INHERITED=shared\n")
+    secrets("PINGWIN_TEST_KEY=one\nPINGWIN_TEST_LOCAL_KEY=shared\nPINGWIN_TEST_INHERITED_KEY=shared\n")
     config.load_env()
     assert os.environ["PINGWIN_TEST_KEY"] == "one"
-    assert os.environ["PINGWIN_TEST_LOCAL"] == "this-pc"  # this PC's own .env wins, as before
-    assert os.environ["PINGWIN_TEST_INHERITED"] == "from-windows"  # so does the real environment
+    assert os.environ["PINGWIN_TEST_LOCAL_KEY"] == "this-pc"  # this PC's own .env wins, as before
+    assert os.environ["PINGWIN_TEST_INHERITED_KEY"] == "from-windows"  # so does the real environment
 
-    secrets("PINGWIN_TEST_KEY=two\nPINGWIN_TEST_OTHER=new\nPINGWIN_TEST_LOCAL=changed\nPINGWIN_TEST_INHERITED=x\n")
-    assert sorted(config.load_secrets()) == ["PINGWIN_TEST_KEY", "PINGWIN_TEST_OTHER"]
-    assert os.environ["PINGWIN_TEST_KEY"] == "two" and os.environ["PINGWIN_TEST_OTHER"] == "new"
-    assert os.environ["PINGWIN_TEST_LOCAL"] == "this-pc" and os.environ["PINGWIN_TEST_INHERITED"] == "from-windows"
+    secrets(
+        "PINGWIN_TEST_KEY=two\nPINGWIN_TEST_OTHER_KEY=new\nPINGWIN_TEST_LOCAL_KEY=changed\nPINGWIN_TEST_INHERITED_KEY=x\n"
+    )
+    assert sorted(config.load_secrets()) == ["PINGWIN_TEST_KEY", "PINGWIN_TEST_OTHER_KEY"]
+    assert os.environ["PINGWIN_TEST_KEY"] == "two" and os.environ["PINGWIN_TEST_OTHER_KEY"] == "new"
+    assert os.environ["PINGWIN_TEST_LOCAL_KEY"] == "this-pc"
+    assert os.environ["PINGWIN_TEST_INHERITED_KEY"] == "from-windows"
 
-    secrets("PINGWIN_TEST_OTHER=new\n")  # a key deleted on another PC's dashboard
+    secrets("PINGWIN_TEST_OTHER_KEY=new\n")  # a key deleted on another PC's dashboard
     assert config.load_secrets() == ["PINGWIN_TEST_KEY"]
     assert "PINGWIN_TEST_KEY" not in os.environ
-    assert os.environ["PINGWIN_TEST_LOCAL"] == "this-pc" and os.environ["PINGWIN_TEST_INHERITED"] == "from-windows"
+    assert os.environ["PINGWIN_TEST_LOCAL_KEY"] == "this-pc"
+    assert os.environ["PINGWIN_TEST_INHERITED_KEY"] == "from-windows"
 
 
 def test_missing_secrets_file_changes_nothing(secrets, data):
@@ -290,3 +294,13 @@ def test_time_zone_flag_is_saved(tmp_path):
     )
     (tz,) = load_config(path, require_token=False).roles.extra
     assert tz.is_timezone and not tz.roles
+
+
+def test_secrets_env_only_sets_key_names(secrets, data):
+    """A PC that can write the shared secrets.env can't set things git or Python read (GIT_CONFIG_* can run
+    commands), only key-like names."""
+    secrets("PINGWIN_TEST_KEY=ok\nGIT_CONFIG_COUNT=1\nGIT_CONFIG_KEY_0=core.fsmonitor\nPYTHONPATH=x\nPATH=x\n")
+    changed = config.load_secrets()
+    assert changed == ["PINGWIN_TEST_KEY"] and os.environ.get("GIT_CONFIG_KEY_0") != "core.fsmonitor"
+    assert config.secret_name_ok("OMDB_API_KEY") and config.secret_name_ok("DISCORD_TOKEN")
+    assert not config.secret_name_ok("GIT_SSH_KEY") and not config.secret_name_ok("PINGWIN_DATA")

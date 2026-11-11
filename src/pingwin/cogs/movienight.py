@@ -83,6 +83,11 @@ def winners(counts: list[tuple[str, int]]) -> list[str]:
     return [i for i, c in counts if c == top]
 
 
+def candidate_label(c: dict[str, Any]) -> str:
+    """A movie's entry in the night card's menu."""
+    return (f"{c['title']} ({c['year']})" if c.get("year") else str(c.get("title", "")))[:100]
+
+
 def _yr(d: dict[str, Any]) -> str:
     return f" ({d['year']})" if d.get("year") else ""
 
@@ -267,6 +272,31 @@ def _duration(minutes: int) -> str:
 
 
 # --------------------------------------------------------------------- buttons
+class Decision(str):
+    """What a movie mod's decision did, as the text for its card. `ok` is False when nothing was decided (it
+    was handled already, or a movie still needs picking): the card then stays as it is."""
+
+    ok: bool = True
+
+    def __new__(cls, text: str, ok: bool = True) -> Decision:
+        obj = super().__new__(cls, text)
+        obj.ok = ok
+        return obj
+
+
+async def show_decision(interaction: discord.Interaction, msg: str, **edit: Any) -> None:
+    """Put a decision on its card, or, when nothing was decided, tell only the mod who clicked."""
+    try:
+        if not getattr(msg, "ok", True):
+            await interaction.followup.send(msg, ephemeral=True)
+        elif interaction.message is not None:
+            await interaction.message.edit(content=msg, view=None, **edit)
+        else:
+            await interaction.edit_original_response(content=msg, view=None, **edit)
+    except discord.HTTPException:
+        pass
+
+
 class RequestButton(
     discord.ui.DynamicItem[discord.ui.Button], template=r"pingwin:mvq:(?P<rid>[0-9a-f]+):(?P<act>ok|no)"
 ):
@@ -296,11 +326,7 @@ class RequestButton(
             await interaction.response.send_message("Only movie mods can approve these.", ephemeral=True)
             return
         await interaction.response.defer()
-        msg = await cog.decide(self.rid, self.act == "ok", interaction.user)
-        try:
-            await interaction.edit_original_response(content=msg, view=None)
-        except discord.HTTPException:
-            pass
+        await show_decision(interaction, await cog.decide(self.rid, self.act == "ok", interaction.user))
 
 
 class BreakButton(
@@ -377,12 +403,11 @@ class NightPick(discord.ui.DynamicItem[discord.ui.Select], template=r"pingwin:mv
         if choice == "other":
             await interaction.response.send_modal(OtherNightModal(self.rid))
             return
+        # The menu's entry, so a list that changed since this card was drawn can't log a different movie.
+        label = next((o.label for o in getattr(self.item, "options", []) if o.value == choice), None)
         await interaction.response.defer()
-        msg = await cog.decide(self.rid, True, interaction.user, choice=int(choice))
-        try:
-            await interaction.edit_original_response(content=msg, embed=None, view=None)
-        except discord.HTTPException:
-            pass
+        msg = await cog.decide(self.rid, True, interaction.user, choice=int(choice), choice_label=label)
+        await show_decision(interaction, msg, embed=None)
 
 
 class StarterPick(discord.ui.DynamicItem[discord.ui.UserSelect], template=r"pingwin:mvf:(?P<rid>[0-9a-f]+)"):
@@ -410,10 +435,10 @@ class StarterPick(discord.ui.DynamicItem[discord.ui.UserSelect], template=r"ping
         if not cog.is_movie_mod(interaction.user):
             await interaction.response.send_message("Only movie mods can pick this.", ephemeral=True)
             return
-        values = (interaction.data or {}).get("values") or []
-        guild = interaction.guild
-        member = guild.get_member(int(values[0])) if values and guild is not None else None
-        problem, card = cog.set_night_starter(self.rid, member, picked=bool(values))
+        # The picked member comes with the interaction (the member list may not be kept without the intent).
+        picked = list(getattr(self.item, "values", []) or [])
+        member = picked[0] if picked else None
+        problem, card = cog.set_night_starter(self.rid, member, picked=bool(picked))
         if problem or card is None:
             await interaction.response.send_message(problem or "This one was already handled.", ephemeral=True)
             return
@@ -446,9 +471,23 @@ class StarterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pingwi
         if problem:
             await interaction.response.send_message(problem, ephemeral=True)
             return
-        view = discord.ui.View(timeout=300)
+        view = ExpiringView(interaction, "That menu expired. Tap Pick who starts again.", timeout=300)
         view.add_item(StarterMenu(self.hid))
         await interaction.response.send_message("Who should rate first? I'll ping them.", view=view, ephemeral=True)
+
+
+class ExpiringView(discord.ui.View):
+    """A private menu that says so when it times out, instead of failing when clicked later."""
+
+    def __init__(self, interaction: discord.Interaction, expired: str, timeout: float) -> None:
+        super().__init__(timeout=timeout)
+        self.interaction, self.expired = interaction, expired
+
+    async def on_timeout(self) -> None:
+        try:
+            await self.interaction.edit_original_response(content=self.expired, view=None)
+        except discord.HTTPException:
+            pass
 
 
 class StarterMenu(discord.ui.UserSelect):
@@ -462,6 +501,8 @@ class StarterMenu(discord.ui.UserSelect):
         cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
         if cog is None or not self.values:
             return
+        if self.view is not None:
+            self.view.stop()  # done: it won't say it expired
         await interaction.response.defer()
         msg = await cog.pick_starter(self.hid, self.values[0], interaction.user)
         try:
@@ -570,12 +611,7 @@ class OtherNightModal(discord.ui.Modal, title="Which movie was it?"):
         y = str(self.year.value or "").strip()
         custom = {"title": title, "year": int(y) if y.isdigit() else year}
         await interaction.response.defer()
-        msg = await cog.decide(self.rid, True, interaction.user, custom=custom)
-        try:
-            if interaction.message is not None:
-                await interaction.message.edit(content=msg, embed=None, view=None)
-        except discord.HTTPException:
-            pass
+        await show_decision(interaction, await cog.decide(self.rid, True, interaction.user, custom=custom), embed=None)
 
 
 class RateButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pingwin:rate:(?P<hid>[0-9a-f]+)"):
@@ -616,6 +652,9 @@ async def open_rating(interaction: discord.Interaction, hid: str) -> None:
 PICKED = re.compile(r"(?P<id>(?:tt\d{6,10})?)\|(?P<title>[^|]+)\|(?P<year>\d{4})?")
 
 
+COMMENT_LIMIT, ANSWER_LIMIT, ASK_LIMIT = 1500, 500, 300  # as on the movie pages
+
+
 class RateModal(discord.ui.Modal):
     def __init__(
         self,
@@ -633,16 +672,23 @@ class RateModal(discord.ui.Modal):
         self.hid, self.uid, self.draft_id = hid, uid, draft_id
         mine = {**entry.get("ratings", {}).get(uid, {}), **(draft or {})}  # a voice message's score and words
         self.question, self.asker = movies.question_for(entry, uid)
+
+        def fill(key: str, limit: int) -> str | None:
+            # Discord refuses a form whose saved text is longer than its box (reviews from the movie pages
+            # and imports can be): the same limits as the movie pages, and anything longer is cut.
+            return (str(mine.get(key) or ""))[:limit] or None
+
+        score = mine.get("score")
         self.score = discord.ui.TextInput(
             placeholder="Like 7 or 7.5",
-            max_length=4,
-            default=None if mine.get("score") is None else f"{mine['score']:g}",
+            max_length=5,
+            default=None if not isinstance(score, (int, float)) else f"{round(score, 2):g}",
         )
         self.comment = discord.ui.TextInput(
             style=discord.TextStyle.paragraph,
             required=False,
-            max_length=1000,
-            default=mine.get("comment") or None,
+            max_length=COMMENT_LIMIT,
+            default=fill("comment", COMMENT_LIMIT),
         )
         self.add_item(discord.ui.Label(text="Your score out of 10", component=self.score))
         self.add_item(discord.ui.Label(text="What did you think?", component=self.comment))
@@ -651,14 +697,14 @@ class RateModal(discord.ui.Modal):
             asker = (entry.get("ratings", {}).get(self.asker or "") or {}).get("name") or "Someone"
             q = self.question if len(self.question) <= 100 else self.question[:99] + "…"
             self.answer = discord.ui.TextInput(
-                required=False, max_length=300, placeholder="Your answer", default=mine.get("answer") or None
+                required=False, max_length=ANSWER_LIMIT, placeholder="Your answer", default=fill("answer", ANSWER_LIMIT)
             )
             self.add_item(discord.ui.Label(text=f"{asker} asked you"[:45], description=q, component=self.answer))
         self.ask = discord.ui.TextInput(
             placeholder="How many ___ out of ___?",
             required=False,
-            max_length=200,
-            default=mine.get("ask") or None,
+            max_length=ASK_LIMIT,
+            default=fill("ask", ASK_LIMIT),
         )
         self.add_item(discord.ui.Label(text="Ask someone a question", component=self.ask))
         self.who = None
@@ -756,7 +802,7 @@ class FranchiseModal(discord.ui.Modal, title="Franchise queue"):
         super().__init__()
         self.cog, self.s = cog, s
         q = cog._data(store.load(STATE), s).get("queue") or {}
-        self.name = discord.ui.TextInput(label="Franchise", max_length=100, default=q.get("name") or None)
+        self.name = discord.ui.TextInput(label="Franchise", max_length=100, default=(q.get("name") or "")[:100] or None)
         lines = [
             ("✅ " if i.get("done") else "") + franchise.label(i) for i in q.get("items", []) if not i.get("skipped")
         ]
@@ -764,7 +810,7 @@ class FranchiseModal(discord.ui.Modal, title="Franchise queue"):
             label="Movies in order, one per line (✅ = watched)",
             style=discord.TextStyle.paragraph,
             max_length=4000,
-            default="\n".join(lines) or None,
+            default="\n".join(lines)[:4000] or None,
             placeholder="Alien (1979)\nAliens (1986)\nAlien 3 (1992)",
         )
         self.add_item(self.name)
@@ -1261,7 +1307,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             await channel.send(
                 ((role.mention + " ") if role and key == "franchise_next" else "") + text,
                 embeds=embeds,
-                allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
+                allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False),
             )
         except discord.HTTPException as e:
             log.warning("Couldn't post the %s franchise update: %s", s.name, e)
@@ -1619,7 +1665,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         embed = discord.Embed(title=title, description="\n".join(lines), color=GOLD)
         options = [
             discord.SelectOption(
-                label=(f"{c['title']} ({c['year']})" if c.get("year") else c["title"])[:100],
+                label=candidate_label(c),
                 description=(c.get("why") or "")[:100] or None,
                 value=str(i),
             )
@@ -1811,6 +1857,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         mod: discord.abc.User,
         choice: int | None,
         custom: dict[str, Any] | None,
+        choice_label: str | None = None,
     ) -> str:
         d = req["data"]
         who = getattr(mod, "display_name", mod.name)
@@ -1824,13 +1871,18 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             pick = custom
             if pick is None and choice is not None and 0 <= choice < len(d.get("candidates", [])):
                 pick = d["candidates"][choice]
+                if choice_label is not None and choice_label != candidate_label(pick):
+                    s = self.series(req["series"])
+                    if s is not None:
+                        await self._refresh_night_card(s, req)
+                    return Decision("The list of movies changed. Pick again on the updated card.", ok=False)
             if pick is None and choice is None:
                 pick = d.get("expected")  # "Yes, we watched it"
             if not pick or not str(pick.get("title", "")).strip():
-                return "Pick a movie (or Something else…) first."
+                return Decision("Pick a movie (or Something else…) first.", ok=False)
             s = self.series(req["series"])
             if s is None:
-                return f"There's no {req['series']} series anymore."
+                return Decision(f"There's no {req['series']} series anymore.", ok=False)
             req["status"], req["decided_by"] = "approved", who
             movies.save(lib)
             year = pick.get("year")
@@ -1873,6 +1925,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         choice: int | None = None,
         custom: dict[str, Any] | None = None,
         starter: str | None = None,
+        choice_label: str | None = None,
     ) -> str:
         lib = movies.load()
         req = lib["pending"].get(rid)
@@ -1884,9 +1937,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             elif not starter:
                 req["data"].pop("starter", None)
         if req is None or req.get("status") != "pending":
-            return "This one was already handled."
+            return Decision("This one was already handled.", ok=False)
         if req["kind"] == "detected":
-            return await self._decide_detected(lib, req, approve, mod, choice, custom)
+            return await self._decide_detected(lib, req, approve, mod, choice, custom, choice_label)
         req["status"] = "approved" if approve else "denied"
         req["decided_by"] = getattr(mod, "display_name", mod.name)
         movies.save(lib)
@@ -2076,6 +2129,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         ch = data.get("changes", {})
         if "date" in ch:
             e["date"] = ch["date"] or None
+            lib["history"].sort(key=lambda x: (x.get("date") or "9999", x.get("created", 0)))  # date order
         if "series" in ch:
             e["series"] = ch["series"]
         if "title" in ch or "year" in ch:
@@ -2579,7 +2633,9 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if url:
             text += f"\nAll the comments: <{url}>"
         try:
-            await channel.get_partial_message(p["message"]).reply(text, mention_author=False)
+            await channel.get_partial_message(p["message"]).reply(
+                text, mention_author=False, allowed_mentions=discord.AllowedMentions.none()
+            )
         except discord.HTTPException:
             pass
 
@@ -2828,7 +2884,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 break
         url = self.page_url()
         embed = discord.Embed(
-            title="🎞️ Movie history" + (f": {search}" if search else ""),
+            title=("🎞️ Movie history" + (f": {search}" if search else ""))[:256],
             color=GOLD,
             description="\n".join(rows) or "Nothing found.",
         )
@@ -2930,6 +2986,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         ranked = bool(getattr(s, "ranked", False)) if ranked is None else ranked
         if self.cfg.pick == "choose" and len(unwatched) > 2:
             view = ChooseView(self, s, unwatched, hours, question, interaction.user.id, closes, ranked)
+            view.interaction = interaction
             await interaction.response.send_message(
                 f"Pick up to {min(self.cfg.poll_options, len(unwatched))} movies for the poll:",
                 view=view,
@@ -3057,7 +3114,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             msg = await channel.send(
                 content=((role.mention + " ") if role else "") + note,
                 poll=poll,
-                allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
+                allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False),
             )
         except discord.HTTPException as e:
             await interaction.followup.send(f"Couldn't post the poll in #{channel.name}: {e.text or e}", ephemeral=True)
@@ -3106,7 +3163,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 content=((role.mention + " ") if role else "") + note,
                 embed=self.ranked_embed(s, record),
                 view=view,
-                allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
+                allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False),
             )
         except discord.HTTPException as e:
             await interaction.followup.send(f"Couldn't post the poll in #{channel.name}: {e.text or e}", ephemeral=True)
@@ -3375,7 +3432,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         try:
             await msg.reply(
                 ((role.mention + " ") if role else "") + text,
-                allowed_mentions=discord.AllowedMentions(roles=[role] if role else False),
+                allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False),
             )
         except discord.HTTPException as e:
             log.warning("Couldn't announce the %s winner: %s", s.name, e)
@@ -3398,6 +3455,17 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
 
 class ChooseView(discord.ui.View):
     """Lets whoever started the poll pick which watchlist movies go in it."""
+
+    interaction: discord.Interaction | None = None  # the command's, to say so when the menu expires
+
+    async def on_timeout(self) -> None:
+        if self.interaction is not None:
+            try:
+                await self.interaction.edit_original_response(
+                    content="That menu expired. Run `/pingwin movie poll` again.", view=None
+                )
+            except discord.HTTPException:
+                pass
 
     def __init__(
         self,
@@ -3433,6 +3501,7 @@ class ChooseView(discord.ui.View):
             return
         ids = interaction.data.get("values", [])
         picks = [self.noms[i] for i in ids if i in self.noms]
+        self.stop()  # done: it won't say it expired
         await interaction.response.edit_message(content="Posting the poll…", view=None)
         msg = await self.cog.start_poll(interaction, self.s, picks, self.hours, self.question, self.closes, self.ranked)
         if msg:

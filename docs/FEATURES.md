@@ -8,20 +8,25 @@ every PC gets them. You can also edit `config.toml` by hand: each feature is its
 
 | Feature | What it does | Needs |
 |---|---|---|
-| [Event reminders](#event-reminders) | Pings the right roles when a Discord Event is created, and before it starts | Nothing extra |
-| [Birthdays](#birthdays) | Members save their birthday; Pingwin posts a shout-out on the day | Nothing extra |
-| [Movie night](#movie-night) | Watchlists, polls, a Rate it button after each movie, and movie pages with your history | Optional free OMDb key |
+| [Event reminders](#event-reminders) | Pings the right roles when a Discord Event is created, and before it starts | Nothing extra (*Manage Events* to keep repeating events at their local time) |
+| [Birthdays](#birthdays) | Members save their birthday; Pingwin posts a shout-out on the day, plus a Star birthdays message for people without Discord | Nothing extra |
+| [Movie night](#movie-night) | Watchlists, Discord or ranked-choice polls, a Rate it button after each movie (typed or by voice message), and movie pages with your history | Optional free OMDb key; optional `voice` install |
 | [Game day sign-ups](#game-day-sign-ups) | A "Who's in?" card with buttons, plus a reminder to everyone who's in | Nothing extra |
 | [Event attendance](#event-attendance-and-frumples) | Takes attendance at Discord Events and adds a reward (like Frumples) in UnbelievaBoat | A free UnbelievaBoat API token |
-| [Stream alerts](#stream-alerts) | Posts once when a streamer goes live on Twitch or YouTube | Free Twitch and/or YouTube keys |
+| [Stream alerts](#stream-alerts) | Posts once when a streamer goes live on Twitch, YouTube or Discord (Go Live) | Free Twitch and/or YouTube keys (none for Go Live) |
 | [Welcome and approval](#welcome-and-approval) | Welcomes new members; mods approve them with a button | **Server Members** intent |
-| [Mod log](#mod-log) | Records joins, leaves, role changes, edits and deletes in a private channel | **Server Members** intent (+ **Message Content** for edits and deletes) |
+| [Mod log](#mod-log) | Records joins, leaves, role changes and deleted messages (edits too, if you want) in a private channel | **Server Members** intent (+ **Message Content** for messages) |
 
 Before you start:
 
-- **Restart Pingwin once** after updating to 0.7.0 so the new slash commands show up (`/pingwin restart`).
+- **New slash commands** show up after Pingwin restarts (updates restart it on their own, or use
+  `/pingwin restart`). If one still doesn't show, press Ctrl+R in Discord.
 - **Pingwin has to be able to see and post in** every channel you pick. If a channel is private, add
-  Pingwin (or its role) to it with *View Channel*, *Send Messages* and *Embed Links*.
+  Pingwin (or its role) to it with *View Channel*, *Send Messages*, *Embed Links* and *Read Message History*.
+- **The invite link includes *Manage Events*** (keeping repeating events at their local time, and moving a
+  movie night's event past a break). If you invited Pingwin before 0.35, give its role *Manage Events*.
+  *Kick Members* isn't in the link: give it only if the welcome card's Deny should kick. The **Setup** tab
+  (or the log) says when one is missing.
 - **Time zones:** under *General*, set the server's time zone (like `America/New_York`). Members in other
   zones can pick their own with `/pingwin timezone set`. See [Time zones](#time-zones).
 - "Mods" below means anyone with *Manage Roles*, *Manage Server* or *Administrator*.
@@ -44,7 +49,7 @@ person's time zone, and picking another swaps it. **＋ Add every time zone** ad
 Alaska, Hawaii, Atlantic and common zones abroad (UK, Central Europe, India, Japan & Korea, Australia and
 more). A menu with more than 10 roles shows as a dropdown in Discord instead of a wall of buttons.
 `/pingwin timezone set` gives the matching role too, so the two always agree. Click **Create missing roles**,
-then post it with **Post it** (or **Refresh posted menus** if it's already posted).
+then post it with **Post it** (or **Update posted menus** if it's already posted).
 
 **Posted menus** are listed on the Role menu tab, each with a **Remove** button that deletes Pingwin's
 message in Discord (nobody loses their roles). **Who can use the menus** only lists roles that existed before
@@ -78,6 +83,22 @@ movie role).
 
 Each event is announced, reminded and started only once, even when several PCs are running Pingwin.
 
+### Repeating events
+
+A repeating Discord Event (like a weekly movie night) is one event that moves to its next date. Pingwin
+reminds people again for each date, and:
+
+- **Keep one message per event** (on by default): each new post about an event (a reminder, "starting now",
+  the next date) deletes Pingwin's last one, so it stays at the bottom and the channel doesn't fill up.
+- **Say when a repeating event's next one is** (on): when a date is over, Pingwin posts the next date, with
+  no pings. If nobody clicked *Start* on a date, Pingwin treats it as over 4 hours after it was meant to
+  start and moves on to the next one.
+- **Keep repeating events at their local time** (on): Discord keeps repeating events at the same UTC time, so
+  they move an hour when the clocks change. Pingwin moves them back to their time in the server's time zone
+  (and fixes the time in its "next one is" post without pinging anyone again). This needs *Manage Events*.
+- **Show the movie in movie night posts** (on): a movie night's posts get a card with the poster, IMDb link,
+  rating and runtime of the movie leading the vote, or the franchise's next part.
+
 ### More reminders
 
 Under **More reminders**, add as many as you like, each with:
@@ -85,7 +106,7 @@ Under **More reminders**, add as many as you like, each with:
 | How long before | Only events with | Message (optional) | Ping |
 |---|---|---|---|
 | `1 day` | | | off |
-| `2 hours` | `MMM, Maggie` | `🍿 {event} is {when}! {poll} {nudge}` | on |
+| `2 hours` | `MM, movie` | `🍿 {event} is {when}! {poll} {nudge}` | on |
 | `15 min` | `game` | `Grab your snacks, {event} starts {when}!` | on |
 
 *How long before* reads things like `1 day`, `2h`, `1h30m` or `15 min`. *Only events with* takes keywords
@@ -139,8 +160,8 @@ Pingwin only adds to (or takes back from) balances for attendance; it doesn't re
 | `/pingwin birthday set month day` | Everyone | Save your birthday (month and day, never the year) |
 | `/pingwin birthday remove` | Everyone | Remove yours |
 | `/pingwin birthday upcoming` | Everyone | The next birthdays |
-| `/pingwin birthday set_for member month day` | Mods | Set someone else's |
-| `/pingwin birthday remove_for member` | Mods | Remove someone else's |
+| `/pingwin birthday set_for member month day` | Manage Roles | Set someone else's |
+| `/pingwin birthday remove_for member` | Manage Roles | Remove someone else's |
 | `/pingwin birthday add_other name birthday [note]` | Mods | A birthday for someone without Discord, like a celebrity |
 | `/pingwin birthday remove_other name` | Mods | Remove one |
 
@@ -153,21 +174,35 @@ the next day). Feb 29 birthdays are celebrated on Feb 28 in other years.
 
 ### Birthdays of people without Discord
 
-For friends who aren't on Discord, or celebrities you like to celebrate, fill in **Birthdays of people without
+For friends who aren't on Discord, or stars from your movies, fill in **Birthdays of people without
 Discord** on the Features tab (or use `/pingwin birthday add_other`): a name, the birthday (`Sep 2`, `9/2` or
-`1964-09-02`), an optional note, and the year they died if they have. On the day, at the same hour (in the
-server's time zone), Pingwin posts *Message for them* in the birthdays channel without pinging anyone. With the
-year it adds their age ("62 today", or "who would have been 53"), and if they're in the cast or crew of movies
-from your movie nights it adds "We've watched them in …". They're in `/pingwin birthday upcoming` with a ⭐.
+`1964-09-02`), an optional note, and when they died (a date or a year), if they have. They're in
+`/pingwin birthday upcoming` with a ⭐. Pingwin never pings anyone for them.
+
+**The Star birthdays message** (*Keep them in one Star birthdays message*, on by default): one ⭐ Star
+birthdays message in the birthdays channel. From the birthday hour (in the server's time zone), Pingwin edits
+it each day to show today's birthdays, using *Birthday line*, and who's coming up in the next 14 days (*Show
+birthdays coming up in the next (days)*). With the year it adds their age ("62 today", or "who would have
+been 53" and how old they were when they died), and if they're in the cast or crew of your movie nights, which
+ones and when. On a day with a birthday it deletes the message and posts it again at the bottom, since Discord
+doesn't notify anyone about edits.
+
+Turn that off to get a separate *Birthday line* message on each birthday instead, ending with "We've watched
+them in …" when they're in your movie nights.
 
 ## Movie night
 
 Each **series** (for example *Movie Mondays* and *Franchise Fridays*) has a short name for commands (like
 `MM`), a **full name** shown on the movie pages and used to recognise it when importing, and its own
 watchlist, role and channel. There's always a **General** watchlist too, for movies that aren't for a
-particular series (its polls go to the channel they're started in). Members nominate
-movies, then a mod (or whoever you allow) turns the watchlist into a native Discord poll. When the poll
-ends, Pingwin replies with the winner.
+particular series. Members nominate movies, then a mod (or whoever you allow) turns the watchlist into a
+native Discord poll. When the poll ends, Pingwin replies with the winner.
+
+**Where things go:** polls go to *Polls go to* (like #polls), or each series' own channel when that's blank
+(a General poll then goes where it was started). Pingwin also reads the polls there, like a Horror / Not
+Horror round followed by a movie poll for each side, for event reminders and to suggest which movie a night
+was. *Announcements go to* (like #events) gets franchise queue posts and new watchlist suggestions; blank =
+each series' channel. Rate it buttons always go to the series' channel.
 
 **Ranked-choice polls:** tick *Ranked polls* on a series (or start one with `ranked:True`) and Pingwin posts
 its own poll instead of a Discord one, since Discord's can't rank. Everyone taps **Vote** and ranks their top
@@ -189,14 +224,14 @@ Passing `hours` still overrides it.
 | `/pingwin movie remove series movie` | Take one off |
 | `/pingwin movie watched series movie [date] [rate]` | Mark watched (added to the history for `date`, like `11/2`, `Nov 2`, `yesterday` or `monday`; today if left out), or not. No Rate it button unless `rate` is on |
 | `/pingwin movie tonight series title [year]` | Set tonight's movie on a night without a poll |
-| `/pingwin movie history [search]` | What you've watched and how you rated it |
+| `/pingwin movie history [search]` | The latest movie nights (search by title, director, star or year), with the group's average |
 | `/pingwin movie rate` | Rate the latest movie (if you missed the button) |
 | `/pingwin movie page` | The movie pages: the view-only link and your own sign-in link |
 | `/pingwin movie queue series` | Where a franchise series is up to |
-| `/pingwin movie franchise series` | Line up a franchise's movies (mods) |
+| `/pingwin movie franchise series` | Movie mods: line up a franchise's movies |
 | `/pingwin movie poll series [hours] [question] [ranked]` | Start a poll and ping the series' role, in *Polls go to* (or the series' channel). `ranked` for a ranked-choice poll; the default is the series' *Ranked polls* box |
 | `/pingwin movie endpoll series` | End the running poll now |
-| `/pingwin movie skip series [weeks] [starting] [reason]` | Movie mods: skip showings (a week off, or a break between franchises) |
+| `/pingwin movie skip series [weeks] [starting] [reason]` | Movie mods: skip showings (a week off, or a break between franchises; up to 26). `starting` is a date like `11/13`, `Nov 13` or `friday` (default the next showing) |
 | `/pingwin movie unskip series` | Movie mods: end a break early |
 
 What you control (all on the dashboard):
@@ -208,7 +243,9 @@ What you control (all on the dashboard):
   nominations, or random ones. Plus how many movies go in a poll (2 to 10).
 - **Approvals, Rate it, and how long ratings stay open.**
 - **Poll length, single or multiple votes,** whether the movie mods are asked to confirm the winner, and
-  **what happens on a tie** (announce it so a mod decides, or pick one at random).
+  **what happens on a tie** (announce it so a mod decides, or pick one at random). With *Ask the movie mods
+  to confirm the winner* off, a poll's winner isn't added to the history by itself: add the night on the
+  movie pages or with `/pingwin movie watched`.
 
 The watchlists are on the movie pages (the Features tab shows a summary with a link): movie mods can mark a
 movie watched, move it to another watchlist, or remove it there.
@@ -216,23 +253,31 @@ movie watched, move it to another watchlist, or remove it there.
 ### Breaks (weeks off)
 
 Skip a week (a holiday) or take a few weeks off (between franchises) with `/pingwin movie skip`, or on the
-movie pages (Watchlists tab, under each series' next showing). While a series is on a break, no poll closes on a
-skipped night, no franchise part is announced or asked about, the voice check doesn't watch, and Pingwin
-moves the series' repeating Discord Event to the first showing after the break, so the event, its reminders
-and the "next one is..." post in the events channel show the real date. **End break** brings it back to the
-next regular showing. When a franchise is finished, the movie mods get a card asking **No break**, **2**,
+movie pages (Watchlists tab, under each series' next showing). Only a series with a showtime can take a
+break. While a series is on a break, no poll closes on a skipped night, no franchise part is announced or
+asked about, the voice check doesn't watch, and Pingwin moves the series' repeating Discord Event to the first
+showing after the break (this needs *Manage Events*), so the event, its reminders and the "next one is..."
+post in the events channel show the real date. **End break** (or `/pingwin movie unskip`) brings it back to
+the next regular showing. When a franchise is finished, the movie mods get a card asking **No break**, **2**,
 **3** or **4 weeks off**.
 
 ### Did movie night happen?
 
 Some weeks get skipped, so nothing joins the history on its own. When a poll picks a movie, the franchise
-queue reaches a part, or someone sets `/pingwin movie tonight`, the movie mods get one card for that night
-in the approval channel (and on the movie pages): **Yes, we watched it** adds it to the history, marks it
-watched and posts the Rate it button (not before the movie is over); picking another movie logs that one
-instead; **We skipped it** leaves the history alone, and a franchise part stays next in line for the following
-week. If the voice check also noticed the night, it adds who was there to the same card. Adding that night
-another way (the movie pages' **Add a movie night**, or `/pingwin movie watched`) closes its card too, and
-who was in voice goes on the history entry.
+queue reaches a part (at showtime), or someone sets `/pingwin movie tonight`, the movie mods get one
+"🎬 Did ... happen?" card for that night in the approval channel (and under *Waiting for a mod* on the movie
+pages):
+
+- **Yes, we watched** (the movie's name) adds it to the history, marks it watched and posts the Rate it
+  button (not before the movie is over: showtime + its runtime).
+- **Which movie did we watch?** picks another movie (or *Something else…* to type one) and logs that one
+  instead.
+- **We skipped it** leaves the history alone, and a franchise part stays next in line for the following week.
+- **Who rates first?** (optional) picks who Pingwin pings first when the Rate it button goes up.
+
+A night in a break gets no card. If the voice check also noticed the night, it adds who was there to the same
+card. Adding that night another way (the movie pages' **Add a movie we watched**, or `/pingwin movie watched`)
+closes its card too, and who was in voice goes on the history entry.
 
 ### Franchise queues
 
@@ -240,8 +285,9 @@ Tick **Franchise queue** on a series (like *Franchise Fridays*) to work through 
 order instead of polling every week:
 
 - **Each showtime**, Pingwin announces the next part a few hours before (*Announce a franchise's next part*,
-  6 hours by default), pinging the series' role: "**Alien 3 (1992)**, part 3 of 6 of Alien". When the movie
-  starts, it logs that part in the history (so the **Rate it** button still comes) and moves on.
+  6 hours by default; 0 = no announcement), pinging the series' role: "**Alien 3 (1992)**, part 3 of 6 of
+  Alien". When the movie starts, the movie mods get the [did it happen?](#did-movie-night-happen) card.
+  Confirming it logs that part in the history (so the **Rate it** button still comes) and the queue moves on.
 - **When the last part is done**, Pingwin says so, and a mod runs `/pingwin movie poll` for that series. Its
   watchlist holds the *franchises* to choose from, and the winner becomes the next queue.
 - **Lining up the movies:** on the movie pages' **Watchlists** tab, mods click **Edit list** (or **Start a
@@ -255,17 +301,18 @@ order instead of polling every week:
 ### Approvals
 
 With **Members' changes need a mod's OK** on (the default), anything a member does that changes the lists (a
-nomination, removing a movie, marking one watched, a fix to the history) becomes a card in the mod
-channel (*Send them to*, or the approval channel under Welcome and approval). A mod clicks **Approve** or **Deny**,
-Pingwin applies it and tells the member. Mods' own changes apply straight away. Pending cards also show on
-the movie pages, where mods can approve them too.
+nomination, removing a movie, marking one watched, setting tonight's movie, a fix to the history) becomes a
+card in the mod channel (*Approval cards go to*, or the approval channel under Welcome and approval). A movie
+mod clicks **Approve** or **Deny**, and Pingwin applies it and tells the member. Movie mods' own changes apply
+straight away. Pending cards also show on the movie pages, where movie mods can approve them too.
 
 ### Rate it
 
 When a movie mod confirms a movie night (see above), Pingwin logs it in the history and, about when the
 movie finishes (showtime + its runtime), posts a **Rate it** button in the series' channel. Each person
-gives a score out of 10 and a comment. The message keeps a live average next to IMDb's, and closes after
-*Ratings stay open for* hours (48 by default).
+gives a score out of 10 and a comment; rating again changes yours. The message keeps a live average next
+to IMDb's, and closes after *Ratings stay open for* hours (48 by default). Missed the button? Use
+`/pingwin movie rate`.
 
 **Who goes first (optional):** a movie mod can pick who rates first on the night's "did it happen?" card
 (or on the movie pages), and until someone's picked or has rated, the Rate it post has a **Pick who starts**
@@ -275,18 +322,23 @@ button anyone can use. Pingwin pings that person under the Rate it post; everyon
 **who should answer it**. Pingwin pings that person under the Rate it post with their own Rate it button,
 and their form shows the question; once they answer, the ping shows the answer. Leave the person empty and
 the question goes to whoever rates next. Everyone gets one question to answer per movie, so Pingwin says so
-if the person you pick already has one. The Rate it post's footer shows whose questions are still waiting,
-and the movie pages show each question's **From** and **To** (the review form there has the same picker).
+if the person you pick already has one (or you pick yourself). The Rate it post's footer shows whose
+questions are still waiting, and the movie pages show each question's **From** and **To** (the review form
+there has the same picker). Rating from a DM has no picker, so your question keeps whoever you picked before.
 
 **Rate by voice:** instead of typing, send Pingwin a **voice message**, in a DM or as a reply to the Rate it
-post (or a question ping). Pingwin turns it into text on the PC it runs on, finds the score you said ("I'd
-give it a seven and a half", "8 out of 10"), and replies with a card: **Save**, **Edit** (the Rate it form,
-filled in, to fix the score or words, answer a question or ask one), **Other movie** when two are open, or
-**Cancel**. Only the person who spoke can save it, and nothing is saved until they do. The speech-to-text is
-[Whisper](https://github.com/SYSTRAN/faster-whisper), free and offline: the recording never leaves the PC,
-and isn't kept. Install it with `pip install "pingwin[voice]"`; the model
-(about 0.5 GB) downloads into the `models` folder the first time someone uses it. Turn it off with *Rate by
-voice message* under Ratings.
+post (or a question ping). When you reply in the server, keep the @ on (Discord only shows Pingwin a voice
+message's recording when it's mentioned, unless the mod log's Message Content intent is on). Pingwin turns it
+into text on the PC that's answering, finds the score you said ("I'd give it a seven and a half", "8 out of
+10"), and replies with a card: **Save**, **Edit** (the Rate it form, filled in, to fix the score or words,
+answer a question or ask one), **Other movie** when two are open, or **Cancel**. Only the person who spoke can
+save it, and nothing is saved until they do; an unsaved card expires after 2 days. Recordings up to 3 minutes.
+
+The speech-to-text is [Whisper](https://github.com/SYSTRAN/faster-whisper), free and offline: the recording
+never leaves the PC, and isn't kept. It's an optional install. In the Pingwin folder, run
+`.venv\Scripts\python -m pip install -e ".[voice]"` on every PC that may answer (a backup PC without it says
+it can't listen yet). The model (about 0.5 GB) downloads into the `models` folder the first time someone uses
+it. Turn voice ratings off with *Rate by voice message* under Ratings.
 
 ### Movie details (OMDb)
 
@@ -327,22 +379,24 @@ There are three ways in, and nobody has to type a Discord password:
   their own sign-in link. It opens a page with an **Open the movie pages** button that signs them in with
   no Discord screen, so they can write reviews and suggest movies. Each one works once, for 15 minutes.
   (Opening the link doesn't use it up, so Discord's link previews and link scanners can't spend it.)
-- **Sign in with Discord**, as before.
+- **Sign in with Discord.**
 
 Members (with the member role, like **Friend**) see:
 
 - **History:** every movie night with date, series, our average and IMDb's, searchable and sortable. Open
   one for the poster, details, everyone's ratings and the question chain. **Suggest a fix** sends a
   correction to the mods (including a poster image link, if a movie has no picture).
-- **Reviews:** **Write a review** for any movie night: a score, what you thought, an answer to the last
-  person's question and one for the next. Reviewing the same movie again updates yours. Admins can also
-  enter a review for a member, or for a guest without Discord (saved under their name, like imported
-  ratings, so **People** can group it). Each guest name is a separate guest; the box lists earlier guests.
 - **Add a movie we watched** (on History): for a movie night that isn't in the history yet. Pick the title
   (with IMDb suggestions), the date and the event. It comes off that event's watchlist, opens so people can
   review it, and can also post a **Rate it** button in Discord. Movie mods add it straight away; with approvals
-  on, everyone else's goes to the movie mods first. Below that, everyone's ratings and comments in one place. Filter by person, series or score, search
-  them, or click someone's card for their average, how they compare with the group, and their favorites.
+  on, everyone else's goes to the movie mods first.
+- **Reviews:** **Write a review** for any movie night: a score, what you thought, an answer to the question
+  waiting for you, and one of your own (for someone you pick, or whoever rates next). Reviewing the same movie
+  again updates yours. Admins can also enter a review for a member, or for a guest without Discord (saved
+  under their name, like imported ratings, so **People** can group it). Each guest name is a separate guest;
+  the box lists earlier guests. Below that, everyone's ratings and comments in one place. Filter by person,
+  series or score, search them, or click someone's card for their average, how they compare with the group,
+  and their favorites.
 - **Watchlists:** each series' list as poster cards, with filters for named lists (like *Horror*), and a
   form to suggest a movie. Typing a title suggests matches from our library and from IMDb's catalog (via
   OMDb, with the key added), with posters; picking one pins down exactly which movie it is. The title in
@@ -353,9 +407,12 @@ Members (with the member role, like **Friend**) see:
   any bar for the details.
 
 On **History**, **Columns** picks what the table shows (year, rating count, us vs IMDb, director, writers,
-stars, genre), and clicking a column heading sorts by it. Your choice is remembered in your browser.
+stars, genre), and clicking a column heading sorts by it. Your choice is remembered in your browser. Like the
+dashboard, long pages have an **On this page** list and sections that fold up.
 
-Members only see the movie pages; the rest of the dashboard stays admin-only.
+Members only see the movie pages; the rest of the dashboard stays admin-only. With the view-only link,
+everything above can be read (including names, scores, comments and questions) by anyone who has the link,
+so share it only where you'd share the reviews themselves.
 
 ### Importing your old history
 
@@ -398,17 +455,19 @@ series' showtime, so nobody has to remember to log the movie:
 1. From 15 minutes before showtime, it notes who's in the movie night's voice channel: the voice channel of the
    series' Discord Event if there is one around showtime, otherwise the busiest voice channel. Only who and how
    long, never audio.
-2. When everyone has left (after showtime + 30 minutes), or 5 hours after showtime, it checks whether at least
-   *At least this many people* stayed for *For at least (minutes)* (3 and 45 by default).
-3. If the night is already in the history (a franchise queue part, a Pingwin poll, or someone added it), it just
-   notes the turnout. Otherwise the movie mods get a card in the approvals channel asking **Which movie was
-   it?** The menu lists likely picks: the franchise queue's next part, poll winners from *Polls go to*
-   and the series' channel (it follows Horror / Not Horror rounds: the winning side's latest movie poll comes
-   first), then recent watchlist suggestions. *Something else…* lets a mod type it, and **We skipped it** closes
-   the card. The same choices are under *Waiting for a mod* on the movie pages.
+2. When everyone has been gone for 20 minutes (but not before showtime + 30 minutes), or 5 hours after
+   showtime, it checks whether at least *At least this many people* stayed for *For at least (minutes)* (3
+   and 45 by default).
+3. If the night is already in the history, it just notes the turnout. If a poll, the franchise queue or
+   `/pingwin movie tonight` already asked about that night, the turnout and who stayed are added to that
+   [did it happen?](#did-movie-night-happen) card. Otherwise the movie mods get a card in the approvals
+   channel asking **Which movie did we watch?** The menu lists likely picks: the franchise queue's next part,
+   poll winners from *Polls go to* and the series' channel (it follows Horror / Not Horror rounds: the winning
+   side's latest movie poll comes first), then recent watchlist suggestions. *Something else…* lets a mod type
+   it, and **We skipped it** closes the card. The same choices are under *Waiting for a mod* on the movie pages.
 4. Picking a movie adds it to the history on that date, takes it off the watchlist and posts the Rate it button.
 
-Movie nights with no date show as **Pre-Clubhouse 🦕**.
+Nights in a break aren't watched. Movie nights with no date get a 🦕 label and sort as the oldest.
 
 ### Movie mods
 
@@ -416,7 +475,9 @@ Movie nights with no date show as **Pre-Clubhouse 🦕**.
 needing the rest of the dashboard. They can approve requests (the Approve/Deny card in the approvals channel, or
 *Waiting for a mod* on the movie pages), use the movie pages' **Admin** tab (People, Imports, Movie details,
 Backups), edit the history and franchise queues, and enter reviews for others. Server admins can always do all of
-this. Make sure movie mods can see the approvals channel.
+this, and so can anyone with Manage Roles or Manage Server. Movie mods also answer the "did it happen?"
+cards, pick who rates first, take weeks off (`/pingwin movie skip`), and line up franchises
+(`/pingwin movie franchise`). Make sure movie mods can see the approvals channel.
 
 ### Where reviews are kept
 
@@ -443,7 +504,7 @@ not on this list** to see what a watched log is missing. Movies in our library a
 from the file (IMDb ID, runtime, IMDb rating, genre, director), and OMDb lookups use the IMDb ID.
 
 In ratings documents, a question line can say who it's for: `To Alex: How many …?`, or
-`To Ellie from Alina and Sam: …` when it came from more than one person. A question without `To` goes to
+`To Jordan from Alex and Sam: …` when it came from more than one person. A question without `To` goes to
 the next person who rated.
 
 ### Importing a watchlist from Discord
@@ -459,7 +520,8 @@ and ones already on the list are skipped. You can paste the list's text instead 
 pings the game role. *when* can be things like `fri 8pm`, `tomorrow 7:30pm`, `10/31 9pm` or `in 2 hours`
 (a bare `8` means 8 pm). The card goes to *Post game days in* if it's set (like #events), otherwise to the
 channel you ran the command in. The time is in your own zone (`/pingwin timezone set`), or add one like `sat 7pm CT`. Pingwin reminds everyone who's in before it starts (set the minutes on the
-dashboard) and pings them when it starts. `/pingwin gameday cancel` cancels it (the host or a mod).
+dashboard) and pings them when it starts. `/pingwin gameday cancel` cancels it (the host or a mod) and lets
+everyone who's in know.
 
 ## Stream alerts
 
@@ -512,11 +574,19 @@ own role must be **above** the role it gives. To kick on Deny, give Pingwin *Kic
 
 ## Mod log
 
-Posts server activity to a private channel: joins, leaves, kicks and bans, role changes, and edited or
-deleted messages (with what they said). Ping-menu roles are skipped by default because they change often.
+Posts server activity to a private channel: joins, leaves, kicks and bans, role changes, and deleted
+messages (with what they said). It stays quiet on purpose:
 
-This needs the **Server Members** intent, and the **Message Content** intent for edits and deletes. Make
-the log channel mod-only: it shows message text from across the server.
+- **Edited messages** are off by default, since every typo fix would show up. When you turn them on, quick
+  fixes (within 10 minutes of posting, or only a few characters changed) are still skipped.
+- **Ping-menu roles** are skipped by default because they change often.
+- **Never logged:** Pingwin's own posts, other bots, the log channel itself, and mod-only channels (ones
+  regular members can't see). Add more under *Don't log messages in these channels* (names, like
+  `bots, music`).
+- Only messages Pingwin saw since it last started can be shown when they're deleted.
+
+This needs the **Server Members** intent, and the **Message Content** intent for deleted and edited messages.
+Make the log channel mod-only: it shows message text from across the server.
 
 ## Turning on intents
 
@@ -525,14 +595,16 @@ Discord makes bots ask for two kinds of extra access in the Developer Portal. On
 1. Open the [Developer Portal](https://discord.com/developers/applications) → your app → **Bot**.
 2. Under **Privileged Gateway Intents**, turn on:
    - **Server Members Intent** for *Welcome and approval* or *Mod log*
-   - **Message Content Intent** for the mod log's edited and deleted messages
+   - **Message Content Intent** for the mod log's deleted and edited messages
 3. Click **Save Changes**, then restart Pingwin (the dashboard shows a banner when a restart is needed).
 
-If you turn a feature on before the intent, Pingwin stops at startup and says which intent to switch on.
-Bots in fewer than 100 servers don't need Discord's approval for these.
+If you turn a feature on before the intent, Pingwin still starts, but without it: Welcome and the mod log
+are paused, and the log and the **Setup** tab say which intent to switch on. Bots in fewer than 100 servers
+don't need Discord's approval for these.
 
 ## Several PCs
 
 Features follow failover: only the active PC posts, reminds or answers buttons, and what each feature keeps
 (birthdays, watchlists, sign-ups, what's been announced) lives in the shared settings folder under
-`state\`, so a backup PC picks up where the main one left off.
+`state\`, so a backup PC picks up where the main one left off. Voice ratings are the exception: install the
+`voice` extra on each PC that may answer (see [Rate it](#rate-it)).

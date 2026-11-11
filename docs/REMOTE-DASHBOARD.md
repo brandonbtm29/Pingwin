@@ -8,9 +8,10 @@ It works like this:
 
 - **Tailscale Funnel** gives the dashboard a private-looking but public address, like
   `https://my-pc.tail1234.ts.net:10000`. Only the PC running Pingwin needs Tailscale.
-- Visitors see a **Sign in with Discord** page. Pingwin only lets them in if they're in your server and
-  have **Manage Server** (or a role you pick). It checks again every few minutes, so removing someone's
-  role also removes their access.
+- Visitors see a **Sign in with Discord** page. Pingwin only lets them into the dashboard if they're in
+  your server and have **Manage Server** (or a role you pick); other members only get the
+  [movie pages](#movie-pages-for-members). It checks again every few minutes, so removing someone's role
+  also removes their access.
 - **If that PC is off,** its dashboard link is down, but Pingwin keeps working in Discord from the backup
   PCs. Each PC can have its own link; `/pingwin dashboard` lists them all.
 
@@ -51,10 +52,11 @@ Every change made from the dashboard is logged with the name of whoever made it.
 ## Movie pages for members
 
 The same link also serves the **movie pages** at `/movies` (history, ratings, watchlists, stats; see
-[movie night](FEATURES.md#movie-pages)). Anyone with the member role (`required_role`, like **Friend**)
-can sign in there, and only sees the movie pages: the rest of the dashboard says no. Members who sign in
-from the main link are sent to the movie pages. There's also a shared **view-only link** (browse without
-signing in) and **personal sign-in links** from `/pingwin movie page`; see [movie pages](FEATURES.md#movie-pages).
+[movie night](FEATURES.md#movie-pages)). Anyone with the member role (`required_role`, like **Friend**; with
+no member role, anyone in the server) can sign in there, and only sees the movie pages: the rest of the
+dashboard says no. Members who sign in from the main link are sent to the movie pages. Movie mods also get
+the movie pages' **Admin** tab. There's also a shared **view-only link** (browse without signing in) and
+**personal sign-in links** from `/pingwin movie page`; see [movie pages](FEATURES.md#movie-pages).
 
 Suggestions made on the movie pages go to the mods' approval channel, the same as in Discord.
 
@@ -75,6 +77,14 @@ use **Sign everyone out** in the same place. You can also run `tailscale funnel 
 
 ## Security notes
 
+- The address is on the public internet: anyone who has it sees the sign-in page, but nothing else until
+  they sign in.
+- **The view-only link** is the exception: anyone who has it can read the movie pages (history, everyone's
+  ratings, comments and questions, watchlists, stats), but can't change anything or open the rest of the
+  dashboard. **Reset link** (Features → Movie night → Movie pages) cuts off the old one.
+- **Personal sign-in links** from `/pingwin movie page` sign one member in to the movie pages. Each works
+  once, for 15 minutes, and opens only the movie pages, even for an admin (who signs in with Discord for the
+  dashboard), so a forwarded link can't hand over the dashboard.
 - The dashboard still only listens on `127.0.0.1`. Tailscale forwards Funnel visitors to it and marks
   their requests, so Pingwin knows they came from outside. The local sign-in key never works that way.
 - Requests must be for this PC's own Tailscale address; anything else is refused.

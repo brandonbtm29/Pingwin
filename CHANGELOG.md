@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.35.0 (2026-11-11)
+A review of the whole bot, its pages and its security:
+- **Security:** secrets.env only sets key names (like `OMDB_API_KEY`) on each PC, never things like
+  `GIT_CONFIG_*`, and the updater's git ignores `GIT_*` settings. A personal movie-page link opens only the
+  movie pages, even for an admin. The dashboard admin role (and the movie mods role) is the highest role with
+  that name, so a lower copy someone makes doesn't count. Exported reviews can't run as spreadsheet formulas.
+  User text (movie titles, event names) can't ping roles. The ratings-document import can't freeze Pingwin
+  on a huge line, and Google downloads are capped at 4 MB. Movie mods can post the movie pages link only in
+  channels they can post in. The view-only link no longer shows raters' Discord IDs.
+- **Discord:** the Rate it form opens for long reviews written on the movie pages; *Who rates first?* finds
+  the person without the member list; voice ratings by DM work without it too, and only real voice
+  messages are transcribed. A mod's click on a card that was already handled (or still needs a movie)
+  tells only them instead of replacing the card. Private menus say when they've expired.
+- **Pages:** pressing Enter on a History row opens the movie; messages show above open dialogs and can be
+  clicked away; the Sections button no longer covers buttons; checkboxes keep their size; Stop and *Add a
+  backup PC* only show for the PC's owner (or full access); and smaller fixes.
+- **The invite link asks for Manage Events** (repeating events keep their local time by default).
+- **CI:** the secret scan uses a `.gitleaks.toml` allowlist (the old one stopped matching after the history
+  was tidied), actions are pinned to commits, and gitleaks' download is checked.
+
+## Since 0.24 (up to 0.34.1)
+
+A summary by feature. Each version's details are in the
+[commit history on GitHub](https://github.com/brandonbtm29/Pingwin/commits/main).
+
+- **"Did movie night happen?"** A poll's winner, a franchise queue's part or `/pingwin movie tonight` no
+  longer goes straight into the history. The movie mods get one card for the night: **Yes, we watched it**,
+  pick another movie, or **We skipped it**. The Rate it button comes once it's confirmed and the movie is over.
+- **Breaks:** `/pingwin movie skip` and `unskip` (or the movie pages' Watchlists tab) take a week or a few off.
+  Skipped nights get no poll closing, no franchise post and no voice check, and Pingwin moves the series'
+  Discord Event to the next real showing. A finished franchise asks the movie mods how long a break to take.
+- **Ranked-choice polls:** tick *Ranked polls* on a series (or `ranked:True`). Everyone ranks up to 3 to 5
+  picks, and the count is an instant runoff, shown round by round.
+- **Polls go to:** Pingwin posts movie polls in that channel (like #polls), not just reads them there.
+- **The question game:** ask your question of someone by name (they get pinged with their own Rate it
+  button) or of whoever rates next; one question each per movie. **Pick who starts** on the Rate it post, or
+  *Who rates first?* on the night's card.
+- **Rate by voice message:** send Pingwin a voice message (in a DM, or as a reply to the Rate it post), check
+  the score and words it heard, and tap Save. Speech-to-text runs on the PC with Whisper; install it with the
+  optional `voice` extra.
+- **⭐ Star birthdays:** people without Discord share one message that's updated each day, with today's
+  birthdays, ages, the movie nights they were in, and who's coming up.
+- **Repeating events:** one message per event in the reminders channel, a "next one is..." post when a date
+  is over, a movie card in movie night posts, and repeating events moved back to their local time after a
+  clock change (needs *Manage Events*).
+- **Mod log, quieter:** edited messages are off by default, quick fixes are skipped, and mod-only channels,
+  bots and a list of channels you pick are never logged.
+- **Dashboard and movie pages:** an **On this page** list to jump between sections, and sections that fold
+  up (remembered per browser).
+- The invite link also asks for Send Messages in Threads, Mention All Roles, Create Polls and Pin Messages.
+
 ## 0.24.0 (2026-11-02)
 - **More event reminders:** as many as you like (1 day, 2 hours, 15 min…), each for every event or only events
   with certain keywords, with its own message and its own choice of pinging. If Pingwin was off and several
@@ -34,7 +85,7 @@
   and *We skipped it*. The same card shows under *Waiting for a mod* on the movie pages. Picking one adds it to
   the history, takes it off the watchlist and posts the Rate it button. Nights that are already logged just get
   their turnout noted, shown as *In voice* in the movie's details.
-- Movie nights with no date now read **Pre-Clubhouse 🦕** and sort as the oldest.
+- Movie nights with no date now get a 🦕 label and sort as the oldest.
 
 ## 0.21.2 (2026-10-24)
 - Fixing a movie's title or year in the history corrects that movie in place (keeping its poster, IMDb link and
@@ -94,7 +145,7 @@
   button, and only pressing it signs in. The `/pingwin movie page` reply also no longer shows previews.
 - **Who asked whom:** the funny question chain shows **From** (who asked you) and **To** (who your question
   went to) on reviews and in each movie's ratings. Imported ratings documents are read for `To Alex:` and
-  `To Ellie from Alina and Sam:` lines; running the import again links ratings imported earlier.
+  `To Jordan from Alex and Sam:` lines; running the import again links ratings imported earlier.
 - **People** on the Admin tab groups every name under the person it counts as (a member or a typed name),
   with each person's total, and lists names that aren't linked yet at the bottom.
 - **Title suggestions:** typing in *Suggest a movie* (and the title in `/pingwin movie nominate`) suggests
@@ -174,7 +225,7 @@
 ## 0.10.0 (2026-10-23)
 - **All commands under /pingwin:** `/pingwin movie ...`, `/pingwin birthday ...`, `/pingwin timezone ...` and
   so on, so Pingwin's commands stay together next to other bots. Press Ctrl+R in Discord if the old ones linger.
-- **Typed commands:** optionally answer `-pingwin movie nominate MMM The Thing 1982`, `-pingwin movie
+- **Typed commands:** optionally answer `-pingwin movie nominate MM The Thing 1982`, `-pingwin movie
   history`, `-pingwin birthday set 9 3` and more (General → *Also answer typed -pingwin commands*; needs the
   Message Content intent).
 - **Movie approvals:** members' nominations, removals, watched marks and history fixes go to the mods as

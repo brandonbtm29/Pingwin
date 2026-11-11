@@ -17,18 +17,18 @@ def test_many_reminders_but_only_the_nearest_when_several_are_due():
         remind_minutes=300,
         reminders=[
             NS(before="1 day", keywords=[], message="", ping=False),
-            NS(before="30 min", keywords=["MMM", "Maggie"], message="Popcorn time! {poll}", ping=True),
+            NS(before="30 min", keywords=["MMM", "Mystery"], message="Popcorn time! {poll}", ping=True),
             NS(before="nonsense", keywords=[], message="", ping=True),
         ],
     )
     rs = reminder_list(cfg)
     assert [r["minutes"] for r in rs] == [300, 1440, 30]
-    pick, mark = due_reminder(rs, "Maggie Movie Monday", 1000, set())
+    pick, mark = due_reminder(rs, "Mystery Movie Monday", 1000, set())
     assert pick["minutes"] == 1440 and mark == [1440]
-    pick, mark = due_reminder(rs, "Maggie Movie Monday", 200, {1440})
+    pick, mark = due_reminder(rs, "Mystery Movie Monday", 200, {1440})
     assert pick["minutes"] == 300 and mark == [300, 1440]
     # Pingwin was off all day: only the 30 minute one goes out, the rest are marked sent.
-    pick, mark = due_reminder(rs, "Maggie Movie Monday", 20, set())
+    pick, mark = due_reminder(rs, "Mystery Movie Monday", 20, set())
     assert pick["minutes"] == 30 and mark == [30, 300, 1440]
     # Game night doesn't match MMM's keywords, so its nearest reminder is the 5 hour one.
     pick, _ = due_reminder(rs, "Game night", 20, set())

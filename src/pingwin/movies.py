@@ -47,6 +47,12 @@ def save(lib: dict[str, Any]) -> None:
     store.save(STATE, lib)
 
 
+def _cell(text: Any) -> str:
+    """Spreadsheet text that can't run as a formula: a leading = + - @ (or tab, carriage return) gets a '."""
+    text = "" if text is None else str(text)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
 def reviews_csv(lib: dict[str, Any], names: dict[str, str]) -> str:
     """Every rating as a spreadsheet: a plain record of the reviews that opens anywhere."""
     out = io.StringIO()
@@ -77,18 +83,18 @@ def reviews_csv(lib: dict[str, Any], names: dict[str, str]) -> str:
             w.writerow(
                 [
                     e.get("date") or "",
-                    m.get("title", "?"),
+                    _cell(m.get("title", "?")),
                     m.get("year") or "",
-                    e.get("series") or "",
-                    names.get(k) or r.get("name") or "",
-                    r.get("name") or "",
+                    _cell(e.get("series") or ""),
+                    _cell(names.get(k) or r.get("name") or ""),
+                    _cell(r.get("name") or ""),
                     "" if r.get("score") is None else f"{r['score']:g}",
-                    r.get("comment") or "",
-                    r.get("answered") or "",
-                    chain[k]["from"] or "",
-                    r.get("answer") or "",
-                    r.get("ask") or "",
-                    " & ".join(chain[k]["to"]),
+                    _cell(r.get("comment") or ""),
+                    _cell(r.get("answered") or ""),
+                    _cell(chain[k]["from"] or ""),
+                    _cell(r.get("answer") or ""),
+                    _cell(r.get("ask") or ""),
+                    _cell(" & ".join(chain[k]["to"])),
                     f"https://www.imdb.com/title/{m['imdb_id']}/" if m.get("imdb_id") else "",
                 ]
             )
@@ -742,8 +748,9 @@ def parse_sheet(csv_text: str) -> list[dict[str, Any]]:
     return out
 
 
+# (No two whitespace runs back to back in these: on a long line of spaces they'd take minutes to fail.)
 RATING = re.compile(
-    r"^(?P<name>[A-Z][\w .'’&/-]{0,30}?)\s*(?:’s|'s)?\s*"
+    r"^(?P<name>[A-Z][\w .'’&/-]{0,30}?)\s*(?:(?:’s|'s)\s*)?"
     r"\(\s*(?P<score>[\d.]+|NA|N/A|U|)\s*/\s*10(?:\.0)?\s*\)\s*[:\-–]?\s*(?P<comment>.*)$"
 )
 RATING_ALT = re.compile(r"^(?P<name>[A-Z][\w .'’&/-]{0,30}):\s*(?P<score>[\d.]+)\s*/\s*10\s*(?P<comment>.*)$")
@@ -764,9 +771,12 @@ TOC_LINE = re.compile(r"^(?P<title>\S.*?)(?:\t+|\s{2,})(?P<page>\d{1,4})$")
 
 
 def _people_text(text: str) -> str:
-    """'alina and sebastian' -> 'Alina & Sebastian' (names as written, tidied)."""
+    """'jordan and casey' -> 'Jordan & Casey' (names as written, tidied)."""
     names = [n.strip() for n in NAME_SPLIT.split(text.strip()) if n.strip()]
     return " & ".join(n[:1].upper() + n[1:] for n in names)
+
+
+MAX_LINE = 4000
 
 
 def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[str, Any]]:
@@ -777,7 +787,8 @@ def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[st
     'Date watched' or a rating. `titles` (normalized movie titles) helps spot the second kind.
     A table of contents at the top ('Title    12') names sections that start without a title."""
     titles = titles or set()
-    lines = [ln.strip().replace("\u200b", "") for ln in text.splitlines()]
+    # A line is a title, a rating or a question: past a few thousand characters it's not worth matching.
+    lines = [ln.strip().replace("\u200b", "")[:MAX_LINE] for ln in text.splitlines()]
     sections: list[dict[str, Any]] = []
     cur: dict[str, Any] | None = None
     last_rating: dict[str, Any] | None = None
@@ -810,9 +821,9 @@ def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[st
             cur, last_rating = None, None
             continue
         is_rating = RATING.match(ln) or RATING_ALT.match(ln)
-        if not seen_sep and not sections:
+        if not seen_sep and not sections and len(ln) < 120:
             m = TOC_LINE.match(ln)
-            if m and not is_rating and len(ln) < 120:
+            if m and not is_rating:
                 toc.append(m["title"].strip())
                 continue
         if after_sep:
@@ -864,7 +875,7 @@ def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[st
             if q:
                 last_rating["ask"] = q
                 if m:
-                    parts = FROM_PART.split(m["to"].strip(), maxsplit=1)  # 'To Ellie from Alina and Sam'
+                    parts = FROM_PART.split(m["to"].strip(), maxsplit=1)  # 'To Morgan from Jordan and Sam'
                     last_rating["ask_to"] = _people_text(parts[0])
                     last_rating["asked_by"] = _people_text(parts[1]) if len(parts) > 1 else ""
             continue
@@ -906,7 +917,7 @@ def _question_links(
 ) -> dict[str, tuple[str, str]]:
     """{rater key: (asker key, question)} for one document section.
 
-    'To Alina: ...' under Sam's rating goes to Alina (whoever rated as Alina or matches her);
+    'To Jordan: ...' under Sam's rating goes to Jordan (whoever rated as Jordan or matches her);
     a question without a 'To' goes to the next person who rated."""
     out: dict[str, tuple[str, str]] = {}
     for i, (key, _uid, r) in enumerate(rows):

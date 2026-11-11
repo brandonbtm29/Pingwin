@@ -220,6 +220,38 @@ def test_view_only_link_and_personal_sign_in(tmp_path, data, monkeypatch):  # no
     run(scenario, tmp_path)
 
 
+def test_a_personal_link_opens_only_the_movie_pages_even_for_admins(tmp_path, data, monkeypatch):  # noqa: F811
+    """Forwarding your sign-in link mustn't hand over the dashboard: its session reaches the movie pages only."""
+    from types import SimpleNamespace
+
+    from pingwin import movieaccess
+    from pingwin.dashboard import server
+
+    async def as_admin(bot, uid):
+        return "admin", "", SimpleNamespace(display_name="Riley")
+
+    monkeypatch.setattr(server, "check_member", as_admin)
+
+    async def scenario(client, app):
+        code = movieaccess.new_login_code(42, "Riley")
+        r = await client.get(f"/movies/login?code={code}", headers=PUBLIC)
+        page_token = re.search(r'name="token" value="([^"]+)"', await r.text())[1]
+        r = await client.post(
+            "/movies/login",
+            data={"code": code, "token": page_token},
+            headers={**PUBLIC, "Cookie": f"{server.LOGIN_COOKIE}={page_token}", "Origin": ORIGIN},
+            allow_redirects=False,
+        )
+        me = {**PUBLIC, "Cookie": f"pingwin_session={r.cookies['pingwin_session'].value}", "X-Pingwin": "1"}
+        body = await (await client.get("/api/movies", headers=me)).json()
+        assert body["viewer"]["movies_only"] and body["viewer"]["movie_mod"]  # still a movie mod there
+        assert not body["viewer"]["full_access"]
+        assert (await client.get("/api/logs", headers=me)).status == 403
+        assert (await client.get("/api/state", headers=me)).status == 403
+
+    run(scenario, tmp_path)
+
+
 def test_imdb_lists_and_question_chain_on_the_pages(tmp_path, data):  # noqa: F811
     doc = DOC.replace(
         "Sam (8/10): Gross in the best way.", "Sam (8/10): Gross in the best way.\nTo Alex: How many flies?"
@@ -342,3 +374,25 @@ def test_movie_mods_get_the_movie_tools_but_not_the_dashboard(tmp_path, data, mo
         assert body["viewer"]["movie_mod"] is False
 
     run(scenario, tmp_path)
+
+
+def test_the_view_only_link_doesnt_show_discord_ids():
+    from pingwin.dashboard.server import _hide_discord_ids
+
+    history = [
+        {
+            "ratings": [
+                {
+                    "key": "426244914964070415",
+                    "who_id": "426244914964070415",
+                    "ask_for": "77",
+                    "answered_from_key": None,
+                }
+            ]
+        },
+        {"ratings": [{"key": "426244914964070415", "who_id": "1", "ask_for": None, "answered_from_key": "name:sam"}]},
+    ]
+    _hide_discord_ids(history, "k" * 32)
+    a, b = history[0]["ratings"][0], history[1]["ratings"][0]
+    assert a["key"] == b["key"] and "4262" not in a["key"] and a["who_id"] is None  # same person, no ID
+    assert a["ask_for"].startswith("p") and b["answered_from_key"] == "name:sam"

@@ -46,10 +46,13 @@ the setup in Pingwin's dashboard.
 6. Invite the bot to your server. Paste this link into your browser, replacing `APP_ID` with the
    Application ID:
    ```
-   https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=335629312
+   https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=2815033570708480
    ```
    Pick your server and click **Authorize**. The link asks only for what Pingwin uses:
-   Manage Roles, Change Nickname, View Channels, Send Messages, Embed Links and Read Message History.
+   Manage Roles, Change Nickname, View Channels, Send Messages, Send Messages in Threads, Embed Links,
+   Read Message History, Mention All Roles (to ping roles), Create Polls, Pin Messages and Manage Events
+   (keeping repeating events at their local time, and movie night breaks). One optional feature needs one
+   more, which you can add to Pingwin's role later: *Kick Members* (if the welcome card's Deny should kick).
 
 **Your server ID:** you'll be asked for it in the next step. In Discord, go to **User Settings → Advanced**
 and turn on **Developer Mode**. Then right-click your server's icon and choose **Copy Server ID**.
@@ -111,7 +114,7 @@ Most of the remaining work is on the **Role menu** tab:
 3. Click **Save**.
 4. Click **Create missing roles.** Pingwin creates each role with no permissions and turns on
    "Allow anyone to @mention this role", so the pings work.
-5. Pick your `#roles` channel and click **Post a new menu**.
+5. Under **Publish**, pick the menu and your `#roles` channel, and click **Post it**.
 
 If you later change the roles or wording, click **Update posted menus** and the existing message updates in place.
 
@@ -162,6 +165,15 @@ about 20 seconds when it does. To update right away, click **Restart Pingwin** o
 A second PC can take over if yours goes offline. It works best at a friend's house, on different internet.
 See **[Adding a backup PC](BACKUP-PC.md)** for both sides of the setup and how to test it.
 
+### Rating movies by voice message
+Movie night can turn voice messages into ratings, with speech-to-text that runs on the PC itself. It's a
+separate install (about 0.5 GB with its model). In the Pingwin folder, open a Command Prompt and run:
+```
+.venv\Scripts\python -m pip install -e ".[voice]"
+```
+Do this on every PC that may answer (backups too), then restart Pingwin. See
+[Rate it](FEATURES.md#rate-it).
+
 ### A different personality
 Pingwin's messages come from `personas\pingwin.toml`. To change them, copy that file into a `personas`
 folder inside your settings folder (create it if needed), rename it (e.g. `pirate.toml`), and rewrite the lines. Then set
@@ -171,7 +183,7 @@ folder inside your settings folder (create it if needed), rename it (e.g. `pirat
 On any OS with Python 3.11+:
 ```
 python -m venv .venv
-.venv/bin/pip install -e .          # Windows: .venv\Scripts\pip
+.venv/bin/pip install -e .          # Windows: .venv\Scripts\pip; add ".[voice]" for voice ratings
 cp config.example.toml config.toml  # then edit it
 cp secrets.env.example secrets.env  # then add your token
 .venv/bin/python -m pingwin

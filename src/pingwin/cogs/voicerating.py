@@ -30,10 +30,12 @@ GOLD = discord.Color.gold()
 
 
 def voice_attachment(message: discord.Message) -> discord.Attachment | None:
-    """The recording in a Discord voice message (or, in a DM, any audio file)."""
+    """The recording in a Discord voice message. (Only voice messages: Discord gives them a length, so a
+    long audio file can't keep the PC busy for an hour.)"""
+    if not message.flags.voice:
+        return None
     for a in message.attachments:
-        audio = (a.content_type or "").startswith("audio/")
-        if (message.flags.voice or (message.guild is None and audio)) and (audio or a.is_voice_message()):
+        if (a.content_type or "").startswith("audio/") or a.is_voice_message():
             return a
     return None
 
@@ -149,7 +151,7 @@ class VoiceRatings(commands.Cog):
         uid = str(message.author.id)
         if message.guild is None:  # a DM: only from people in the server
             guild = self.bot.home_guild
-            if att is None or guild is None or guild.get_member(message.author.id) is None:
+            if att is None or guild is None or not await self._in_server(guild, message.author.id):
                 return
             entry = replied_entry(lib, ref) if ref else None
             entry = entry or pick_entry(open_entries(lib), uid)
@@ -168,7 +170,7 @@ class VoiceRatings(commands.Cog):
         if not voicerate.available():
             await self._reply(message, "🎙️ I can't listen to voice messages on this PC yet. Tap **Rate it** to type it.")
             return
-        if (att.duration or 0) > voicerate.MAX_SECONDS or att.size > MAX_BYTES:
+        if att.duration is None or att.duration > voicerate.MAX_SECONDS or att.size > MAX_BYTES:
             await self._reply(message, "That's a long one! Keep it under 3 minutes, or tap **Rate it** to type it.")
             return
         try:
@@ -197,6 +199,19 @@ class VoiceRatings(commands.Cog):
         except discord.HTTPException as e:
             log.warning("Couldn't reply to a voice rating: %s", e)
         log.info("Heard a voice rating from %s (%s)", draft["name"], "score found" if draft["score"] else "no score")
+
+    @staticmethod
+    async def _in_server(guild, user_id: int) -> bool:
+        """Whether someone is in the server (asking Discord when the member list isn't kept, which needs the
+        Server Members intent)."""
+        if guild.get_member(user_id) is not None:
+            return True
+        try:
+            return bool(await guild.fetch_member(user_id))
+        except (discord.NotFound, discord.Forbidden):
+            return False
+        except discord.HTTPException:
+            return False
 
     async def _reply(self, message: discord.Message, text: str) -> None:
         try:

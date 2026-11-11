@@ -5,9 +5,12 @@
 [![CI](https://github.com/brandonbtm29/Pingwin/actions/workflows/ci.yml/badge.svg)](https://github.com/brandonbtm29/Pingwin/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A friendly Discord bot for a friends' server. Right now it does **opt-in ping roles**:
+A friendly, self-hosted Discord bot for a friends' server. It started with **opt-in ping roles**:
 members tap buttons in `#roles` to choose which pings they get (movie nights,
 streams, game days…), so the server can stop using `@everyone` for everything.
+It also has [optional features](#features) you switch on when you want them: movie nights (watchlists,
+polls, ratings and a history), birthdays, event reminders, game day sign-ups, event attendance, stream
+alerts, welcome and approval, and a mod log.
 
 - **Swappable personality:** announcements and replies come from a persona file, so you can rename it or change its voice without touching code. The default, Pingwin, is a playful penguin: puns in announcements, plain words in mod tools and errors.
 - **Runs on several PCs:** one answers, the others wait on standby and take over if it goes offline.
@@ -22,13 +25,16 @@ the bot in Discord to posting your first menu, plus troubleshooting.
 The short version, on a Windows PC that stays on:
 
 1. Create a bot in the [Discord Developer Portal](https://discord.com/developers/applications), copy its token, and
-   invite it with `https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=335629312`.
+   invite it with `https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=2815033570708480`.
 2. Install [Python 3.11+](https://www.python.org/downloads/) and [Git](https://git-scm.com), then
    `git clone https://github.com/brandonbtm29/Pingwin.git`.
 3. Double-click `scripts\setup.cmd` and paste your token when asked.
 4. Double-click `scripts\run_pingwin.cmd`, then `scripts\open_dashboard.cmd`, and follow the **Setup** tab's checklist.
 5. Optional: `scripts\install_autostart.cmd` starts Pingwin in the background (no window) when you sign
    in, and adds a **Pingwin Dashboard** shortcut to your desktop. Stop it with **Status → Stop Pingwin**.
+6. Optional: to let people rate movies by voice message, also run
+   `.venv\Scripts\python -m pip install -e ".[voice]"` in the Pingwin folder (on every PC that may answer).
+   See [Rate by voice](docs/FEATURES.md#rate-it).
 
 ## Commands
 
@@ -43,7 +49,7 @@ Every command lives under **/pingwin**, so it doesn't get mixed up with other bo
 | `/pingwin timezone set · show · remove` | Everyone | Pick your time zone, so times you type mean your time |
 | `/pingwin about` | Everyone | Says hi |
 | `/pingwin status` | Everyone | Which PC is answering, version, uptime |
-| `/pingwin dashboard` | Manage Server | Links to the dashboard (when it's online) |
+| `/pingwin dashboard` | Manage Server (or the dashboard admin role) | Links to the dashboard (when it's online) |
 | `/pingwin reload` | Manage Server | Reload settings now (they also reload on their own within a minute) |
 | `/pingwin restart` | Manage Server | Restart and install any update from GitHub |
 
@@ -58,17 +64,17 @@ Eight optional features, all off until you switch them on in the dashboard's **F
 
 | Feature | Commands | What it does |
 |---|---|---|
-| Event reminders | (automatic) | Pings the roles whose keywords match a new Discord Event, reminds before it starts |
-| Birthdays | `/pingwin birthday set · remove · upcoming` | A shout-out on the day; optional birthday role |
-| Movie night | `/pingwin movie nominate · list · poll · endpoll · watched · remove · tonight · history · rate · page` | Watchlists and polls, mod approvals, a Rate it button after each movie, and movie pages (history, ratings, stats) members open with Discord sign-in |
+| Event reminders | (automatic) | Pings the roles whose keywords match a new Discord Event, reminds before it starts, and keeps repeating events at their local time when the clocks change |
+| Birthdays | `/pingwin birthday set · remove · upcoming` (mods: `set_for · remove_for · add_other · remove_other`) | A shout-out on the day; optional birthday role; a ⭐ Star birthdays message for people without Discord |
+| Movie night | `/pingwin movie nominate · list · remove · poll · endpoll · watched · tonight · history · rate · page · queue · franchise · skip · unskip` | Watchlists, Discord or ranked-choice polls, franchise queues, weeks off, a "did it happen?" card for the movie mods, a Rate it button (typed or by voice message) with a question game, and movie pages (history, ratings, stats) |
 | Game day sign-ups | `/pingwin gameday create · cancel` | "Who's in?" buttons and a reminder to everyone who's in |
 | Event attendance | `/pingwin attendance add · remove · code · history` | Takes attendance at Discord Events (voice or an "I'm here" button) and pays a reward into UnbelievaBoat |
-| Stream alerts | (automatic) | Posts once when a streamer goes live on Twitch or YouTube |
+| Stream alerts | (automatic) | Posts once when a streamer goes live on Twitch, YouTube or Discord (Go Live) |
 | Welcome and approval | (buttons) | Welcomes new members; mods click Approve to give them Friend |
-| Mod log | (automatic) | Joins, leaves, bans, role changes, edited and deleted messages, in a private channel |
+| Mod log | (automatic) | Joins, leaves, bans, role changes and deleted messages (edits too, if you want), in a private channel |
 
-Admins decide how movie night works: who can nominate, who can start polls, how the poll's movies are
-picked, how long it runs, and what happens on a tie. Welcome and the mod log need privileged intents
+Admins decide how movie night works: who can nominate, who can start polls, where polls go, how the poll's
+movies are picked, how long it runs, and what happens on a tie. Welcome and the mod log need privileged intents
 ([details](docs/FEATURES.md#turning-on-intents)).
 
 ## Dashboard
@@ -77,26 +83,28 @@ Double-click the **Pingwin Dashboard** desktop shortcut (or `scripts\open_dashbo
 with `scripts\create_shortcuts.cmd`). It starts Pingwin in the background if needed, and opens a page in your
 browser with six tabs:
 
-- **Setup:** a checklist of what's done and what's left, a check that Pingwin can reach every channel and
-  role it's been given, and an About page
-- **Status:** which PC is answering, Discord connection, version; reload, restart, check for updates;
-  remote access
+- **Status:** which PC is answering, Discord connection, version; reload, restart, check for updates,
+  stop; remote access
 - **Role menu:** several menus (pings, time zones, ...); add, remove and reorder roles, set emoji and
   descriptions, choose who can use them, see which roles are ready, create missing ones, and post menus
-- **Features:** switch on and set up the optional features, the birthday list, and movie watchlists
-- **PCs & failover:** turn failover on, pick the status channel, order the PCs
+- **Features:** switch on and set up the optional features, plus event attendance, the birthday list and
+  the movie watchlists
+- **PCs & failover:** turn failover on, pick the status channel, order the PCs, add a backup PC
+- **Setup:** a checklist of what's done and what's left, a check that Pingwin can reach every channel and
+  role it's been given, and an About page
 - **Logs:** this PC's recent log, live
 
 Long pages have an **On this page** list in the empty space on the left (a **☰ Sections** button on smaller
-screens) to jump to any section, and every section folds up with the ▾ next to its title; each browser
-remembers what you folded. The movie pages work the same way.
+screens) to jump to any section, with **Expand all** and **Collapse all**. Every section folds up with the
+▾ next to its title, and each browser remembers what you folded. The movie pages work the same way.
 
 Every PC running Pingwin has its own dashboard. Changes save to the shared `config.toml`, so they reach
 every PC. The page only answers on that PC (`127.0.0.1:8787`; change it under `[dashboard]`), and
 `open_dashboard.cmd` signs you in with a key kept in the project folder.
 
 **Co-admins** can use it from anywhere too: put it online with Tailscale Funnel and they sign in with
-Discord (Manage Server or a role you pick), with nothing to install.
+Discord (Manage Server or a role you pick), with nothing to install. Members (with the **Friend** role) can
+sign in there too, but only get the movie pages.
 **[Remote dashboard and co-admins](docs/REMOTE-DASHBOARD.md)**. When several people have it open, it shows
 who's where, stops a save that would overwrite someone's newer change, and helps sort out SyncThing
 conflicts.
@@ -105,9 +113,9 @@ conflicts.
 
 | Where | What | Synced? |
 |---|---|---|
-| **Settings folder** (e.g. `SyncThing\Pingwin`) | `config.toml`, `secrets.env` (token), `personas\`, `menus.json` | Yes: same on every PC |
+| **Settings folder** (e.g. `SyncThing\Pingwin`) | `config.toml`, `secrets.env` (token and API keys), `personas\`, `menus.json`, and `state\` (what the features keep: birthdays, watchlists, the movie library, ...) | Yes: same on every PC |
 | **Project folder** `.env` | `PINGWIN_DATA` (path to the settings folder), `PINGWIN_NODE` (this PC's name) | No: one per PC |
-| **Project folder** `logs\`, `.dashboard-key` | Log, dashboard sign-in key | No |
+| **Project folder** `logs\`, `.dashboard-key`, `.dashboard-sessions.json`, `models\` | Log, dashboard sign-in key, Discord sign-ins, the speech-to-text model (if voice ratings are installed) | No |
 | **GitHub** | The code | Pulled by every PC |
 
 ## Running on more than one PC (failover)
@@ -164,7 +172,8 @@ Each feature lives in `src/pingwin/cogs/` as its own module. Anything that runs 
 ## Privacy
 With the default features, Pingwin can't read messages and has no tracking. It keeps a small activity log
 (who opted into which role) on the PC that runs it. The mod log, if you turn it on, can read messages so it
-can record edits and deletes. See the [privacy notice](PRIVACY.md).
+can record deletes (and edits, if you want). Movie night's voice ratings only listen to voice messages sent
+to Pingwin, turn them into text on that PC, and don't keep the recording. See the [privacy notice](PRIVACY.md).
 
 ## License
 MIT

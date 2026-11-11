@@ -5,6 +5,7 @@ import asyncio
 import time
 from types import SimpleNamespace as NS
 
+import discord
 import pytest
 
 from pingwin import movies, store, voicerate
@@ -73,7 +74,10 @@ def voice_message(uid=7, guild=None, ref=None, seconds=6.0, audio=True):
 
 
 def make(heard="Loved it, I'd give it an eight out of ten."):
-    home = NS(get_member=lambda uid: NS(id=uid) if uid in (7, 8) else None)
+    async def fetch_member(uid):  # not in the member list: Discord says they're not in the server
+        raise discord.NotFound(NS(status=404, reason="Not Found"), "Unknown Member")
+
+    home = NS(get_member=lambda uid: NS(id=uid) if uid in (7, 8) else None, fetch_member=fetch_member)
     rated = []
 
     async def after_rating(*a):

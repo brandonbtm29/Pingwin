@@ -178,6 +178,9 @@ next to its own name and *on standby* in the summary.
   is only for reaching a PC's dashboard from elsewhere: if the main PC is off, Pingwin keeps answering in
   Discord from a backup, and only the main PC's dashboard link is down. Install Tailscale on a backup only
   if you want that backup to have a dashboard link of its own.
+- **Voice ratings** (movie night's *Rate by voice message*) need their own install on each PC, and the backup
+  installer doesn't add it. If you use them, run `.venv\Scripts\python -m pip install -e ".[voice]"` in the
+  backup's Pingwin folder too. Without it, a backup that's answering tells people to tap **Rate it** instead.
 - **More PCs:** add more names to the list. Each one waits its turn.
 - **Removing a backup:**
   - On the backup: double-click **`Uninstall-Pingwin.cmd`** in its Pingwin folder. It takes the PC off the
