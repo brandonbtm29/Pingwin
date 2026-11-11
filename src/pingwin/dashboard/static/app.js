@@ -161,7 +161,7 @@ function renderStatus() {
   if (state.update) {
     $("s-update").textContent = state.update.available
       ? "An update is ready. Restart Pingwin to install it."
-      : "Pingwin is up to date.";
+      : state.update.problem ? `⚠️ ${state.update.problem}` : "Pingwin is up to date.";
   }
   const banner = $("standby-banner");
   banner.hidden = state.active || !state.connected;

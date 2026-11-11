@@ -2230,8 +2230,14 @@ async def post_action(request: web.Request) -> web.Response:
             )
         if action == "check_updates":
             available = await updater.update_available(PROJECT_ROOT)
-            bot.update_status = {"available": available, "checked_at": discord.utils.utcnow().isoformat()}
+            bot.update_status = {
+                "available": available,
+                "problem": updater.problem,
+                "checked_at": discord.utils.utcnow().isoformat(),
+            }
             msg = "An update is ready. Restart to install it." if available else "Pingwin is up to date."
+            if not available and updater.problem:
+                msg = updater.problem
             return web.json_response({"message": msg, "available": available})
         if action in ("check_roles", "create_roles"):
             lines = await role_report(

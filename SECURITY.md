@@ -45,8 +45,13 @@ Things that count as security issues here:
   and opening one (like a link preview does) doesn't use it up
 - Voice ratings are turned into text on the PC itself; recordings aren't sent anywhere or kept
 - The token lives outside the repo; CI and the pre-commit hook scan for leaked secrets
+- **Signed updates:** a PC installs an update only if GitHub's newest commit is signed with a key listed in
+  `.github/allowed_signers` (checked against the PC's own copy, so a new commit can't add its own key), and
+  `main` is protected: no force-pushes, no deleting it, and every commit must be signed. Someone who gets
+  into the GitHub account can push, but not sign with the maintainer's key, so the PCs won't run it.
 
 ## Running Pingwin on someone else's PC
 
-Every PC that runs Pingwin holds the bot token, and auto-update runs whatever is pushed to
-`main` on it. Only add PCs (and GitHub collaborators) you trust. If a PC is retired, reset the token.
+Every PC that runs Pingwin holds the bot token and installs signed updates from `main`. Only add PCs (and
+GitHub collaborators, whose keys would also need to be in `.github/allowed_signers`) you trust. If a PC is
+retired, reset the token.

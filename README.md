@@ -145,7 +145,9 @@ Anyone running a backup has the bot token, so only use PCs you trust.
 
 - **Code:** push to GitHub. Every PC checks every 30 minutes (`[updates] check_minutes`), restarts,
   pulls, and reinstalls. For an immediate update on the active PC, run `/pingwin restart`.
-  PCs with uncommitted code changes skip auto-updates.
+  PCs with uncommitted code changes skip auto-updates, and a PC only installs commits signed with a key in
+  `.github/allowed_signers` (see [Signing commits](CONTRIBUTING.md#signing-commits)); the Status tab says
+  when it's holding one back.
 - **Settings:** edit `config.toml` or a persona on one PC. SyncThing copies it, and every Pingwin
   reloads it within a minute. After changing the menu, click *Update posted menus* (or `/pingwin rolemenu refresh`).
 - **Personality:** copy `personas\pingwin.toml` into the settings folder's `personas\`, rename it

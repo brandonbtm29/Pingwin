@@ -54,7 +54,10 @@ where git >nul 2>nul || exit /b 0
 set BEFORE=
 set AFTER=
 for /f %%h in ('git rev-parse HEAD 2^>nul') do set BEFORE=%%h
-git pull --ff-only --quiet 2>nul || call :rewritten
+git fetch --quiet 2>nul || goto update_offline
+rem Only install GitHub's newest commit if it's signed with a trusted key (.github\allowed_signers).
+".venv\Scripts\python.exe" -m pingwin.updater --check-signature || exit /b 0
+git merge --ff-only --quiet @{u} 2>nul || call :rewritten
 for /f %%h in ('git rev-parse HEAD 2^>nul') do set AFTER=%%h
 if not "%BEFORE%"=="%AFTER%" (
     echo Updated to %AFTER:~0,7%. Installing...
@@ -62,15 +65,18 @@ if not "%BEFORE%"=="%AFTER%" (
 )
 exit /b 0
 
+:update_offline
+echo Couldn't fetch updates from GitHub; starting the current version.
+exit /b 0
+
 :rewritten
 rem GitHub's history was rewritten (for example to remove names). Follow it only if this PC's
 rem version is on GitHub's list of replaced commits and nothing was changed here.
-git fetch --quiet 2>nul
 git show @{u}:.github/rewritten-commits.txt 2>nul | findstr /x /c:"%BEFORE%" >nul || goto rewritten_no
 git diff --quiet HEAD 2>nul || goto rewritten_no
 echo GitHub's history was tidied up; switching to it.
 git reset --hard --quiet @{u}
 exit /b 0
 :rewritten_no
-echo Couldn't fetch updates from GitHub; starting the current version.
+echo This PC's code differs from GitHub's, so it can't update by itself; starting the current version.
 exit /b 0

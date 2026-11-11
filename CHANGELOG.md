@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.36.0 (2026-11-11)
+- **Signed updates:** every PC installs an update only if GitHub's newest commit is signed with a key in
+  `.github/allowed_signers` (checked against the PC's own copy). Both the restart-time pull and the regular
+  update check verify it, and the Status tab says why when an update is held back. GitHub now also refuses
+  unsigned commits on `main`. See [Signing commits](CONTRIBUTING.md#signing-commits).
+- New screenshot of the PCs & failover tab.
+
 ## 0.35.0 (2026-11-11)
 A review of the whole bot, its pages and its security:
 - **Security:** secrets.env only sets key names (like `OMDB_API_KEY`) on each PC, never things like

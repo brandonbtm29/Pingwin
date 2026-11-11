@@ -208,6 +208,12 @@ class Pingwin(commands.Bot):
                     log.info("Restarting to install the update")
                     await self.restart()
                     return
+                if updater.problem:  # an update that won't be installed (like an unsigned one): show why
+                    self.update_status = {
+                        "available": False,
+                        "problem": updater.problem,
+                        "checked_at": discord.utils.utcnow().isoformat(),
+                    }
 
             await asyncio.sleep(self.config.failover.heartbeat_seconds + random.uniform(0, 3))
 

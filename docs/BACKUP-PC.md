@@ -47,7 +47,8 @@ add the reply code.
 ## Doing it by hand
 
 Every PC needs two things:
-- **The code**: from GitHub, so it updates itself.
+- **The code**: from GitHub, so it updates itself (only to commits signed with a trusted key; Windows 10 and
+  11 have the `ssh-keygen` that checks them built in).
 - **The shared settings folder**: synced between PCs (this guide uses [SyncThing](https://syncthing.net)).
   It holds `config.toml`, `secrets.env` (the token) and `menus.json`.
 
