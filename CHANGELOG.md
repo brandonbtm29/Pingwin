@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.37.0 (2026-11-13)
+- **The main PC takes the job back right away.** When it comes back, it no longer waits 3 minutes: it asks
+  SyncThing on the same PC whether the backup's changes have arrived and takes over as soon as they have
+  (right away if the backup PC is off). It only waits the 3 minutes if SyncThing can't say.
+- **The backup steps aside at once** when the status message names the main PC, instead of at its next
+  check-in, so both don't answer for up to 30 seconds.
+- The dashboard says what a returning PC is waiting for.
+
 ## 0.36.0 (2026-11-11)
 - **Signed updates:** every PC installs an update only if GitHub's newest commit is signed with a key in
   `.github/allowed_signers` (checked against the PC's own copy). Both the restart-time pull and the regular

@@ -10,7 +10,8 @@ import pytest
 
 from pingwin import failover
 from pingwin.config import FailoverConfig, Node
-from pingwin.failover import WARMUP_SECONDS, Coordinator
+from pingwin.failover import CATCH_UP_TICK, WARMUP_SECONDS, Coordinator
+from pingwin.syncthing import FolderSync
 
 BOT_USER_ID = 1
 
@@ -75,6 +76,12 @@ def make_pc(name, channel):
         return channel
 
     coord._channel = channel_lookup
+    coord.sync = None  # what SyncThing on this PC says (None: no SyncThing, so the 3-minute wait)
+
+    async def folder_sync():
+        return coord.sync
+
+    coord._folder_sync = folder_sync
     return coord
 
 
@@ -302,3 +309,95 @@ def test_second_outage_raises_a_new_alert(world):
         assert len(alerts()) == 2 and all("✅" in a.content for a in alerts())
 
     asyncio.run(scenario())
+
+
+def test_main_takes_back_as_soon_as_syncthing_catches_up(world):
+    clock, channel, main, backup = world
+    run(backup.tick())
+    assert backup.active
+    main.sync = FolderSync(False, "SyncThing has 2 files to bring over", 3600, (600.0,))
+    clock.advance(30)
+    run(main.tick(), backup.tick())  # main is back, but the backup's last changes are still on their way
+    assert backup.active and not main.active
+    assert main.catching_up and main.waiting_for == "SyncThing has 2 files to bring over"
+    main.sync = FolderSync(True, "", 3600, (605.0,))  # ...and now they're here
+    clock.advance(CATCH_UP_TICK)
+    run(main.tick())
+    assert main.active and main.waiting_for == "" and not main.catching_up
+    run(backup.tick())
+    assert not backup.active and len(status(channel)) == 1
+
+
+def test_main_takes_back_at_once_when_the_backup_pc_is_off(world):
+    """This morning's case: the backup PC is off, so nothing can arrive from it. Don't wait 2 minutes."""
+    clock, channel, main, backup = world
+    run(backup.tick())  # the backup was answering, then its PC went to sleep
+    clock.advance(30)
+    main.sync = FolderSync(True, "", 64, ())  # SyncThing has been up a minute and found no other PC
+    run(main.tick())
+    assert main.active
+
+
+def test_main_waits_while_syncthing_looks_for_the_backup(world):
+    clock, channel, main, backup = world
+    run(backup.tick())
+    main.sync = FolderSync(True, "", 20, ())  # SyncThing only just started
+    run(main.tick(), backup.tick())
+    assert backup.active and not main.active and "looking for the other PCs" in main.waiting_for
+    main.sync = FolderSync(True, "", 22, (2.0,))  # found it; give it a moment to swap file lists
+    clock.advance(CATCH_UP_TICK)
+    run(main.tick(), backup.tick())
+    assert backup.active and not main.active
+    main.sync = FolderSync(True, "", 35, (15.0,))
+    clock.advance(CATCH_UP_TICK)
+    run(main.tick())
+    assert main.active
+
+
+def test_backup_steps_aside_the_moment_main_takes_over(world):
+    clock, channel, main, backup = world
+    run(backup.tick())
+    main.sync = FolderSync(True, "", 3600, (600.0,))
+    clock.advance(30)
+    run(main.tick())
+    assert main.active and backup.active  # both, until the backup hears about it...
+    lease = status(channel)[0]
+
+    async def go():
+        backup.lease_edited("hello")  # not a status message
+        main.lease_edited(lease.content)  # its own edit
+        assert not backup._wake.is_set() and not main._wake.is_set()
+        backup.lease_edited(lease.content)  # Discord tells the backup the message now names the main PC
+        assert backup._wake.is_set()
+        await asyncio.wait_for(backup.sleep(30), 1)  # so it doesn't wait out its 30 seconds...
+        await backup.tick()  # ...and steps aside straight away
+        assert not backup.active and main.active
+        backup.lease_edited(lease.content)  # on standby: nothing to do
+        assert not backup._wake.is_set()
+
+    asyncio.run(go())
+
+
+def test_standby_checks_often_only_while_catching_up(world):
+    clock, channel, main, backup = world
+    run(backup.tick())
+    run(main.tick())  # no SyncThing: the 3-minute wait, at the usual pace
+    assert not main.active and main.waiting_for and not main.catching_up
+    main.sync = FolderSync(False, "SyncThing is syncing", 3600, (600.0,))
+    run(main.tick())
+    assert main.catching_up
+    run(backup.tick())
+    assert not backup.catching_up  # the answering PC isn't waiting for anything
+
+
+def test_a_broken_syncthing_check_falls_back_to_the_wait(world):
+    clock, channel, main, backup = world
+    run(backup.tick())
+
+    async def broken():
+        raise RuntimeError("surprise")
+
+    main._folder_sync = broken
+    run(main.tick(), backup.tick())  # main comes back; the check fails, so it doesn't count as caught up
+    assert backup.active and not main.active
+    assert wait_for_takeback(clock, main, backup) == WARMUP_SECONDS

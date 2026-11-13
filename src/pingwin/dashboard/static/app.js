@@ -165,7 +165,9 @@ function renderStatus() {
   }
   const banner = $("standby-banner");
   banner.hidden = state.active || !state.connected;
-  banner.textContent = `This PC is on standby. ${state.leader || "Another PC"} is answering in Discord. You can still change settings here; every PC picks them up.`;
+  banner.textContent = state.taking_back
+    ? `This PC is on standby. ${state.leader || "Another PC"} is answering in Discord until this PC's shared files are in sync (${state.taking_back}), then this PC takes over.`
+    : `This PC is on standby. ${state.leader || "Another PC"} is answering in Discord. You can still change settings here; every PC picks them up.`;
 }
 
 // ---------- role menus -----------------------------------------------------
@@ -464,7 +466,9 @@ function renderPcs() {
       lp.append("This PC (", el("strong", {}, state.node), `) is answering${checkin}. Backups are standing by.`);
     } else {
       lp.append(el("strong", {}, state.leader || "Nobody yet"), ` is answering${checkin}. This PC (`,
-        el("strong", {}, state.node), ") is on standby and takes over if that stops.");
+        el("strong", {}, state.node), state.taking_back
+          ? `) takes over as soon as its shared files are in sync: ${state.taking_back}.`
+          : ") is on standby and takes over if that stops.");
     }
   }
 

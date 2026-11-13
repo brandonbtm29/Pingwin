@@ -2,7 +2,8 @@
 
 A backup PC keeps Pingwin running when the main PC is off or its internet is down. Every PC runs
 Pingwin, but only one answers at a time. If the answering PC stops checking in for 2 minutes, the next
-PC in the list takes over. When the main PC comes back, it takes the job back.
+PC in the list takes over. When the main PC comes back, it takes the job back as soon as SyncThing has
+brought it the backup's latest changes (usually within seconds), and the backup steps aside right away.
 
 A backup helps most when it's in **a different place on a different internet connection**, like a
 friend's house.
@@ -161,8 +162,8 @@ next to its own name and *on standby* in the summary.
 2. Wait about 2 minutes. The backup's window should say
    `ACTIVE on FRIENDS-PC: took over from MAIN-PC (it went quiet)`, and the message in **#pingwin-status**
    should name the backup. Try a button in your role menu: it still works.
-3. Start Pingwin on the main PC again. Within about 30 seconds it takes the job back
-   (`took over from FRIENDS-PC (this PC is earlier in the list)`), and the backup returns to standby.
+3. Start Pingwin on the main PC again. As soon as its SyncThing folder is up to date, it takes the job back
+   (`took over from FRIENDS-PC (this PC is earlier in the list)`), and the backup returns to standby at once.
 
 ## Good to know
 
@@ -182,6 +183,11 @@ next to its own name and *on standby* in the summary.
 - **Voice ratings** (movie night's *Rate by voice message*) need their own install on each PC, and the backup
   installer doesn't add it. If you use them, run `.venv\Scripts\python -m pip install -e ".[voice]"` in the
   backup's Pingwin folder too. Without it, a backup that's answering tells people to tap **Rate it** instead.
+- **Taking the job back.** A PC higher in the list waits only until the backup's changes to the shared
+  folder have reached it, so it doesn't pick up where things were before. It asks SyncThing on the same PC
+  (read-only, through SyncThing's local API). If the backup PC is off, there's nothing to wait for. If
+  SyncThing can't say (for example, it isn't running), it waits 3 minutes instead. Meanwhile its dashboard
+  says what it's waiting for.
 - **More PCs:** add more names to the list. Each one waits its turn.
 - **Removing a backup:**
   - On the backup: double-click **`Uninstall-Pingwin.cmd`** in its Pingwin folder. It takes the PC off the

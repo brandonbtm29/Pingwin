@@ -122,7 +122,8 @@ conflicts.
 
 Every PC connects to Discord, but only one answers at a time. The active PC checks in every 30 s by
 editing a status message in a mod-only channel. If check-ins stop for 2 minutes, the next PC in the
-list takes over. When a PC higher in the list comes back, it takes the job back.
+list takes over. When a PC higher in the list comes back, it takes the job back as soon as SyncThing has
+brought its copy of the shared folder up to date.
 
 1. Make a mod-only channel such as `#pingwin-status`, and let Pingwin view and post in it.
 2. In `config.toml`, list the PCs in order of preference:

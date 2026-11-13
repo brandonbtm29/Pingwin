@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pingwin"
-version = "0.36.0"
+version = "0.37.0"
 description = "A friendly, self-hosted Discord bot for friends' servers: opt-in ping roles, movie nights, birthdays, event reminders, game days and stream alerts."
 readme = "README.md"
 license = "MIT"

@@ -6,8 +6,9 @@ commands. The others wait on *standby* and stay quiet.
 The active PC checks in by editing a status message in a mod-only channel
 (the "lease"). If check-ins stop for `takeover_after_seconds` (PC off,
 internet down, crashed), the next PC in `[failover] pcs` takes over. A PC
-earlier in that list takes the job back once it has been online for
-WARMUP_SECONDS, so SyncThing can bring its copy of state/ up to date first.
+earlier in that list takes the job back as soon as SyncThing says its copy of
+the shared folder has caught up with what the backup wrote (see
+files_caught_up), and the backup steps aside the moment it sees that.
 
 A lease counts as gone quiet when this PC has seen the very same message,
 unedited, for `takeover_after_seconds` by its own monotonic clock. The PCs'
@@ -16,6 +17,7 @@ clocks are never compared, so it doesn't matter if they disagree.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -26,7 +28,9 @@ from typing import TYPE_CHECKING
 
 import discord
 
-from .config import FailoverConfig, Node
+from . import syncthing
+from .config import FailoverConfig, Node, data_dir
+from .syncthing import FolderSync
 
 if TYPE_CHECKING:
     from .bot import Pingwin
@@ -44,9 +48,13 @@ ALERT_HEADER = "⚠️ **Pingwin backup alert**"
 _ALERT_LINE = re.compile(r"^-# alert:(\{.*\})\s*$", re.MULTILINE)
 CHECKIN_EVERY = 30 * 60
 QUIET_AFTER = 65 * 60  # two missed check-ins (plus a little slack) before an alert
-# A PC that comes back (started, woke up, internet back) waits this long online before taking the job back from
-# a lower-ranked PC that's still checking in, so SyncThing can deliver what that PC wrote to state/ meanwhile.
+# A PC that comes back (started, woke up, internet back) takes the job back from a lower-ranked PC that's still
+# checking in as soon as SyncThing has delivered what that PC wrote to state/ (see files_caught_up). If SyncThing
+# can't tell us, it waits this long online instead. It's also the longest it ever waits.
 WARMUP_SECONDS = 3 * 60
+SYNC_SETTLE = 10  # a fresh SyncThing connection gets this long to swap file lists before "nothing to download" counts
+FIND_PEERS = 60  # with no other PC connected, how long SyncThing gets to find one before there's nothing to wait for
+CATCH_UP_TICK = 5  # seconds between checks while waiting to take the job back
 
 
 @dataclass(frozen=True)
@@ -133,13 +141,39 @@ def quiet_pcs(pcs: list[str], me: str, checkins: dict[str, datetime], now: datet
     return out
 
 
+def files_caught_up(sync: FolderSync | None, online_for: float, resumed: bool) -> tuple[bool, str]:
+    """Has this PC's copy of the shared folder caught up, so it can take the job back? Returns (yes, what it's
+    still waiting for).
+
+    sync: what SyncThing on this PC says (None: it couldn't tell, so wait WARMUP_SECONDS).
+    online_for: seconds this PC has been online without a gap.
+    resumed: it came back from a gap (asleep, internet down), so SyncThing connections from before then may be
+    dead and don't count.
+    """
+    if online_for >= WARMUP_SECONDS:
+        return True, ""
+    if sync is None:
+        return False, f"waiting {WARMUP_SECONDS // 60} minutes for shared files to sync"
+    if not sync.idle:
+        return False, sync.waiting_for
+    peers = [age for age in sync.peers if not resumed or age <= online_for]
+    if any(age < SYNC_SETTLE for age in peers):
+        return False, "SyncThing just connected to another PC and is checking for new files"
+    if peers:
+        return True, ""  # connected, file lists swapped, and nothing left to download
+    searched = min(sync.uptime, online_for) if resumed else sync.uptime
+    if searched >= FIND_PEERS:
+        return True, ""  # no other PC is connected to send anything, so there's nothing to wait for
+    return False, "SyncThing is looking for the other PCs"
+
+
 def should_lead(
-    lease: Lease | None, me: Node, quiet_for: float, cfg: FailoverConfig, *, warmed_up: bool = True
+    lease: Lease | None, me: Node, quiet_for: float, cfg: FailoverConfig, *, caught_up: bool = True
 ) -> bool:
     """Decide whether this PC should be the active one.
 
     quiet_for: how long this PC has seen the lease go without a check-in, by its own monotonic clock.
-    warmed_up: this PC has been online for WARMUP_SECONDS, so its shared files have had time to sync.
+    caught_up: this PC's shared files have synced (files_caught_up), so it can take the job back.
     """
     if lease is None:
         return True  # nobody has ever claimed it
@@ -147,8 +181,8 @@ def should_lead(
         return True  # it's us: keep renewing
     if quiet_for > cfg.takeover_after_seconds:
         return True  # the active PC went quiet
-    # We're earlier in the list: take it back, but only once our copy of state/ has had time to catch up.
-    return warmed_up and cfg.rank(me.name) < cfg.rank(lease.node)
+    # We're earlier in the list: take it back, but only once our copy of state/ has caught up.
+    return caught_up and cfg.rank(me.name) < cfg.rank(lease.node)
 
 
 class Coordinator:
@@ -172,6 +206,11 @@ class Coordinator:
         self._lease_changed_at = 0.0
         self._online_since: float | None = None  # time.monotonic() since we've been reaching Discord without a gap
         self._last_online: tuple[float, float] | None = None  # (time.monotonic(), time.time()) of the last scan
+        self._resumed = False  # we've been offline since starting (asleep, internet down)
+        self.waiting_for = ""  # while waiting to take the job back: what for (shown on the dashboard)
+        self._check_soon = False  # ...and SyncThing can tell us when it's done, so check every few seconds
+        self._wake = asyncio.Event()  # set when another PC takes the job from us: check now (see lease_edited)
+        self._folder_sync = lambda: syncthing.folder_sync(data_dir())
 
     async def tick(self) -> None:
         cfg = self.bot.config.failover
@@ -181,7 +220,7 @@ class Coordinator:
             self.leader = self.bot.node.name
             return
         if not self.bot.gateway_connected:
-            self._online_since = None
+            self._went_offline()
             self._check_stale()
             return
 
@@ -195,10 +234,26 @@ class Coordinator:
         current = messages[0] if messages else None
         lease = parse_lease(current.content, current.edited_at or current.created_at) if current else None
         now = discord.utils.utcnow()
-        warmed_up = self._note_online()
+        online_for = self._note_online()
         quiet_for = self._lease_quiet_for(current)
+        caught_up, self.waiting_for, self._check_soon = True, "", False
+        me = self.bot.node.name
+        if (
+            lease is not None
+            and lease.node.casefold() != me.casefold()
+            and cfg.rank(me) < cfg.rank(lease.node)
+            and quiet_for <= cfg.takeover_after_seconds
+        ):  # a backup is answering and we're back: ask SyncThing whether its changes have reached us
+            try:
+                sync = await self._folder_sync()
+            except Exception:  # never let this keep us from taking the job back: wait the old way instead
+                log.exception("Couldn't check SyncThing; waiting %d minutes instead", WARMUP_SECONDS // 60)
+                sync = None
+            caught_up, why = files_caught_up(sync, online_for, self._resumed)
+            self.waiting_for = "" if caught_up else why
+            self._check_soon = not caught_up and sync is not None  # SyncThing can say when: keep asking
 
-        if should_lead(lease, self.bot.node, quiet_for, cfg, warmed_up=warmed_up):
+        if should_lead(lease, self.bot.node, quiet_for, cfg, caught_up=caught_up):
             if not self.active or self.active_since is None:
                 self.active_since = now
             content = render_lease(self.bot.node, cfg.describe(self.bot.node.name), self.active_since, now)
@@ -224,23 +279,53 @@ class Coordinator:
             self.leader = lease.node
             self.last_lease = lease
             reason = f"{lease.node} is active"
-            if cfg.rank(self.bot.node.name) < cfg.rank(lease.node):
-                reason += f"; this PC takes over after {WARMUP_SECONDS // 60} minutes online, once shared files sync"
+            if self.waiting_for:
+                reason += f"; this PC takes over once its shared files are in sync ({self.waiting_for})"
             self._set_active(False, reason)
             await self._check_in(channel, checkins, now)
 
-    def _note_online(self) -> bool:
-        """Called after each successful look at the status channel. True once this PC has been online, without
-        a gap long enough for a backup to have taken over (asleep, internet down), for WARMUP_SECONDS."""
+    def _note_online(self) -> float:
+        """Called after each successful look at the status channel. Returns how long this PC has been online
+        without a gap long enough for a backup to have taken over (asleep, internet down)."""
         mono, wall = time.monotonic(), time.time()
         if self._last_online is not None:
             gap = max(mono - self._last_online[0], wall - self._last_online[1])  # monotonic may skip sleep
             if gap > self.bot.config.failover.heartbeat_seconds * 2 + 10:
-                self._online_since = None
+                self._went_offline()
         self._last_online = (mono, wall)
         if self._online_since is None:
             self._online_since = mono
-        return mono - self._online_since >= WARMUP_SECONDS
+        return mono - self._online_since
+
+    def _went_offline(self) -> None:
+        """We couldn't reach Discord for a while: catch up on shared files again before taking the job back."""
+        if self._online_since is not None:
+            self._resumed = True
+        self._online_since = None
+
+    @property
+    def catching_up(self) -> bool:
+        """On standby, waiting for SyncThing to finish before taking the job back."""
+        return self._check_soon and not self.active
+
+    async def sleep(self, seconds: float) -> None:
+        """Wait until the next check: `seconds`, every few seconds while catching up to take the job back, or
+        no longer than it takes Discord to tell us another PC has taken the job from us."""
+        if self.catching_up:
+            seconds = min(seconds, CATCH_UP_TICK)
+        try:
+            await asyncio.wait_for(self._wake.wait(), seconds)
+        except TimeoutError:
+            pass
+        self._wake.clear()
+
+    def lease_edited(self, content: str) -> None:
+        """The status message was edited (Discord tells every PC at once). If another PC took the job from us,
+        check now and step aside, instead of answering alongside it until our next check-in."""
+        lease = parse_lease(content, discord.utils.utcnow())
+        if self.active and lease is not None and lease.node.casefold() != self.bot.node.name.casefold():
+            log.info("%s took over the status message; checking now", lease.node)
+            self._wake.set()
 
     def _lease_quiet_for(self, current: discord.Message | None) -> float:
         """Seconds the lease message has stayed exactly the same, by this PC's monotonic clock."""
@@ -302,7 +387,7 @@ class Coordinator:
             self._set_active(False, "couldn't check in with Discord; a backup has likely taken over")
 
     async def after_error(self) -> None:
-        self._online_since = None  # couldn't reach Discord properly: warm up again before taking the job back
+        self._went_offline()  # couldn't reach Discord properly: catch up again before taking the job back
         self._check_stale()
 
     async def _channel(self, channel_id: int | None) -> discord.abc.Messageable | None:

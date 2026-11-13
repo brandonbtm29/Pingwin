@@ -190,6 +190,12 @@ class Pingwin(commands.Bot):
     async def on_pingwin_active(self) -> None:
         await self.apply_nickname()
 
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
+        """An edit to the failover status message: if another PC just took the job, step aside right away."""
+        cfg = self.config.failover
+        if cfg.active and payload.channel_id == cfg.status_channel_id:
+            self.coordinator.lease_edited(str((payload.data or {}).get("content") or ""))
+
     # ----- housekeeping loop ---------------------------------------------
     async def _housekeeping(self) -> None:
         next_update_check = time.monotonic() + 120
@@ -215,7 +221,7 @@ class Pingwin(commands.Bot):
                         "checked_at": discord.utils.utcnow().isoformat(),
                     }
 
-            await asyncio.sleep(self.config.failover.heartbeat_seconds + random.uniform(0, 3))
+            await self.coordinator.sleep(self.config.failover.heartbeat_seconds + random.uniform(0, 3))
 
     async def restart(self) -> None:
         self.exit_code = EXIT_RESTART

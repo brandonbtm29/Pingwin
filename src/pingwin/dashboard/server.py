@@ -626,6 +626,8 @@ def build_state(bot: Pingwin) -> dict[str, Any]:
         "leader": coord.leader,
         "lease_node": lease.node if lease else None,
         "lease_age": round(lease.age(now)) if lease else None,
+        # On standby, waiting for shared files to sync before taking the job back: what for.
+        "taking_back": (getattr(coord, "waiting_for", "") or None) if not bot.is_active else None,
         "connected": bot.gateway_connected,
         "latency_ms": round(latency * 1000) if latency and math.isfinite(latency) else None,
         "started_at": bot.started_at.isoformat(),

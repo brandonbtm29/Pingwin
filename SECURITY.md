@@ -45,6 +45,9 @@ Things that count as security issues here:
   and opening one (like a link preview does) doesn't use it up
 - Voice ratings are turned into text on the PC itself; recordings aren't sent anywhere or kept
 - The token lives outside the repo; CI and the pre-commit hook scan for leaked secrets
+- To know when the shared folder is in sync (before taking the job back from a backup), Pingwin reads
+  SyncThing's API key from SyncThing's settings on the same PC and only asks SyncThing's local API for the
+  folder's status, checking SyncThing's own certificate. It never changes SyncThing or logs the key
 - **Signed updates:** a PC installs an update only if GitHub's newest commit is signed with a key listed in
   `.github/allowed_signers` (checked against the PC's own copy, so a new commit can't add its own key), and
   `main` is protected: no force-pushes, no deleting it, and every commit must be signed. Someone who gets
