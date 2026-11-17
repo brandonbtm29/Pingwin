@@ -229,7 +229,7 @@ Passing `hours` still overrides it.
 | `/pingwin movie page` | The movie pages: the view-only link and your own sign-in link |
 | `/pingwin movie queue series` | Where a franchise series is up to |
 | `/pingwin movie franchise series` | Movie mods: line up a franchise's movies |
-| `/pingwin movie poll series [hours] [question] [ranked]` | Start a poll and ping the series' role, in *Polls go to* (or the series' channel). Pick its movies from the watchlist, type them in with **Type movies**, or both, then **Post poll**; typed movies join the watchlist. `ranked` for a ranked-choice poll; the default is the series' *Ranked polls* box |
+| `/pingwin movie poll series [hours] [question] [ranked]` | Start a poll and ping the series' role, in *Polls go to* (or the series' channel). Pick its movies from the watchlist, type them in with **Type movies** (one per line), or both, up to 10, then **Post poll**; typed movies join the watchlist. The dashboard's **Movie watchlists** panel (Features → Movie night) has a **Start a poll** button that does the same. `ranked` for a ranked-choice poll; the default is the series' *Ranked polls* box |
 | `/pingwin movie endpoll series` | End the running poll now |
 | `/pingwin movie skip series [weeks] [starting] [reason]` | Movie mods: skip showings (a week off, or a break between franchises; up to 26). `starting` is a date like `11/13`, `Nov 13` or `friday` (default the next showing) |
 | `/pingwin movie unskip series` | Movie mods: end a break early |

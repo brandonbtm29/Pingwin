@@ -818,6 +818,7 @@ p.center { text-align: center; }
 #n-box label.check input { width: auto; margin: 0; }
 @media (max-width: 760px) { .n-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .n-grid .n-title { grid-column: 1 / -1; } }
 label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; }
+label.check input[type="checkbox"] { width: auto; flex: none; margin: 0; }
 #rv-guest-wrap .hint { font-size: .78rem; }
 
 /* movie nights noticed in voice */
@@ -841,6 +842,12 @@ label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; 
 .w-watched li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: .9rem; }
 .w-sum { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
 .w-sum li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.w-sum li .btn.small { margin-left: auto; }
+.poll-picks { max-height: 16rem; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 2px 10px; margin-bottom: 10px; }
+.poll-picks label.check { margin: 6px 0; }
+.poll-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+.poll-row > label:not(.check) { flex: 1 1 10rem; }
+.poll-row > label.check { margin: 0 0 1.4rem; }
 
 /* movie night schedule and breaks */
 .schedule { display: grid; gap: 6px; margin-bottom: 12px; font-size: .92rem; }

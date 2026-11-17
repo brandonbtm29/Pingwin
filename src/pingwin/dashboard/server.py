@@ -746,15 +746,23 @@ async def get_watchlist(request: web.Request) -> web.Response:
                 "key": slug(s.name),
                 "nominations": data.get("nominations", []),
                 "open_poll": any(p.get("status") == "open" for p in data.get("polls", [])),
+                "ranked": bool(getattr(s, "ranked", False)),
+                "showtime": getattr(s, "showtime", "") or "",
             }
         )
-    return web.json_response({"series": series})
+    from ..cogs.movienight import POLL_MAX
+
+    return web.json_response(
+        {"series": series, "poll_max": POLL_MAX, "can_post": bool(bot.is_active), "leader": bot.coordinator.leader}
+    )
 
 
 async def post_watchlist(request: web.Request) -> web.Response:
     from .. import store
 
     payload = await read_json(request)
+    if payload.get("action") == "poll":
+        return await _start_movie_poll(request, payload)
     key, nom_id, action = _str(payload, "series", 60), _str(payload, "id", 20), _str(payload, "action", 20)
     state = store.load("movienight")
     noms = state.get(key, {}).get("nominations", [])
@@ -769,6 +777,39 @@ async def post_watchlist(request: web.Request) -> web.Response:
         raise ApiError("Unknown action")
     store.save("movienight", state)
     return web.json_response({"ok": True})
+
+
+async def _start_movie_poll(request: web.Request, payload: dict[str, Any]) -> web.Response:
+    """Post a movie poll from the dashboard: watchlist movies (by id) and typed ones, one per line."""
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    cog = _movie_cog(bot)
+    if cog is None:
+        raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+    if not bot.is_active:  # only the answering PC posts
+        where = bot.coordinator.leader or "the answering PC"
+        raise ApiError(f"This PC is on standby. Start the poll from {where}'s dashboard, or in Discord.", 409)
+    s = cog.series(_str(payload, "series", 60))
+    if s is None:
+        raise ApiError("Pick a series.")
+    raw_ids = payload.get("ids", [])
+    ids = [i[:20] for i in raw_ids if isinstance(i, str)][:50] if isinstance(raw_ids, list) else []
+    hours = None if payload.get("hours") in (None, "") else _int(payload, "hours", 24, 1, 768)
+    ranked = payload.get("ranked")
+    try:
+        msg = await cog.poll_from_dashboard(
+            s,
+            ids,
+            _str(payload, "typed", 3000),
+            hours,
+            _str(payload, "question", 300),
+            ranked if isinstance(ranked, bool) else None,
+            int(viewer.user_id or 0),
+        )
+    except ValueError as e:
+        raise ApiError(str(e)) from None
+    log.info("Movie poll started from the dashboard (%s): %s", viewer.name, s.name)
+    return web.json_response({"ok": True, "message": msg})
 
 
 async def get_setup(request: web.Request) -> web.Response:

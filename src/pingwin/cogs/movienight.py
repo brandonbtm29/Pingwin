@@ -142,6 +142,7 @@ def _same_title(item: dict[str, Any], title: str, year: Any) -> bool:
     return movies.norm(item.get("title") or "") == movies.norm(title or "") and _same_year(item, year) is not None
 
 
+POLL_MAX = 10  # a Discord poll holds 10 answers; hand-picked polls can use them all
 TYPED_YEAR = re.compile(r"\s*\((\d{4})\)\s*$")
 
 
@@ -2770,6 +2771,58 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         }
         return (await self.submit("nominate", s.name, data, member)) + note
 
+    async def look_up_typed(self, text: str) -> tuple[list[dict[str, Any]], list[str]]:
+        """Movies typed one per line, looked up for their proper title and year. Returns (movies, the lines
+        that couldn't be found: IMDb links with no title that OMDb doesn't know)."""
+        found: list[dict[str, Any]] = []
+        missed: list[str] = []
+        for line in (text or "").splitlines()[: POLL_MAX * 2]:
+            t = parse_typed_movie(line)
+            if t is None:
+                continue
+            m = await self.details(t["title"], t["year"], t["imdb_id"])
+            if m:
+                t = {"title": m["title"], "year": m.get("year") or t["year"], "movie_id": m["id"]}
+            elif not t["title"]:
+                missed.append(t["imdb_id"])
+                continue
+            if not any(_same_title(x, t["title"], t.get("year")) for x in found):
+                found.append(t)
+        return found, missed
+
+    async def poll_from_dashboard(
+        self, s, ids: list[str], typed: str, hours: int | None, question: str, ranked: bool | None, by: int
+    ) -> str:
+        """Start a poll from the dashboard: watchlist movies by id plus typed ones (added to the watchlist).
+        Raises ValueError with what to fix."""
+        data = self._data(store.load(STATE), s)
+        if any(p["status"] == "open" for p in data["polls"]):
+            raise ValueError(f"There's already a {s.name} poll running. End it first.")
+        unwatched = {n["id"]: n for n in data["nominations"] if not n.get("watched")}
+        picks = [unwatched[i] for i in dict.fromkeys(ids) if i in unwatched]
+        found, missed = await self.look_up_typed(typed)
+        if missed:
+            raise ValueError("Couldn't find " + ", ".join(missed) + ". Type the title instead.")
+        new = []
+        for t in found:
+            n = next((n for n in unwatched.values() if _same_title(n, t["title"], t.get("year"))), None)
+            if n is None:
+                new.append(t)
+            elif all(n["id"] != p["id"] for p in picks):
+                picks.append(n)
+        total = len(picks) + len(new)
+        if not 2 <= total <= POLL_MAX:
+            raise ValueError(f"Pick 2 to {POLL_MAX} movies (that's {total}).")
+        picks += [self.add_to_watchlist(s, t, by) for t in new]
+        closes, hours = self.poll_timing(s, hours)
+        ranked = bool(getattr(s, "ranked", False)) if ranked is None else ranked
+        msg, problem = await self.post_poll(
+            s, picks, hours, question or f"{s.name}: what should we watch?", closes, ranked, by=by
+        )
+        if problem:
+            raise ValueError(problem)
+        return f"Poll posted in #{msg.channel.name} with {total} movies."
+
     def add_to_watchlist(self, s, data: dict[str, Any], by: int) -> dict[str, Any]:
         """Put a movie typed for a poll on the series' watchlist (or find it there already), straight away: whoever
         starts a poll may pick its movies. Returns its watchlist entry."""
@@ -3005,13 +3058,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             )
             return
         unwatched = [n for n in data["nominations"] if not n.get("watched")]
-        closes, hours = poll_close(
-            getattr(s, "showtime", ""),
-            datetime.now(self.bot.features.tz),
-            hours,
-            self.cfg.poll_hours,
-            self.series_breaks(s),
-        )
+        closes, hours = self.poll_timing(s, hours)
         question = question or f"{s.name}: what should we watch?"
         ranked = bool(getattr(s, "ranked", False)) if ranked is None else ranked
         if self.cfg.pick == "choose" or len(unwatched) < 2:  # pick from the watchlist, type movies, or both
@@ -3109,6 +3156,16 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         return p
 
     # ------------------------------------------------------------ polls
+    def poll_timing(self, s, hours: int | None) -> tuple[datetime, int]:
+        """When a new poll for this series closes, and its length in hours (see poll_close)."""
+        return poll_close(
+            getattr(s, "showtime", ""),
+            datetime.now(self.bot.features.tz),
+            hours,
+            self.cfg.poll_hours,
+            self.series_breaks(s),
+        )
+
     async def start_poll(
         self,
         interaction: discord.Interaction,
@@ -3119,16 +3176,39 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         closes: datetime | None = None,
         ranked: bool = False,
     ) -> discord.Message | None:
+        """Post a poll for a slash command or its menu; a problem goes back to whoever ran it."""
+        msg, problem = await self.post_poll(
+            s, picks, hours, question, closes, ranked, by=interaction.user.id, fallback=interaction.channel
+        )
+        if problem:
+            await interaction.followup.send(problem, ephemeral=True)
+        return msg
+
+    async def post_poll(
+        self,
+        s,
+        picks: list[dict],
+        hours: int,
+        question: str,
+        closes: datetime | None = None,
+        ranked: bool = False,
+        *,
+        by: int = 0,
+        fallback=None,
+    ) -> tuple[discord.Message | None, str]:
+        """Post a movie poll (from Discord or the dashboard). Returns (the message, "") or (None, what went wrong)."""
         # The polls channel when there is one (like #polls), else the series' own channel.
         channel = (
             self.bot.text_channel(getattr(self.cfg, "polls_channel", None))
             or self.bot.text_channel(s.channel)
-            or interaction.channel
+            or fallback
         )
+        if channel is None:
+            return None, f"There's no channel to post it in: set *Polls go to* or the {s.name} channel."
         closes = closes or discord.utils.utcnow() + timedelta(hours=hours)
         early = closes < discord.utils.utcnow() + timedelta(hours=hours) - timedelta(minutes=1)
         if ranked:
-            return await self._start_ranked(interaction, s, channel, picks, question, closes, early)
+            return await self._start_ranked(s, channel, picks, question, closes, early, by)
         poll = discord.Poll(question=question[:300], duration=timedelta(hours=hours), multiple=self.cfg.multiple)
         for n in picks:
             t = n["title"] + (f" ({n['year']})" if n.get("year") else "")
@@ -3143,8 +3223,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False),
             )
         except discord.HTTPException as e:
-            await interaction.followup.send(f"Couldn't post the poll in #{channel.name}: {e.text or e}", ephemeral=True)
-            return None
+            return None, f"Couldn't post the poll in #{channel.name}: {e.text or e}"
         state = store.load(STATE)
         self._data(state, s)["polls"].append(
             {
@@ -3154,15 +3233,15 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 "ends": closes.astimezone(discord.utils.utcnow().tzinfo).isoformat(),
                 "end_early": early,
                 "status": "open",
-                "by": interaction.user.id,
+                "by": by,
             }
         )
         store.save(STATE, state)
         log.info("%s poll started with %d movies", s.name, len(picks))
-        return msg
+        return msg, ""
 
     # ------------------------------------------------------------ ranked-choice polls
-    async def _start_ranked(self, interaction, s, channel, picks, question, closes, early) -> discord.Message | None:
+    async def _start_ranked(self, s, channel, picks, question, closes, early, by) -> tuple[discord.Message | None, str]:
         """A ranked-choice poll: Pingwin's own message with a Vote button (Discord polls can't rank)."""
         pid = secrets.token_hex(4)
         record = {
@@ -3177,7 +3256,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             "ends": closes.astimezone(discord.utils.utcnow().tzinfo).isoformat(),
             "created": discord.utils.utcnow().isoformat(),
             "status": "open",
-            "by": interaction.user.id,
+            "by": by,
         }
         role = self.bot.role_named(channel.guild, s.role)
         ts = int(closes.timestamp())
@@ -3192,14 +3271,13 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
                 allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False),
             )
         except discord.HTTPException as e:
-            await interaction.followup.send(f"Couldn't post the poll in #{channel.name}: {e.text or e}", ephemeral=True)
-            return None
+            return None, f"Couldn't post the poll in #{channel.name}: {e.text or e}"
         record["message_id"] = msg.id
         state = store.load(STATE)
         self._data(state, s)["polls"].append(record)
         store.save(STATE, state)
         log.info("%s ranked poll started with %d options", s.name, len(picks))
-        return msg
+        return msg, ""
 
     def ranked_embed(self, s, p: dict[str, Any], result: dict[str, Any] | None = None) -> discord.Embed:
         """The poll message: each option's first-choice votes so far, or once closed the final count and how
@@ -3484,26 +3562,23 @@ def _movie_label(n: dict[str, Any]) -> str:
 
 
 class TypeMoviesModal(discord.ui.Modal, title="Type movies for the poll"):
-    """Up to five movies typed by name (a form holds five boxes); open it again to change or add more."""
+    """Movies typed one per line (as many as the poll holds); open it again to change or add more."""
 
     def __init__(self, picker: ChooseView) -> None:
         super().__init__(timeout=600)
         self.picker = picker
-        shown = [_movie_label(t) for t in picker.typed]
-        self.boxes = []
-        for i in range(5):
-            box = discord.ui.TextInput(
-                label=f"Movie {i + 1}",
-                required=False,
-                max_length=150,
-                placeholder="Title, or with the year: Alien (1979). An IMDb link works too.",
-                default=shown[i] if i < len(shown) else None,
-            )
-            self.boxes.append(box)
-            self.add_item(box)
+        self.box = discord.ui.TextInput(
+            label=f"Movies, one per line (up to {picker.limit})",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=2000,
+            placeholder="Alien (1979)\nBrazil\nhttps://www.imdb.com/title/tt0078748/",
+            default="\n".join(_movie_label(t) for t in picker.typed) or None,
+        )
+        self.add_item(self.box)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await self.picker.typed_in(interaction, [b.value for b in self.boxes])
+        await self.picker.typed_in(interaction, self.box.value)
 
 
 class ChooseView(discord.ui.View):
@@ -3536,7 +3611,7 @@ class ChooseView(discord.ui.View):
         self.cog, self.s, self.hours, self.question, self.owner = cog, s, hours, question, owner
         self.closes, self.ranked = closes, ranked
         self.noms = {n["id"]: n for n in unwatched}
-        self.limit = max(2, min(cog.cfg.poll_options, 10))  # a Discord poll holds 10 answers
+        self.limit = POLL_MAX  # picked by hand: as many as Discord allows (How many is for oldest/random)
         self.chosen: list[str] = []  # watchlist movies picked (ids)
         self.typed: list[dict[str, Any]] = []  # typed movies that aren't on the watchlist yet
         self.missed: list[str] = []  # typed lines that couldn't be found
@@ -3602,27 +3677,18 @@ class ChooseView(discord.ui.View):
             return
         await interaction.response.send_modal(TypeMoviesModal(self))
 
-    async def typed_in(self, interaction: discord.Interaction, texts: list[str]) -> None:
+    async def typed_in(self, interaction: discord.Interaction, text: str) -> None:
         """The form came back: look each movie up (for its proper title and year), and use the watchlist's own
         entry when it's already there."""
         await interaction.response.defer()  # looking movies up can take a few seconds
-        self.typed, self.missed = [], []
-        for text in texts:
-            t = parse_typed_movie(text)
-            if t is None:
-                continue
-            m = await self.cog.details(t["title"], t["year"], t["imdb_id"])
-            if m:
-                t = {"title": m["title"], "year": m.get("year") or t["year"], "movie_id": m["id"]}
-            elif not t["title"]:
-                self.missed.append(t["imdb_id"])
-                continue
+        found, self.missed = await self.cog.look_up_typed(text)
+        self.typed = []
+        for t in found:
             n = next((n for n in self.noms.values() if _same_title(n, t["title"], t.get("year"))), None)
-            if n is not None:
-                if n["id"] not in self.chosen:
-                    self.chosen.append(n["id"])
-            elif not any(_same_title(x, t["title"], t.get("year")) for x in self.typed):
+            if n is None:
                 self.typed.append(t)
+            elif n["id"] not in self.chosen:
+                self.chosen.append(n["id"])
         await interaction.edit_original_response(content=self.render(), view=self)
 
     async def post(self, interaction: discord.Interaction) -> None:

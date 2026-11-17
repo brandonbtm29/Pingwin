@@ -380,7 +380,17 @@ SECTIONS: list[dict[str, Any]] = [
                 group="Polls",
                 half=True,
             ),
-            F("poll_options", "number", "How many (2-10)", 10, min=2, max=10, group="Polls", half=True),
+            F(
+                "poll_options",
+                "number",
+                "How many Pingwin picks (2-10)",
+                10,
+                "For oldest or random. Picking by hand allows up to 10.",
+                min=2,
+                max=10,
+                group="Polls",
+                half=True,
+            ),
             F(
                 "poll_hours",
                 "number",

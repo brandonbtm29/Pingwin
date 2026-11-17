@@ -950,11 +950,65 @@ async function loadWatchlist() {
     el("ul", { class: "w-sum" }, data.series.map((s) => {
       const waiting = s.nominations.filter((n) => !n.watched).length;
       return el("li", {}, el("strong", {}, s.name), el("span", { class: "hint" }, `${waiting} waiting`),
-        s.open_poll ? el("span", { class: "tag live" }, "poll running") : null);
+        s.open_poll ? el("span", { class: "tag live" }, "poll running")
+          : el("button", { class: "btn small", type: "button", onclick: () => pollDialog(s, data) }, "🗳️ Start a poll"));
     })),
     el("p", { class: "hint" }, "Posters, who suggested what, and the buttons to mark a movie watched, move it to another list or remove it are on the movie pages. Movie Mods can use them too."),
     el("div", { class: "row-actions" }, el("a", { class: "btn", href: "/movies#watchlists", target: "_blank", rel: "noreferrer" }, "🍿 Open the watchlists ↗")));
 }
+
+// A movie poll from the dashboard: tick watchlist movies and/or type some, one per line. Typed ones are looked up
+// and added to the watchlist when the poll is posted (the same as /pingwin movie poll's Type movies).
+function pollDialog(series, data) {
+  const d = $("d-poll");
+  const max = data.poll_max || 10;
+  const waiting = series.nominations.filter((n) => !n.watched).sort((a, b) => (a.added > b.added) - (a.added < b.added));
+  const boxes = waiting.map((n) => el("input", { type: "checkbox", value: n.id }));
+  const typed = el("textarea", { rows: "5", maxlength: "3000", placeholder: "Alien (1979)\nBrazil\nhttps://www.imdb.com/title/tt0078748/" });
+  const question = el("input", { maxlength: "300", placeholder: `${series.name}: what should we watch?` });
+  const hours = el("input", { type: "number", min: "1", max: "768", placeholder: series.showtime ? "until showtime" : "default" });
+  const ranked = el("input", { type: "checkbox", checked: series.ranked });
+  const count = el("span", { class: "hint", "aria-live": "polite" });
+  const post = el("button", { class: "btn primary", type: "button" }, "Post poll");
+  const lines = () => typed.value.split("\n").filter((l) => l.trim()).length;
+  const update = () => {
+    const n = boxes.filter((b) => b.checked).length + lines();
+    count.textContent = `${n} movie${n === 1 ? "" : "s"} (2 to ${max})`;
+    post.disabled = !data.can_post || n < 2 || n > max;
+  };
+  boxes.forEach((b) => b.addEventListener("change", update));
+  typed.addEventListener("input", update);
+  post.addEventListener("click", async () => {
+    post.disabled = true;
+    try {
+      const res = await api("/api/watchlist", {
+        action: "poll", series: series.key, ids: boxes.filter((b) => b.checked).map((b) => b.value),
+        typed: typed.value, question: question.value, hours: hours.value, ranked: ranked.checked,
+      });
+      d.close();
+      toast(res.message);
+      loadWatchlist();
+    } catch (err) { toast(err.message, true); update(); }
+  });
+  put(d,
+    el("div", { class: "dialog-head" }, el("h2", {}, `Start a ${series.name} poll`),
+      el("button", { class: "btn icon", type: "button", "aria-label": "Close", onclick: () => d.close() }, "✕")),
+    data.can_post ? null : el("p", { class: "warn-text" }, `This PC is on standby, so it can't post. Use ${data.leader || "the answering PC"}'s dashboard, or /pingwin movie poll in Discord.`),
+    waiting.length ? el("div", {}, el("h3", {}, "From the watchlist"),
+      el("div", { class: "poll-picks" }, waiting.map((n, i) => el("label", { class: "check" }, boxes[i], n.year ? `${n.title} (${n.year})` : n.title))))
+      : el("p", { class: "hint" }, "The watchlist is empty, so type the movies below."),
+    el("label", {}, "Type movies, one per line (a title, a title with its year in brackets, or an IMDb link)", typed),
+    el("div", { class: "poll-row" },
+      el("label", {}, "Question (optional)", question),
+      el("label", {}, "Hours (optional)", hours),
+      el("label", { class: "check" }, ranked, "Ranked choice")),
+    el("div", { class: "row-actions" }, post, count),
+    el("p", { class: "hint" }, "Typed movies are looked up and added to the watchlist. The poll goes to the ", el("em", {}, "Polls go to"),
+      " channel (or the series' own channel) and pings the series' role."));
+  update();
+  d.showModal();
+}
+$("d-poll").addEventListener("click", (e) => { if (e.target === $("d-poll")) $("d-poll").close(); });
 
 // ---------- who's here, stale saves, sync conflicts ------------------------
 const TAB_NAMES = { setup: "Setup", status: "Status", roles: "Role menu", features: "Features", pcs: "PCs & failover", logs: "Logs" };

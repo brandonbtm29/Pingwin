@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.39.0 (2026-11-17)
+- **Start a movie poll from the dashboard.** Features → Movie night → *Movie watchlists* has a **Start a
+  poll** button for each series: tick watchlist movies and/or type some (one per line), and optionally set
+  the question, the hours and ranked choice. Only the answering PC posts.
+- **Up to 10 movies in a hand-picked poll.** *How many Pingwin picks* now only applies when Pingwin picks
+  the movies (oldest or random); picking or typing them yourself allows up to 10, the most a Discord poll
+  holds. **Type movies** is one box with a movie per line, so you can type more than five.
+
 ## 0.38.0 (2026-11-17)
 - **Type movies into a poll.** `/pingwin movie poll` now lets whoever starts it type movies in (**Type
   movies**: up to five at a time, like `Alien (1979)` or an IMDb link), pick from the watchlist, or both, then

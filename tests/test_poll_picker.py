@@ -105,16 +105,15 @@ def test_pick_some_type_some_then_post(monkeypatch):
         # The form: Brazil isn't on the watchlist; "alien" is (so it's the watchlist's own entry); a link nobody finds.
         inter = Inter()
         await view.open_form(inter)
-        assert isinstance(inter.modal, TypeMoviesModal) and len(inter.modal.boxes) == 5
+        assert isinstance(inter.modal, TypeMoviesModal) and inter.modal.box.style is discord.TextStyle.paragraph
         inter = Inter()
-        await view.typed_in(inter, ["Brazil (1985)", "", "alien", "https://www.imdb.com/title/tt0000001/", ""])
+        await view.typed_in(inter, "Brazil (1985)\n\nalien\nhttps://www.imdb.com/title/tt0000001/\n")
         text = inter.edits[-1]["content"]
         assert inter.deferred and "**In the poll (3):** Coherence (2013) · Alien (1979) · Brazil (1985)" in text
         assert "Couldn't find tt0000001" in text and "added to the watchlist" in text
         assert not buttons(view)["Post poll"].disabled
         assert [t["title"] for t in view.typed] == ["Brazil"]
-        reopened = TypeMoviesModal(view)
-        assert reopened.boxes[0].default == "Brazil (1985)"  # opening it again shows what was typed
+        assert TypeMoviesModal(view).box.default == "Brazil (1985)"  # opening it again shows what was typed
         await view.post(Inter())
         assert [p["title"] for p in posted["picks"]] == ["Coherence", "Alien", "Brazil"]
         brazil = next(n for n in watchlist() if n["title"] == "Brazil")
@@ -124,19 +123,61 @@ def test_pick_some_type_some_then_post(monkeypatch):
     asyncio.run(go())
 
 
-def test_only_the_host_and_only_up_to_the_limit(monkeypatch):
+def test_only_the_host_and_up_to_ten_movies(monkeypatch):
+    """Ten is all a Discord poll holds. The How many setting (here 4) is only for oldest/random picks."""
+
     async def go():
-        noms = [nom("a", "Alien", 1979), nom("b", "Brazil", 1985), nom("c", "Coherence", 2013)]
-        cog, posted = setup(monkeypatch, noms, poll_options=2)
+        noms = [nom(f"m{i:02}", f"Movie {i}", 2000 + i) for i in range(12)]
+        cog, posted = setup(monkeypatch, noms, poll_options=4)
         view = ChooseView(cog, cog.series("MMM"), noms, 3, "Pick!", OWNER)
-        stranger = Inter(user=99, values=["a"])
+        stranger = Inter(user=99, values=["m00"])
         await view.picked(stranger)
         assert stranger.said == ["This menu belongs to whoever started the poll."] and view.chosen == []
-        inter = Inter(values=["a", "b", "c"])
+        inter = Inter(values=[n["id"] for n in noms[:11]])
         await view.picked(inter)
         assert buttons(view)["Post poll"].disabled and "Take out 1" in inter.edits[-1]["content"]
-        await view.picked(Inter(values=["a", "b"]))
+        await view.picked(Inter(values=[n["id"] for n in noms[:10]]))
         assert not buttons(view)["Post poll"].disabled
+        await view.post(Inter())
+        assert len(posted["picks"]) == 10
+
+    asyncio.run(go())
+
+
+def test_starting_a_poll_from_the_dashboard(monkeypatch):
+    async def go():
+        noms = [nom("a", "Alien", 1979), nom("c", "Coherence", 2013)]
+        cog, _ = setup(monkeypatch, noms, poll_hours=24)
+        sent = {}
+
+        async def post_poll(s, picks, hours, question, closes=None, ranked=False, *, by=0, fallback=None):
+            sent.update(picks=picks, hours=hours, question=question, ranked=ranked, by=by)
+            return NS(channel=NS(name="polls")), ""
+
+        cog.post_poll = post_poll
+        cog.series_breaks = lambda s: []
+        msg = await cog.poll_from_dashboard(cog.series("MMM"), ["c", "nope"], "Brazil (1985)\nalien", 6, "", True, 42)
+        assert msg == "Poll posted in #polls with 3 movies."
+        assert [p["title"] for p in sent["picks"]] == ["Coherence", "Alien", "Brazil"]  # "nope" isn't there
+        assert (
+            sent["hours"] == 6
+            and sent["ranked"] is True
+            and sent["by"] == 42
+            and "what should we watch" in sent["question"]
+        )
+        assert next(n for n in watchlist() if n["title"] == "Brazil")["by"] == 42
+        state = store.load(movienight.STATE)
+        state["mmm"]["polls"].append({"status": "open", "options": []})
+        store.save(movienight.STATE, state)
+        with pytest.raises(ValueError, match="already a MMM poll"):
+            await cog.poll_from_dashboard(cog.series("MMM"), ["a", "c"], "", None, "", None, 42)
+        state["mmm"]["polls"] = []
+        store.save(movienight.STATE, state)
+        with pytest.raises(ValueError, match="Pick 2 to 10"):
+            await cog.poll_from_dashboard(cog.series("MMM"), ["a"], "", None, "", None, 42)
+        with pytest.raises(ValueError, match="Couldn't find tt0000001"):
+            await cog.poll_from_dashboard(cog.series("MMM"), ["a"], "tt0000001", None, "", None, 42)
+        assert len(watchlist()) == 3  # nothing added by the refused ones
 
     asyncio.run(go())
 
