@@ -142,6 +142,38 @@ def _same_title(item: dict[str, Any], title: str, year: Any) -> bool:
     return movies.norm(item.get("title") or "") == movies.norm(title or "") and _same_year(item, year) is not None
 
 
+TYPED_YEAR = re.compile(r"\s*\((\d{4})\)\s*$")
+
+
+def parse_typed_movie(text: str) -> dict[str, Any] | None:
+    """A movie someone typed for a poll: 'Alien', 'Alien (1979)' or an IMDb link (with or without a title).
+    Only a year in brackets counts, so titles like 'Blade Runner 2049' stay whole."""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if not text:
+        return None
+    imdb_id = movies.imdb_id_in(text)
+    title = re.sub(r"\S*imdb\.com\S*|\btt\d{6,10}\b", "", text).strip(" -–,")
+    year = None
+    m = TYPED_YEAR.search(title)
+    if m and title[: m.start()].strip():
+        year, title = int(m[1]), title[: m.start()].strip()
+    if not title and not imdb_id:
+        return None
+    return {"title": title[:100], "year": year, "imdb_id": imdb_id}
+
+
+def _new_nomination(data: dict[str, Any], by: int) -> dict[str, Any]:
+    return {
+        "id": secrets.token_hex(4),
+        "title": data["title"],
+        "year": data.get("year"),
+        "movie_id": data.get("movie_id"),
+        "by": by,
+        "added": discord.utils.utcnow().isoformat(),
+        "watched": None,
+    }
+
+
 def _known(index: dict[str, list[Any]], title: str, year: Any) -> bool:
     """Is this title (and year) in an index of {normalized title: [years]}?"""
     return any(_same_year({"year": y}, year) for y in index.get(movies.norm(title), []))
@@ -2057,17 +2089,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if kind == "nominate":
             if any(_same_title(n, data["title"], data.get("year")) and not n.get("watched") for n in noms):
                 return f"**{data['title']}** is already on the watchlist."
-            noms.append(
-                {
-                    "id": secrets.token_hex(4),
-                    "title": data["title"],
-                    "year": data.get("year"),
-                    "movie_id": data.get("movie_id"),
-                    "by": by,
-                    "added": discord.utils.utcnow().isoformat(),
-                    "watched": None,
-                }
-            )
+            noms.append(_new_nomination(data, by))
             store.save(STATE, state)
             channel = self.announce_channel(s)
             if channel:
@@ -2748,6 +2770,19 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         }
         return (await self.submit("nominate", s.name, data, member)) + note
 
+    def add_to_watchlist(self, s, data: dict[str, Any], by: int) -> dict[str, Any]:
+        """Put a movie typed for a poll on the series' watchlist (or find it there already), straight away: whoever
+        starts a poll may pick its movies. Returns its watchlist entry."""
+        state = store.load(STATE)
+        noms = self._data(state, s)["nominations"]
+        n = next((x for x in noms if not x.get("watched") and _same_title(x, data["title"], data.get("year"))), None)
+        if n is None:
+            n = _new_nomination(data, by)
+            noms.append(n)
+            store.save(STATE, state)
+            log.info("Added %s to the %s watchlist for a poll", data["title"], s.name)
+        return n
+
     @app_commands.command(name="list", description="Show a series' watchlist")
     @app_commands.autocomplete(series=series_autocomplete)
     async def show(self, interaction: discord.Interaction, series: str) -> None:
@@ -2941,7 +2976,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             suppress_embeds=True,
         )
 
-    @app_commands.command(name="poll", description="Start a poll from the watchlist")
+    @app_commands.command(name="poll", description="Start a movie poll: pick from the watchlist or type movies")
     @app_commands.describe(
         series="Which movie night",
         hours="How long the poll runs (default: until the series' showtime)",
@@ -2970,11 +3005,6 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             )
             return
         unwatched = [n for n in data["nominations"] if not n.get("watched")]
-        if len(unwatched) < 2:
-            await interaction.response.send_message(
-                "The watchlist needs at least 2 unwatched movies for a poll.", ephemeral=True
-            )
-            return
         closes, hours = poll_close(
             getattr(s, "showtime", ""),
             datetime.now(self.bot.features.tz),
@@ -2984,14 +3014,10 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         )
         question = question or f"{s.name}: what should we watch?"
         ranked = bool(getattr(s, "ranked", False)) if ranked is None else ranked
-        if self.cfg.pick == "choose" and len(unwatched) > 2:
+        if self.cfg.pick == "choose" or len(unwatched) < 2:  # pick from the watchlist, type movies, or both
             view = ChooseView(self, s, unwatched, hours, question, interaction.user.id, closes, ranked)
             view.interaction = interaction
-            await interaction.response.send_message(
-                f"Pick up to {min(self.cfg.poll_options, len(unwatched))} movies for the poll:",
-                view=view,
-                ephemeral=True,
-            )
+            await interaction.response.send_message(view.render(), view=view, ephemeral=True)
             return
         picks = pick_options(
             data["nominations"], "random" if self.cfg.pick == "random" else "oldest", self.cfg.poll_options
@@ -3453,8 +3479,36 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         return True
 
 
+def _movie_label(n: dict[str, Any]) -> str:
+    return n["title"] + (f" ({n['year']})" if n.get("year") else "")
+
+
+class TypeMoviesModal(discord.ui.Modal, title="Type movies for the poll"):
+    """Up to five movies typed by name (a form holds five boxes); open it again to change or add more."""
+
+    def __init__(self, picker: ChooseView) -> None:
+        super().__init__(timeout=600)
+        self.picker = picker
+        shown = [_movie_label(t) for t in picker.typed]
+        self.boxes = []
+        for i in range(5):
+            box = discord.ui.TextInput(
+                label=f"Movie {i + 1}",
+                required=False,
+                max_length=150,
+                placeholder="Title, or with the year: Alien (1979). An IMDb link works too.",
+                default=shown[i] if i < len(shown) else None,
+            )
+            self.boxes.append(box)
+            self.add_item(box)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.picker.typed_in(interaction, [b.value for b in self.boxes])
+
+
 class ChooseView(discord.ui.View):
-    """Lets whoever started the poll pick which watchlist movies go in it."""
+    """Lets whoever started the poll pick its movies: from the watchlist, typed in, or both. Typed movies join the
+    watchlist when the poll is posted, so the winner is handled like any other."""
 
     interaction: discord.Interaction | None = None  # the command's, to say so when the menu expires
 
@@ -3482,27 +3536,108 @@ class ChooseView(discord.ui.View):
         self.cog, self.s, self.hours, self.question, self.owner = cog, s, hours, question, owner
         self.closes, self.ranked = closes, ranked
         self.noms = {n["id"]: n for n in unwatched}
-        limit = min(cog.cfg.poll_options, len(unwatched), 25)
-        select = discord.ui.Select(
-            placeholder="Choose movies…",
-            min_values=2,
-            max_values=limit,
-            options=[
-                discord.SelectOption(label=n["title"][:100], value=n["id"])
-                for n in sorted(unwatched, key=lambda n: n["added"])[:25]
-            ],
-        )
-        select.callback = self.chosen
-        self.add_item(select)
+        self.limit = max(2, min(cog.cfg.poll_options, 10))  # a Discord poll holds 10 answers
+        self.chosen: list[str] = []  # watchlist movies picked (ids)
+        self.typed: list[dict[str, Any]] = []  # typed movies that aren't on the watchlist yet
+        self.missed: list[str] = []  # typed lines that couldn't be found
+        self.render()
 
-    async def chosen(self, interaction: discord.Interaction) -> None:
+    def picks(self) -> list[str]:
+        return [_movie_label(self.noms[i]) for i in self.chosen] + [_movie_label(t) for t in self.typed]
+
+    def render(self) -> str:
+        """Lay out the menu for what's picked so far, and return the message text that goes with it."""
+        self.clear_items()
+        listed = sorted(self.noms.values(), key=lambda n: n["added"])[:25]  # a menu holds 25
+        self.listed = {n["id"] for n in listed}
+        if listed:
+            select = discord.ui.Select(
+                placeholder="Choose from the watchlist…",
+                min_values=0,
+                max_values=len(listed),
+                options=[
+                    discord.SelectOption(label=_movie_label(n)[:100], value=n["id"], default=n["id"] in self.chosen)
+                    for n in listed
+                ],
+            )
+            select.callback = self.picked
+            self.add_item(select)
+        write = discord.ui.Button(label="Type movies", emoji="✏️", style=discord.ButtonStyle.secondary)
+        write.callback = self.open_form
+        self.add_item(write)
+        picks = self.picks()
+        post = discord.ui.Button(
+            label="Post poll", style=discord.ButtonStyle.primary, disabled=not 2 <= len(picks) <= self.limit
+        )
+        post.callback = self.post
+        self.add_item(post)
+        where = "choose them from the watchlist, type them, or both" if listed else "type them with **Type movies**"
+        lines = [f"Pick 2 to {self.limit} movies for the poll: {where}."]
+        if picks:
+            lines.append(f"**In the poll ({len(picks)}):** " + " · ".join(picks))
+        if len(picks) > self.limit:
+            lines.append(f"That's more than {self.limit}. Take out {len(picks) - self.limit} to post it.")
+        if self.typed:
+            lines.append("-# Typed movies are added to the watchlist when you post the poll.")
+        if self.missed:
+            lines.append("Couldn't find " + ", ".join(self.missed) + ". Type the title instead.")
+        return "\n".join(lines)
+
+    async def _owner(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner:
             await interaction.response.send_message("This menu belongs to whoever started the poll.", ephemeral=True)
+            return False
+        return True
+
+    async def picked(self, interaction: discord.Interaction) -> None:
+        if not await self._owner(interaction):
             return
-        ids = interaction.data.get("values", [])
-        picks = [self.noms[i] for i in ids if i in self.noms]
+        values = interaction.data.get("values", [])
+        # Keep picks the menu doesn't list (typed ones that turned out to be on the watchlist past the first 25).
+        self.chosen = [i for i in values if i in self.noms] + [i for i in self.chosen if i not in self.listed]
+        await interaction.response.edit_message(content=self.render(), view=self)
+
+    async def open_form(self, interaction: discord.Interaction) -> None:
+        if not await self._owner(interaction):
+            return
+        await interaction.response.send_modal(TypeMoviesModal(self))
+
+    async def typed_in(self, interaction: discord.Interaction, texts: list[str]) -> None:
+        """The form came back: look each movie up (for its proper title and year), and use the watchlist's own
+        entry when it's already there."""
+        await interaction.response.defer()  # looking movies up can take a few seconds
+        self.typed, self.missed = [], []
+        for text in texts:
+            t = parse_typed_movie(text)
+            if t is None:
+                continue
+            m = await self.cog.details(t["title"], t["year"], t["imdb_id"])
+            if m:
+                t = {"title": m["title"], "year": m.get("year") or t["year"], "movie_id": m["id"]}
+            elif not t["title"]:
+                self.missed.append(t["imdb_id"])
+                continue
+            n = next((n for n in self.noms.values() if _same_title(n, t["title"], t.get("year"))), None)
+            if n is not None:
+                if n["id"] not in self.chosen:
+                    self.chosen.append(n["id"])
+            elif not any(_same_title(x, t["title"], t.get("year")) for x in self.typed):
+                self.typed.append(t)
+        await interaction.edit_original_response(content=self.render(), view=self)
+
+    async def post(self, interaction: discord.Interaction) -> None:
+        if not await self._owner(interaction):
+            return
+        if not 2 <= len(self.picks()) <= self.limit:
+            await interaction.response.send_message(f"Pick 2 to {self.limit} movies.", ephemeral=True)
+            return
         self.stop()  # done: it won't say it expired
         await interaction.response.edit_message(content="Posting the poll…", view=None)
+        picks = [self.noms[i] for i in self.chosen]
+        for t in self.typed:
+            n = self.cog.add_to_watchlist(self.s, t, interaction.user.id)
+            if all(n["id"] != p["id"] for p in picks):
+                picks.append(n)
         msg = await self.cog.start_poll(interaction, self.s, picks, self.hours, self.question, self.closes, self.ranked)
         if msg:
             await interaction.edit_original_response(content=f"Poll posted: {msg.jump_url}")

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.38.0 (2026-11-17)
+- **Type movies into a poll.** `/pingwin movie poll` now lets whoever starts it type movies in (**Type
+  movies**: up to five at a time, like `Alien (1979)` or an IMDb link), pick from the watchlist, or both, then
+  **Post poll**. Typed movies are looked up and added to the watchlist when the poll is posted, so the winner
+  is handled as usual. A watchlist with fewer than 2 movies opens the same picker instead of refusing.
+
 ## 0.37.1 (2026-11-16)
 - **Imported ratings no longer double up for someone with two accounts.** When a name in the ratings
   document fits more than one member, the history import now uses the one who already has ratings (or keeps

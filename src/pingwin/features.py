@@ -373,7 +373,7 @@ SECTIONS: list[dict[str, Any]] = [
                 "Movies in a poll",
                 "choose",
                 options=[
-                    ["choose", "Whoever starts it picks"],
+                    ["choose", "Whoever starts it picks (or types them in)"],
                     ["oldest", "Oldest nominations"],
                     ["random", "Random nominations"],
                 ],
