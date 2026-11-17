@@ -425,6 +425,16 @@ SECTIONS: list[dict[str, Any]] = [
                 half=True,
             ),
             F(
+                "poll_details",
+                "toggle",
+                "Point polls to the movie details",
+                True,
+                "Each poll mentions /pingwin movie pollinfo, which sends whoever uses it the movies' IMDb links, "
+                "ratings, runtimes, genres and short plots (only they see it).",
+                group="Polls",
+                half=True,
+            ),
+            F(
                 "mark_watched",
                 "toggle",
                 "Ask the movie mods to confirm the winner",

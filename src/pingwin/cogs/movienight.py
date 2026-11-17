@@ -24,6 +24,7 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 import aiohttp
 import discord
@@ -209,6 +210,41 @@ def movie_card(m: dict[str, Any], why: str = "") -> discord.Embed:
     if why:
         e.set_footer(text=why[:200])
     return e
+
+
+def imdb_url(m: dict[str, Any] | None, title: str, year: Any = None) -> str:
+    """The movie's IMDb page, or an IMDb search for it when we don't know which one it is."""
+    if m and m.get("imdb_id"):
+        return f"https://www.imdb.com/title/{m['imdb_id']}/"
+    return "https://www.imdb.com/find/?" + urlencode({"q": f"{title} {year or ''}".strip(), "s": "tt"})
+
+
+def poll_details_embed(
+    items: list[tuple[dict[str, Any], dict[str, Any] | None]], title: str = "🎬 The movies in the poll"
+) -> discord.Embed | None:
+    """The movies in a poll, one paragraph each: title (linked to IMDb), rating, runtime, genre and a short
+    plot. `items` pairs each poll option with what the movie library knows about it (None: nothing)."""
+    if not items:
+        return None
+    plot_room = max(80, min(220, 3600 // len(items) - 120))  # 10 movies still fit in one message
+    parts = []
+    for n, m in items:
+        m = m or {}
+        label = n["title"] + (f" ({n['year']})" if n.get("year") else "")
+        facts = []
+        if m.get("imdb_rating"):
+            facts.append(f"⭐ {m['imdb_rating']}")
+        if m.get("runtime"):
+            facts.append(f"{m['runtime']} min")
+        if m.get("genre"):
+            facts.append(str(m["genre"]))
+        head = f"**[{label}]({imdb_url(m, n['title'], n.get('year'))})**" + (" · " + " · ".join(facts) if facts else "")
+        plot = re.sub(r"\s+", " ", str(m.get("plot") or "")).strip()
+        if len(plot) > plot_room:
+            plot = plot[: plot_room - 1].rsplit(" ", 1)[0] + "…"
+        parts.append(head + ("\n" + plot if plot else ""))
+    text = "\n\n".join(parts)
+    return discord.Embed(title=title[:256], description=text[:4096], color=0xE8B04B)
 
 
 _MONTHS = {
@@ -3074,6 +3110,28 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if msg:
             await interaction.followup.send(f"Poll posted: {msg.jump_url}", ephemeral=True)
 
+    @app_commands.command(
+        name="pollinfo", description="IMDb links and plots of the movies in a running poll (only you see it)"
+    )
+    @app_commands.describe(series="Which movie night (default: every running poll)")
+    @app_commands.autocomplete(series=series_autocomplete)
+    async def pollinfo(self, interaction: discord.Interaction, series: str | None = None) -> None:
+        s = None
+        if series:
+            s = await self._check(interaction, series)
+            if s is None:
+                return
+        elif not self.cfg.enabled:
+            await interaction.response.send_message("Movie night isn't turned on.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)  # looking movies up can take a moment
+        embeds = await self.poll_info_embeds(s)
+        if not embeds:
+            where = f"for {s.name} " if s else ""
+            await interaction.followup.send(f"No movie poll is running {where}right now.", ephemeral=True)
+            return
+        await interaction.followup.send(embeds=embeds[:10], ephemeral=True)
+
     @app_commands.command(name="endpoll", description="End a series' running poll now")
     @app_commands.autocomplete(series=series_autocomplete)
     async def endpoll(self, interaction: discord.Interaction, series: str) -> None:
@@ -3216,6 +3274,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         role = self.bot.role_named(channel.guild, s.role)
         ts = int(closes.timestamp())
         note = f"Voting closes <t:{ts}:F> (<t:{ts}:R>)" + (", right when the movie starts. 🍿" if early else ".")
+        note += await self._info_hint()
         try:
             msg = await channel.send(
                 content=((role.mention + " ") if role else "") + note,
@@ -3240,6 +3299,43 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         log.info("%s poll started with %d movies", s.name, len(picks))
         return msg, ""
 
+    async def _info_hint(self) -> str:
+        """The line under a poll that points to /pingwin movie pollinfo (Features → Movie night → Polls)."""
+        if not getattr(self.cfg, "poll_details", False):
+            return ""
+        mention = getattr(self.bot, "command_mention", None)
+        cmd = await mention("movie pollinfo") if mention else "`/pingwin movie pollinfo`"
+        return f"\n-# 🎬 IMDb links and plots for these movies: {cmd} (just for you)"
+
+    async def poll_info_embeds(self, s=None) -> list[discord.Embed]:
+        """The movies in each running poll (one series', or every series'), for /pingwin movie pollinfo."""
+        state = store.load(STATE)
+        lib = movies.load()
+        embeds = []
+        for series in [s] if s else self.all_series:
+            data = self._data(state, series)
+            noms = {n["id"]: n for n in data["nominations"]}
+            for p in data["polls"]:
+                if p.get("status") != "open":
+                    continue
+                items = []
+                for oid in p.get("options", []):
+                    n = noms.get(oid)
+                    if n is None:  # taken off the watchlist since: the ranked poll still has its name
+                        if oid not in p.get("labels", {}):
+                            continue
+                        n = {"title": p["labels"][oid], "year": None}
+                    m = lib["movies"].get(n.get("movie_id") or "") or _same_year(
+                        movies.find_movie(lib, n["title"], n.get("year")), n.get("year")
+                    )
+                    if m is None or movies.needs_details(m, time.time()):  # misses wait a week, as elsewhere
+                        m = await self.details(n["title"], n.get("year")) or m
+                    items.append((n, m))
+                embed = poll_details_embed(items, f"🎬 {series_label(series)}: the movies in the poll")
+                if embed is not None:
+                    embeds.append(embed)
+        return embeds
+
     # ------------------------------------------------------------ ranked-choice polls
     async def _start_ranked(self, s, channel, picks, question, closes, early, by) -> tuple[discord.Message | None, str]:
         """A ranked-choice poll: Pingwin's own message with a Vote button (Discord polls can't rank)."""
@@ -3261,6 +3357,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         role = self.bot.role_named(channel.guild, s.role)
         ts = int(closes.timestamp())
         note = f"Voting closes <t:{ts}:F> (<t:{ts}:R>)" + (", right when the movie starts. 🍿" if early else ".")
+        note += await self._info_hint()
         view = discord.ui.View(timeout=None)
         view.add_item(RankedVoteButton(pid))
         try:

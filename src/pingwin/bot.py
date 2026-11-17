@@ -130,6 +130,18 @@ class Pingwin(commands.Bot):
             self.tree.remove_command(cmd.name)
             root.add_command(cmd)
 
+    async def command_mention(self, path: str) -> str:
+        """A clickable /pingwin command for a message, like </pingwin movie pollinfo:123>, or plain text when
+        Discord won't say the command's ID."""
+        if getattr(self, "_root_command_id", None) is None:
+            guild = discord.Object(id=self.config.guild_id) if self.config.guild_id else None
+            try:
+                cmds = await self.tree.fetch_commands(guild=guild)
+            except discord.HTTPException:
+                return f"`/pingwin {path}`"
+            self._root_command_id = next((c.id for c in cmds if c.name == "pingwin"), 0)
+        return f"</pingwin {path}:{self._root_command_id}>" if self._root_command_id else f"`/pingwin {path}`"
+
     async def _sync_commands(self) -> None:
         """Register slash commands with Discord, but only when they've changed.
 
@@ -156,6 +168,7 @@ class Pingwin(commands.Bot):
 
         log.info("Registering slash commands with Discord (this can take a moment)...")
         synced = await self.tree.sync(guild=guild)
+        self._root_command_id = next((c.id for c in synced if c.name == "pingwin"), None)
         where = f"server {guild.id}" if guild else "all servers (can take up to an hour to appear)"
         log.info("Registered %d slash command(s) for %s", len(synced), where)
         if fingerprint:

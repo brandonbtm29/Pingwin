@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.40.0 (2026-11-17)
+- **`/pingwin movie pollinfo`:** anyone can get the movies in a running poll with their IMDb links, ratings,
+  runtimes, genres and short plots, in a message only they see. Each poll mentions the command (a link you
+  can click); turn that off with *Point polls to the movie details* under Movie night → Polls.
+
 ## 0.39.0 (2026-11-17)
 - **Start a movie poll from the dashboard.** Features → Movie night → *Movie watchlists* has a **Start a
   poll** button for each series: tick watchlist movies and/or type some (one per line), and optionally set
