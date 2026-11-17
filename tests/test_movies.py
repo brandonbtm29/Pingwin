@@ -110,6 +110,27 @@ def test_import_is_merged_and_repeatable():
     assert again["entries"] == 0 and again["ratings"] == 0 and len(lib["history"]) == 8
 
 
+def test_a_second_account_doesnt_duplicate_imported_ratings():
+    """Someone with two accounts whose names both fit the document's first name: a re-import must not file
+    their ratings a second time under the other account, whichever one Discord lists first."""
+    sheet = movies.parse_sheet(SHEET)
+    doc = movies.parse_ratings_doc(DOC, {movies.norm(r["title"]) for r in sheet})
+    alt = {"333": "Sammy Stream (Sam) samstreams"}
+    lib = {"movies": {}, "history": [], "pending": {}}
+    movies.import_history(lib, sheet, doc, ["MMM"], {"111": "Sammy (Sam) sam_the_great"})
+    again = movies.import_history(lib, sheet, doc, ["MMM"], {**alt, "111": "Sammy (Sam) sam_the_great"})
+    assert again["ratings"] == 0
+    keys = {k for e in lib["history"] for k in e["ratings"]}
+    assert "111" in keys and "333" not in keys and "name:sam" not in keys
+    # The member left (no match at all now): still recognised as the same lines, not added by name.
+    assert movies.import_history(lib, sheet, doc, ["MMM"], {})["ratings"] == 0
+    # A first import that can't tell the two accounts apart keeps the ratings by name, to link later.
+    fresh = {"movies": {}, "history": [], "pending": {}}
+    movies.import_history(fresh, sheet, doc, ["MMM"], {**alt, "111": "Sammy (Sam) sam_the_great"})
+    assert "name:sam" in {k for e in fresh["history"] for k in e["ratings"]}
+    assert movies.match_name("Sam", {**alt, "111": "Sammy (Sam)"}, {"111"}) == "111"
+
+
 def test_ratings_and_question_chain():
     lib = {"movies": {}, "history": [], "pending": {}}
     m = movies.upsert_movie(lib, {"title": "Alien", "year": 1979, "runtime": 117})

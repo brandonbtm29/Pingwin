@@ -888,15 +888,36 @@ def parse_ratings_doc(text: str, titles: set[str] | None = None) -> list[dict[st
     return [s for s in sections if s["ratings"] and s["title"] and s["title"].casefold() != "template"]
 
 
-def match_name(name: str, members: dict[str, str]) -> str | None:
-    """Find a member ID for a first name like 'Sam' among {user_id: 'Sammy (Sam) sam_the_great'}."""
+def match_name(name: str, members: dict[str, str], prefer: set[str] | frozenset[str] = frozenset()) -> str | None:
+    """Find a member ID for a first name like 'Sam' among {user_id: 'Sammy (Sam) sam_the_great'}.
+
+    When the name fits more than one member (someone with a second account, two Sams), the one in `prefer`
+    (members who already have ratings) wins; if that doesn't settle it, nobody does, so the rating is kept by
+    name instead of landing on whichever account Discord happened to list first."""
     key = name.casefold().strip()
     if len(key) < 3:
         return None
+    found = []
     for uid, names in members.items():
         words = re.findall(r"[a-z0-9]+", names.casefold())
         if key in words or any(w.startswith(key) for w in words if len(key) >= 4):
-            return uid
+            found.append(uid)
+    if len(found) > 1:
+        found = [uid for uid in found if uid in prefer]
+    return found[0] if len(found) == 1 else None
+
+
+def same_imported_rating(entry: dict[str, Any], r: dict[str, Any]) -> str | None:
+    """The key of a rating already imported into this movie night from the same line of the document (same
+    name, score and comment), whatever key it was filed under. Stops a re-import adding a second copy."""
+    for key, old in entry.get("ratings", {}).items():
+        if (
+            old.get("at", 1) == 0
+            and (old.get("name") or "").casefold() == r["name"].casefold()
+            and old.get("score") == r["score"]
+            and (old.get("comment") or "") == r["comment"].strip()
+        ):
+            return key
     return None
 
 
@@ -960,6 +981,7 @@ def import_history(
     `full_names` maps each series' short name to its full name, to recognise either in the sheet."""
     members = members or {}
     stats = {"movies": 0, "entries": 0, "ratings": 0, "skipped": 0}
+    raters = {k for e in lib["history"] for k in e.get("ratings", {}) if k.isdigit()}
     existing = {(e.get("date"), e["movie_id"]) for e in lib["history"]}
     by_movie_date: dict[tuple[str | None, str], dict[str, Any]] = {
         (e.get("date"), e["movie_id"]): e for e in lib["history"]
@@ -1015,8 +1037,13 @@ def import_history(
             continue
         rows = []
         for r in sec["ratings"]:
-            uid = match_name(r["name"], members)
-            rows.append((uid or f"name:{r['name'].casefold()}", uid, r))
+            key = same_imported_rating(entry, r)  # imported before: keep it where it is
+            if key:
+                uid = key if key.isdigit() else None
+            else:
+                uid = match_name(r["name"], members, raters)
+                key = uid or f"name:{r['name'].casefold()}"
+            rows.append((key, uid, r))
         links = _question_links(rows, members)
         for key, uid, r in rows:
             asker, question = links.get(key, (None, ""))

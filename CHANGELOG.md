@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.37.1 (2026-11-16)
+- **Imported ratings no longer double up for someone with two accounts.** When a name in the ratings
+  document fits more than one member, the history import now uses the one who already has ratings (or keeps
+  the rating by name), and it recognises lines it imported before whatever account they were filed under. A
+  re-import used to file them again under whichever account Discord listed first.
+
 ## 0.37.0 (2026-11-13)
 - **The main PC takes the job back right away.** When it comes back, it no longer waits 3 minutes: it asks
   SyncThing on the same PC whether the backup's changes have arrived and takes over as soon as they have
