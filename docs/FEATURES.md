@@ -276,9 +276,14 @@ pages):
 - **We skipped it** leaves the history alone, and a franchise part stays next in line for the following week.
 - **Who rates first?** (optional) picks who Pingwin pings first when the Rate it button goes up.
 
+On the movie pages, movie mods see a warning at the top while a night's card is waiting, with **Post the Rate it
+button**, **Log it, no Rate it** (it joins the history without the button) and **We didn't watch it**. The card
+under *Waiting for a mod* has a **Post the Rate it button when it's logged** box too (ticked to begin with).
+
 A night in a break gets no card. If the voice check also noticed the night, it adds who was there to the same
-card. Adding that night another way (the movie pages' **Add a movie we watched**, or `/pingwin movie watched`)
-closes its card too, and who was in voice goes on the history entry.
+card. Adding that night on the movie pages' **Add a movie we watched** answers its card: the page first asks
+whether it gets its Rate it button. `/pingwin movie watched` closes the card too. Either way, who was in voice
+goes on the history entry.
 
 ### Franchise queues
 

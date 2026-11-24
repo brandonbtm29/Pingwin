@@ -41,6 +41,7 @@
         type <code>/pingwin movie page</code> in Discord for your own sign-in link.</span>
       <a class="btn small" href="/auth/login?next=/movies">Sign in with Discord</a>
     </div>
+    <div class="panel night-warn-box" id="m-night-warn" role="status" hidden></div>
     <div class="panel" id="m-pending" hidden>
       <h2>Waiting for a mod</h2>
       <ul class="pending-list" id="m-pending-list"></ul>
@@ -65,6 +66,7 @@
           <label class="check"><input type="checkbox" id="n-rate"> Also post a <strong>Rate it</strong> button in Discord</label>
           <p class="hint">Picking a suggestion pins down the exact movie on IMDb. Once it's added, it opens so you (or
             anyone) can write reviews for it. <span id="n-note"></span></p>
+          <div class="night-choice" id="n-choice" role="alert" hidden></div>
           <div class="row-actions"><button class="btn primary" id="n-go">Add to the history</button></div>
         </div>
       </details>

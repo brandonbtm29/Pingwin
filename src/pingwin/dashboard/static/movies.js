@@ -175,6 +175,7 @@ async function load() {
   }
   put($("rv-guests"), [...guests.values()].sort((a, b) => a.localeCompare(b)).map((n) => el("option", { value: n })));
   renderPending();
+  renderNightWarning();
   restoreReviewDraft();
 }
 
@@ -623,15 +624,22 @@ $("w-add").addEventListener("click", async () => {
 
 // Add a movie night we already watched (admins): it joins the history, then anyone can review it.
 const nightBox = titleSuggest($("n-title"), $("n-ac"), $("n-year"), () => $("n-go").click());
-$("n-go").addEventListener("click", async () => {
+// If that night's "did it happen?" card is still waiting, adding the night answers it: the movie mod says
+// first whether it gets its Rate it button (cardChoice "rate" or "log").
+$("n-go").addEventListener("click", () => addNight());
+async function addNight(cardChoice) {
   const title = $("n-title").value.trim();
   if (!title) return toast("Type the movie's title.", true);
   if (!$("n-date").value) return toast("Pick the date you watched it.", true);
+  const series = $("n-series").value, date = $("n-date").value;
+  const waiting = canMod() && (data.pending || []).find((r) => r.kind === "detected" && r.series === series && r.data.date === date);
+  if (waiting && !cardChoice) return showNightChoice(waiting, title);
+  $("n-choice").hidden = true;
   const btn = $("n-go");
   btn.disabled = true;
   try {
     const res = await api("/api/movies/suggest", { kind: "night", title, year: $("n-year").value.trim(), imdb_id: nightBox.imdb(),
-      date: $("n-date").value, series: $("n-series").value, rate: $("n-rate").checked });
+      date, series, rate: $("n-rate").checked, ...(cardChoice ? { card_choice: cardChoice } : {}) });
     toast(res.message.replace(/\*\*/g, ""));
     nightBox.reset();
     await load();
@@ -639,7 +647,19 @@ $("n-go").addEventListener("click", async () => {
     if (h) showMovie(h);
   } catch (e) { toast(e.message, true); }
   finally { btn.disabled = false; }
-});
+}
+function showNightChoice(r, title) {
+  put($("n-choice"),
+    el("p", {}, el("strong", { class: "warn-text" }, `⚠️ ${evName(r.series)} on ${fmtDate(r.data.date)} is still waiting for a movie mod.`),
+      ` Adding ${title} answers it. Should it get its Rate it button?`),
+    el("div", { class: "row-actions" },
+      el("button", { class: "btn small primary", onclick: () => addNight("rate") }, "Post the Rate it button"),
+      el("button", { class: "btn small", onclick: () => addNight("log") }, "Log it, no Rate it"),
+      el("button", { class: "btn small", onclick: () => { $("n-choice").hidden = true; } }, "Cancel")),
+    el("p", { class: "hint" }, "Didn't watch it after all? Use “We didn't watch it” at the top of the page."));
+  $("n-choice").hidden = false;
+  $("n-choice").querySelector("button").focus();
+}
 
 // ---------- stats ----------
 // Charts are plain HTML bars. Colors come from CSS roles (--c1..--c3, --pos/--neg), so dark mode
@@ -1168,7 +1188,8 @@ function detectedCard(r, admin) {
   const starter = el("select", { "aria-label": "Who rates first" }, el("option", { value: "" }, "Anyone"),
     (data.members || []).map((m) => el("option", { value: m.id }, memberLabel(m))));
   starter.value = d.starter && (data.members || []).some((m) => m.id === d.starter.uid) ? d.starter.uid : "";
-  const yes = (extra = {}) => decide(r.id, true, { ...extra, starter: starter.value });
+  const rateBox = el("input", { type: "checkbox", checked: true, "aria-label": "Post the Rate it button" });
+  const yes = (extra = {}) => decide(r.id, true, { ...extra, starter: starter.value, rate: rateBox.checked });
   return el("li", { class: "detected" },
     el("div", {}, el("strong", {}, `🎬 ${evName(r.series)} on ${fmtDate(d.date)}`),
       exp ? el("span", { class: "hint" }, ` · ${d.why || "Up tonight"}: ${label(exp)}`) : null,
@@ -1186,10 +1207,32 @@ function detectedCard(r, admin) {
           yes({ title: m[1], year: m[2] || "" });
         } }, "Log it"),
         el("button", { class: "btn small danger", onclick: () => decide(r.id, false) }, "We skipped it")),
+      el("label", { class: "check hint" }, rateBox, " Post the Rate it button when it's logged"),
       el("label", { class: "inline hint" }, "Who rates first? ", starter)] : el("div", { class: "hint" }, "Waiting for a movie mod to say which movie it was."));
 }
 async function decide(id, approve, extra = {}) {
   try { toast((await api("/api/movies/admin", { action: "decide", id, approve, ...extra })).message.replace(/\*\*/g, "")); await load(); } catch (e) { toast(e.message, true); }
+}
+// The top of the page warns movie mods about a night whose "did it happen?" card is still waiting, so it
+// isn't added some other way without its Rate it button.
+function renderNightWarning() {
+  const waiting = canMod() ? (data.pending || []).filter((r) => r.kind === "detected") : [];
+  $("m-night-warn").hidden = !waiting.length;
+  put($("m-night-warn"), waiting.map((r) => {
+    const d = r.data;
+    const exp = d.expected;
+    const movie = exp ? (exp.year ? `${exp.title} (${exp.year})` : exp.title) : "";
+    return el("div", { class: "night-warn" },
+      el("p", {}, el("strong", { class: "warn-text" }, `⚠️ ${evName(r.series)} on ${fmtDate(d.date)} is still waiting for a movie mod.`),
+        exp ? ` ${d.why || "Up that night"}: ${movie}.` : " Pingwin doesn't know which movie it was."),
+      el("div", { class: "row-actions" },
+        exp ? el("button", { class: "btn small primary", onclick: () => decide(r.id, true, { rate: true }) }, "Post the Rate it button") : null,
+        exp ? el("button", { class: "btn small", onclick: () => decide(r.id, true, { rate: false }) }, "Log it, no Rate it") : null,
+        el("button", { class: "btn small danger", onclick: () => decide(r.id, false) }, "We didn't watch it")),
+      el("p", { class: "hint" }, exp
+        ? "Both log buttons add it to the history. Watched something else? Pick it under Waiting for a mod, or add it with Add a movie we watched."
+        : "Pick the movie under Waiting for a mod, or add it with Add a movie we watched."));
+  }));
 }
 
 // ---------- admin ----------

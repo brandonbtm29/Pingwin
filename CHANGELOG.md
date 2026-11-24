@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.41.0 (2026-11-23)
+- **The movie pages warn movie mods about a waiting night.** While a night's "Did ... happen?" card is waiting,
+  the top of the movie pages says so, with **Post the Rate it button**, **Log it, no Rate it** and **We didn't
+  watch it**. The card under *Waiting for a mod* gets a **Post the Rate it button when it's logged** box.
+- **Adding that night with "Add a movie we watched" asks first.** It answers the waiting card, so the page asks
+  whether the night gets its Rate it button (before, it closed the card with no button unless a box was ticked).
+  The button still waits until the movie is over.
+
 ## 0.40.0 (2026-11-17)
 - **`/pingwin movie pollinfo`:** anyone can get the movies in a running poll with their IMDb links, ratings,
   runtimes, genres and short plots, in a message only they see. Each poll mentions the command (a link you

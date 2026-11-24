@@ -1492,8 +1492,43 @@ async def post_movie_suggest(request: web.Request) -> web.Response:
         if viewer.kind != "owner" and not is_movie_mod(request):  # everyone else asks the mods
             who = await _need_who(request)
             return web.json_response({"ok": True, "message": await cog.submit("night", s.name, data, who)})
-        log.info("Movie night added from the movie pages (%s): %s on %s", viewer.name, title, day)
-        msg = await cog.apply("night", s.name, data, int(viewer.user_id or 0))
+        # That night's "did it happen?" card is still waiting: adding the night answers it, so the movie mod
+        # says whether it gets its Rate it button (the page asks; an old page gets this message instead).
+        waiting = next(
+            (
+                r
+                for r in lib["pending"].values()
+                if r.get("kind") == "detected"
+                and r.get("status") == "pending"
+                and r.get("series") == s.name
+                and (r.get("data") or {}).get("date") == day
+            ),
+            None,
+        )
+        if waiting is not None:
+            choice = payload.get("card_choice")
+            if choice not in ("rate", "log"):
+                raise ApiError(
+                    f"{s.name}'s card for {day} is still waiting. Reload the page to choose whether this night "
+                    "gets its Rate it button.",
+                    409,
+                )
+
+            class _Mod:
+                display_name = name = viewer.name
+
+            log.info(
+                "Movie night added from the movie pages (%s): %s on %s, answering its card (%s)",
+                viewer.name,
+                title,
+                day,
+                "with Rate it" if choice == "rate" else "no Rate it",
+            )
+            pick = {"title": title, "year": data["year"], "imdb_id": data["imdb_id"]}
+            msg = await cog.decide(waiting["id"], True, _Mod(), custom=pick, rate=choice == "rate")
+        else:
+            log.info("Movie night added from the movie pages (%s): %s on %s", viewer.name, title, day)
+            msg = await cog.apply("night", s.name, data, int(viewer.user_id or 0))
         lib = movies.load()
         ids = {m["id"] for m in lib["movies"].values() if data["imdb_id"] and m.get("imdb_id") == data["imdb_id"]}
         found = movies.find_movie(lib, title, data["year"])
@@ -2101,6 +2136,7 @@ async def post_movie_admin(request: web.Request) -> web.Response:
             choice=int(choice) if isinstance(choice, int) or str(choice or "").isdigit() else None,
             custom=custom,
             starter=str(payload.get("starter") or "").strip() if "starter" in payload else None,
+            rate=payload["rate"] if isinstance(payload.get("rate"), bool) else None,
         )
         return web.json_response({"ok": True, "message": msg})
     raise ApiError("Unknown action")

@@ -1927,6 +1927,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         choice: int | None,
         custom: dict[str, Any] | None,
         choice_label: str | None = None,
+        rate: bool | None = None,
     ) -> str:
         d = req["data"]
         who = getattr(mod, "display_name", mod.name)
@@ -1955,13 +1956,14 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             req["status"], req["decided_by"] = "approved", who
             movies.save(lib)
             year = pick.get("year")
+            post = bool(self.cfg.rate) and rate is not False  # "Log it, no Rate it" on the movie pages
             e, _created = await self.add_night(
                 s,
                 str(pick["title"]).strip(),
                 int(year) if str(year or "").isdigit() else None,
                 pick.get("imdb_id"),
                 d["date"],
-                rate=bool(self.cfg.rate),
+                rate=post,
                 rate_after=d.get("show_end"),
             )
             lib = movies.load()
@@ -1974,8 +1976,10 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
             m = lib["movies"].get(e["movie_id"], {"title": pick["title"]})
             label = f"{m['title']} ({m['year']})" if m.get("year") else m["title"]
             msg = f"✅ {who} logged **{label}** for {req['series']} on {d['date']}."
-            if self.cfg.rate:
+            if post:
                 msg += " The Rate it button is on its way."
+            elif self.cfg.rate:
+                msg += " No Rate it button for this one."
         log.info(msg.replace("**", ""))
         card = req.get("card")
         channel = self.bot.get_channel(card[0]) if card else None
@@ -1995,7 +1999,10 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         custom: dict[str, Any] | None = None,
         starter: str | None = None,
         choice_label: str | None = None,
+        rate: bool | None = None,
     ) -> str:
+        """A movie mod's answer to a waiting card. For a "did it happen?" card, `rate` False logs the night
+        without its Rate it button (None: the usual, a button if Rate it is on)."""
         lib = movies.load()
         req = lib["pending"].get(rid)
         if req is not None and req.get("kind") == "detected" and starter is not None:  # from the movie pages
@@ -2008,7 +2015,7 @@ class MovieNight(commands.GroupCog, group_name="movie", group_description="Movie
         if req is None or req.get("status") != "pending":
             return Decision("This one was already handled.", ok=False)
         if req["kind"] == "detected":
-            return await self._decide_detected(lib, req, approve, mod, choice, custom, choice_label)
+            return await self._decide_detected(lib, req, approve, mod, choice, custom, choice_label, rate)
         req["status"] = "approved" if approve else "denied"
         req["decided_by"] = getattr(mod, "display_name", mod.name)
         movies.save(lib)

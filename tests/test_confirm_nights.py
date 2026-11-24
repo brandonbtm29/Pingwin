@@ -136,3 +136,25 @@ def test_a_night_added_from_the_movie_pages_closes_its_card(monkeypatch):
         assert night_request("MMM", "2026-10-26")["status"] == "pending"
 
     asyncio.run(go())
+
+
+def test_a_night_can_be_logged_without_its_rate_it_button(monkeypatch):
+    use_clock(monkeypatch, datetime(2026, 11, 23, 22, 0, tzinfo=ET))
+
+    async def go():
+        cog, _ = make_cog([mmm()], rate=True)
+        s = cog.series("MMM")
+        await cog.ask_night(s, "2026-11-23", {"title": "Rubber", "year": 2010}, "The poll picked", 0)
+        msg = await confirm(cog, "MMM", "2026-11-23", rate=False)  # "Log it, no Rate it" on the movie pages
+        assert "No Rate it button" in msg
+        (req,) = movies.load()["pending"].values()
+        assert req["status"] == "approved"  # the card is done
+        (e,) = movies.load()["history"]
+        assert e["date"] == "2026-11-23" and "rate_at" not in e
+        await cog.ask_night(s, "2026-11-16", {"title": "Saw", "year": 2004}, "The poll picked", 0)
+        msg = await confirm(cog, "MMM", "2026-11-16")  # the card's own "Yes": still a Rate it button
+        assert "Rate it button is on its way" in msg
+        saw = next(x for x in movies.load()["history"] if x["date"] == "2026-11-16")
+        assert saw.get("rate_at")
+
+    asyncio.run(go())

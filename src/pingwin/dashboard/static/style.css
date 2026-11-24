@@ -825,6 +825,10 @@ label.check input[type="checkbox"] { width: auto; flex: none; margin: 0; }
 .pending-list li.detected { display: grid; gap: 8px; align-items: start; }
 .d-picks { display: flex; flex-wrap: wrap; gap: 6px; }
 .pending-list li.detected .row-actions input { flex: 1 1 220px; min-width: 0; }
+/* A night's "did it happen?" card still waiting: a warning for movie mods at the top, and in Add a movie we watched */
+.night-warn-box { border-color: var(--warn); display: grid; gap: 12px; }
+.night-warn p, .night-choice p { margin: 0 0 6px; }
+.night-choice { border: 1px solid var(--warn); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
 
 /* rows: empty state; "see also" links between features */
 .rows-table .rows-empty td { color: var(--muted); font-size: .88rem; padding: .6rem .25rem; }

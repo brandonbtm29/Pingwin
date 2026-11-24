@@ -12,7 +12,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from test_remote import ORIGIN, PUBLIC, data, remote  # noqa: F401  (data is an autouse fixture)
 
-from pingwin import movieaccess, store
+from pingwin import movieaccess, movies, store
 from pingwin.config import ConfigError, data_dir, load_config
 from pingwin.configedit import check_secret, save_secrets
 from pingwin.dashboard import editing, server
@@ -115,6 +115,10 @@ class FakeCog:
     async def submit(self, kind, series, change, who):
         self.calls.append(("submit", kind, who.id))
         return "sent"
+
+    async def decide(self, rid, approve, mod, custom=None, rate=None, **kw):
+        self.calls.append(("decide", rid, approve, rate, (custom or {}).get("title")))
+        return "decided"
 
     async def nominate_text(self, who, s, title, year, imdb_id):
         self.calls.append(("nominate_text", who.id))
@@ -315,6 +319,35 @@ def test_members_pingwin_cannot_find_are_not_treated_as_the_owner():
         assert cog.calls == []
         r = await client.post("/api/movies/suggest", json=nominate, headers=OWNER)
         assert r.status == 200 and cog.calls == [("apply", "nominate", 0)]
+
+    run(scenario, bot)
+
+
+def test_adding_a_night_whose_card_waits_asks_about_rate_it():
+    cog = FakeCog()
+    bot = make_bot(None, cog=cog)
+
+    async def scenario(client, app):
+        lib = movies.load()
+        lib["pending"]["c1"] = {
+            "id": "c1",
+            "kind": "detected",
+            "series": "General",
+            "status": "pending",
+            "data": {"date": "2026-11-01"},
+        }
+        movies.save(lib)
+        night = {"kind": "night", "series": "General", "title": "Rubber", "year": "2010", "date": "2026-11-01"}
+        r = await client.post("/api/movies/suggest", json=night, headers=OWNER)  # an old page: no choice made
+        assert r.status == 409 and "still waiting" in (await r.json())["error"]
+        assert cog.calls == []
+        r = await client.post("/api/movies/suggest", json={**night, "card_choice": "log"}, headers=OWNER)
+        assert r.status == 200 and cog.calls == [("decide", "c1", True, False, "Rubber")]  # answers the card
+        r = await client.post("/api/movies/suggest", json={**night, "date": "2026-10-25"}, headers=OWNER)
+        assert r.status == 200 and cog.calls[-1] == ("apply", "night", 0)  # no card that night: as before
+        decide = {"action": "decide", "id": "c1", "approve": True, "rate": False}
+        r = await client.post("/api/movies/admin", json=decide, headers=OWNER)  # the banner's "Log it, no Rate it"
+        assert r.status == 200 and cog.calls[-1] == ("decide", "c1", True, False, None)
 
     run(scenario, bot)
 
