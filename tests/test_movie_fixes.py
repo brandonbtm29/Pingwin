@@ -2,6 +2,8 @@
 changes, remakes, reading polls, DST and rater names on the Rate it card."""
 
 import asyncio
+import importlib
+import pkgutil
 import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace as NS
@@ -23,6 +25,14 @@ def data(tmp_path, monkeypatch):
     return tmp_path
 
 
+def patch_datetime(monkeypatch, fake) -> None:
+    """Swap datetime for `fake` in every movie night module that uses it."""
+    for info in pkgutil.iter_modules(movienight.__path__):
+        mod = importlib.import_module(f"{movienight.__name__}.{info.name}")
+        if hasattr(mod, "datetime"):
+            monkeypatch.setattr(mod, "datetime", fake)
+
+
 def use_clock(monkeypatch, start: datetime) -> dict:
     """A clock for the cog's datetime.now (Discord timestamps and time.time stay real)."""
     clock = {"now": start}
@@ -32,7 +42,7 @@ def use_clock(monkeypatch, start: datetime) -> dict:
         def now(cls, tz=None):
             return clock["now"].astimezone(tz) if tz else clock["now"]
 
-    monkeypatch.setattr(movienight, "datetime", FakeDT)
+    patch_datetime(monkeypatch, FakeDT)
     return clock
 
 

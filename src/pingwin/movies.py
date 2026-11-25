@@ -4,7 +4,7 @@ Stored in the shared settings folder (state/movielib.json):
 
     movies   {movie_id: {title, year, runtime, imdb_id, imdb_rating, director, writer, stars, genre, poster, plot}}
     history  [{id, movie_id, date, series, ratings: {key: {...}}, prompt, closed, source}]
-    pending  {request_id: {...}}   changes waiting for a mod (see cogs/movienight.py)
+    pending  {request_id: {...}}   changes waiting for a mod (see cogs/movienight/changes.py)
 
 Movie details come from OMDb (omdbapi.com) and are looked up once, then kept. History can be imported
 from a spreadsheet (CSV) and a ratings document (plain text) like the ones many movie clubs keep.

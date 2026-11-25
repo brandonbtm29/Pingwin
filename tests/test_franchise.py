@@ -6,6 +6,7 @@ from types import SimpleNamespace as NS
 from zoneinfo import ZoneInfo
 
 import pytest
+from test_movie_fixes import patch_datetime
 
 from pingwin import franchise, movies, store
 from pingwin.cogs import movienight
@@ -103,7 +104,7 @@ def test_two_fridays_end_to_end(monkeypatch):
         def now(cls, tz=None):
             return clock["now"].astimezone(tz) if tz else clock["now"]
 
-    monkeypatch.setattr(movienight, "datetime", FakeDT)
+    patch_datetime(monkeypatch, FakeDT)
 
     async def go():
         cog, s, sent = make_cog()

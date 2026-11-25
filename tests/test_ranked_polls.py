@@ -90,7 +90,7 @@ def setup_poll(monkeypatch, **cfg):
     use_clock(monkeypatch, datetime(2026, 11, 9, 12, 0, tzinfo=ET))
     cog, _ = make_cog([NS(**vars(mmm()), ranked=True)], ranked_choices=3, **cfg)
     ch = TextChan(1)
-    monkeypatch.setattr(movienight.discord, "TextChannel", TextChan)
+    monkeypatch.setattr(discord, "TextChannel", TextChan)
     cog.bot.get_channel = lambda cid: ch
     cog.bot.text_channel = lambda cid: ch if cid else None
     noms = [nom("a", "Alien", 1979), nom("b", "Brazil", 1985), nom("c", "Coherence", 2013)]

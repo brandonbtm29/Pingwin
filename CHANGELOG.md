@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.44.0 (2026-11-25)
+- **Under the hood: the movie night code is split up.** `cogs/movienight.py` (about 4,250 lines) is now a
+  folder: the cog with its settings, loops and commands, plus a file each for movie details, franchise queues,
+  changes and approvals, night cards, weeks off, ratings and polls, the shared helpers, and the buttons and forms.
+  Nothing changes in Discord or on the dashboard.
+
 ## 0.43.0 (2026-11-25)
 - **Every PC installs the same library versions.** `constraints.txt` lists the exact versions; Pingwin installs
   from it after each update (so do the installer, `setup.cmd` and CI), so NOVA and BMAX can't drift apart. To move

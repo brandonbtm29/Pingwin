@@ -51,7 +51,7 @@ def setup_night(monkeypatch):
     use_clock(monkeypatch, datetime(2026, 11, 3, 1, 0, tzinfo=ET))
     cog, _ = make_cog([mmm()], rate=True)
     ch = TextChan(1)
-    monkeypatch.setattr(movienight.discord, "TextChannel", TextChan)  # our fake passes the isinstance checks
+    monkeypatch.setattr(discord, "TextChannel", TextChan)  # our fake passes the isinstance checks
     cog.bot.get_channel = lambda cid: ch
     cog.bot.text_channel = lambda cid: ch if cid else None
     cog.bot.persona = NS(say=lambda key, **v: f"[{key}] " + " | ".join(f"{k}={x}" for k, x in sorted(v.items())))
