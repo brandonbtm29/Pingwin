@@ -50,8 +50,15 @@ def test_one_vote_each_with_a_button_per_movie(monkeypatch):
         p = await start(cog, ch, noms)
         post = ch.kw[-1]
         assert p["kind"] == "plurality" and "poll" not in post and "embed" in post  # not a Discord poll
-        assert [c.custom_id for c in post["view"].children] == [f"pingwin:pv:{p['pid']}:{i}" for i in range(3)]
-        assert [c.item.label for c in post["view"].children] == ["Alien (1979)", "Brazil (1985)", "Coherence (2013)"]
+        assert [c.custom_id for c in post["view"].children] == [
+            *(f"pingwin:pv:{p['pid']}:{i}" for i in range(3)),
+            f"pingwin:pwho:{p['pid']}",  # Who voted, for the movie mods
+        ]
+        assert [c.item.label for c in post["view"].children][:3] == [
+            "Alien (1979)",
+            "Brazil (1985)",
+            "Coherence (2013)",
+        ]
         assert "You voted for **Alien (1979)**" in cog.tap_vote(p["pid"], "1", 0)
         assert "You voted for **Brazil (1985)**" in cog.tap_vote(p["pid"], "1", 1)  # changed: one vote each
         cog.tap_vote(p["pid"], "2", 1)
@@ -168,7 +175,7 @@ def test_swapping_a_movie_in_a_ranked_poll(monkeypatch):
         _, edit = ch.edits[-1]
         assert "Dune (1984)" in edit["embed"].description
         assert "Dune (1984) took the place of Brazil (1985)" in edit["embed"].description
-        assert [c.custom_id for c in edit["view"].children] == [f"pingwin:rcv:{p['pid']}"]
+        assert [c.custom_id for c in edit["view"].children] == [f"pingwin:rcv:{p['pid']}", f"pingwin:pwho:{p['pid']}"]
 
     asyncio.run(go())
 
@@ -184,7 +191,7 @@ def test_the_poll_starter_can_swap_and_a_one_vote_poll_loses_the_vote(monkeypatc
         assert the_poll()["ballots"] == {"2": ["a"]} and "1 person had voted for it" in starter.said[-1]
         assert dms[1].endswith("You can vote again: https://discord.test/poll")
         buttons = ch.edits[-1][1]["view"].children
-        assert [c.item.label for c in buttons] == ["Alien (1979)", "Dune (1984)", "Coherence (2013)"]
+        assert [c.item.label for c in buttons][:3] == ["Alien (1979)", "Dune (1984)", "Coherence (2013)"]
         assert "You voted for **Dune (1984)**" in cog.tap_vote(p["pid"], "1", 1)
         await cog.swap.callback(cog, starter, "MMM", "c", "b")  # Brazil can come back in another spot
         assert starter.said[-1].endswith("Nobody had voted for it yet.")
@@ -202,5 +209,64 @@ def test_a_discord_poll_cant_be_swapped(monkeypatch):
         mod = Inter(7)
         await cog.swap.callback(cog, mod, "MMM", "a", "d")
         assert "Discord poll" in mod.said[-1] and the_poll()["options"] == ["a", "b"]
+
+    asyncio.run(go())
+
+
+def test_who_voted_is_for_the_movie_mods(monkeypatch):
+    async def go():
+        cog, ch, noms, dms = swap_setup(monkeypatch)
+        p = await start(cog, ch, noms, multiple=True)
+        assert cog.who_voted(p["pid"], NS(id=7)) == "Nobody has voted yet."
+        for uid, i in (("1", 0), ("1", 2), ("2", 0)):
+            cog.tap_vote(p["pid"], uid, i)
+        assert cog.who_voted(p["pid"], NS(id=9)) == "Only the movie mods can see who voted."
+        text = cog.who_voted(p["pid"], NS(id=7))
+        assert text.splitlines() == [
+            "🗳️ 2 voted so far:",
+            "**Alien (1979)** (2): <@1>, <@2>",
+            "**Brazil (1985)** (0): nobody",
+            "**Coherence (2013)** (1): <@1>",
+        ]
+        said = {}
+
+        async def send_message(text, **kw):
+            said.update(text=text, **kw)
+
+        tap = NS(user=NS(id=7), client=NS(get_cog=lambda n: cog), response=NS(send_message=send_message))
+        await movienight.WhoVotedButton(p["pid"]).callback(tap)
+        assert said["text"] == text and said["ephemeral"] and said["allowed_mentions"].users is False  # no pings
+        # A ranked poll: each voter's ranking.
+        state = store.load(movienight.STATE)
+        state["mmm"]["polls"] = []
+        store.save(movienight.STATE, state)
+        r = await start(cog, ch, noms, ranked=True)
+        cog.save_ballot(r["pid"], "3", ["c", "a"])
+        assert cog.who_voted(r["pid"], NS(id=7)).splitlines()[1] == "<@3>: 1. Coherence (2013) · 2. Alien (1979)"
+
+    asyncio.run(go())
+
+
+def test_swapping_in_a_typed_movie(monkeypatch):
+    async def go():
+        cog, ch, noms, dms = swap_setup(monkeypatch)
+
+        async def details(title, year=None, imdb_id=None):
+            return {"id": "heat-1995", "title": "Heat", "year": 1995} if "heat" in title.casefold() else None
+
+        cog.details = details
+        await start(cog, ch, noms)
+        mod = Inter(7)
+        watchlist = lambda: store.load(movienight.STATE)["mmm"]["nominations"]  # noqa: E731
+        await cog.swap.callback(cog, mod, "MMM", "zzz", "Heat (1995)")
+        assert mod.said[-1] == "That movie isn't in the poll." and len(watchlist()) == 5  # nothing added for it
+        await cog.swap.callback(cog, mod, "MMM", "a", "https://www.imdb.com/title/tt0000001/")
+        assert mod.said[-1].startswith("Couldn't find https://www.imdb.com/title/tt0000001/") and len(watchlist()) == 5
+        await cog.swap.callback(cog, mod, "MMM", "c", "heat")
+        heat = next(n for n in watchlist() if n["title"] == "Heat")
+        assert heat["year"] == 1995 and the_poll()["options"] == ["a", "b", heat["id"]]
+        assert mod.said[-1] == "Swapped **Coherence (2013)** for **Heat (1995)**. Nobody had voted for it yet."
+        await cog.swap.callback(cog, mod, "MMM", "a", "Heat")  # already in it: found on the watchlist, not added again
+        assert mod.said[-1] == "That movie is already in the poll." and len(watchlist()) == 6
 
     asyncio.run(go())

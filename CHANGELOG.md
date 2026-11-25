@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.45.0 (2026-11-25)
+- **Swap a movie from the dashboard.** The **Movie watchlists** panel has **Swap a movie** beside a running poll:
+  pick the movie to take out and a watchlist movie (or type one) to put in. Voters get the same DM as from Discord.
+- **`/pingwin movie swap` takes a typed movie too:** any title or IMDb link, looked up and added to the watchlist.
+- **Who voted (mods)** under every poll shows the movie mods who voted for what, just for them (a ranked poll
+  shows each person's ranking). Discord's own polls showed this; Pingwin's now do too.
+
 ## 0.44.0 (2026-11-25)
 - **Under the hood: the movie night code is split up.** `cogs/movienight.py` (about 4,250 lines) is now a
   folder: the cog with its settings, loops and commands, plus a file each for movie details, franchise queues,

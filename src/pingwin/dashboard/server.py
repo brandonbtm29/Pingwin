@@ -752,6 +752,7 @@ async def get_watchlist(request: web.Request) -> web.Response:
                 "key": slug(s.name),
                 "nominations": data.get("nominations", []),
                 "open_poll": any(p.get("status") == "open" for p in data.get("polls", [])),
+                "poll": poll_summary(data),
                 "ranked": bool(getattr(s, "ranked", False)),
                 "showtime": getattr(s, "showtime", "") or "",
             }
@@ -763,12 +764,30 @@ async def get_watchlist(request: web.Request) -> web.Response:
     )
 
 
+def poll_summary(data: dict[str, Any]) -> dict[str, Any] | None:
+    """A series' running poll for the dashboard's Swap a movie: its movies, and whether it can be changed (a
+    Discord poll can't). None when no poll is running."""
+    from ..cogs.movienight import PINGWIN_POLLS
+
+    p = next((x for x in data.get("polls", []) if x.get("status") == "open"), None)
+    if p is None:
+        return None
+    titles = {n.get("id"): n.get("title") for n in data.get("nominations", [])}
+    labels = p.get("labels") or {}
+    return {
+        "swappable": p.get("kind") in PINGWIN_POLLS,
+        "options": [{"id": c, "label": labels.get(c) or titles.get(c) or "?"} for c in p.get("options", [])],
+    }
+
+
 async def post_watchlist(request: web.Request) -> web.Response:
     from .. import store
 
     payload = await read_json(request)
     if payload.get("action") == "poll":
         return await _start_movie_poll(request, payload)
+    if payload.get("action") == "swap":
+        return await _swap_poll_movie(request, payload)
     key, nom_id, action = _str(payload, "series", 60), _str(payload, "id", 20), _str(payload, "action", 20)
     state = store.load("movienight")
     noms = state.get(key, {}).get("nominations", [])
@@ -783,6 +802,29 @@ async def post_watchlist(request: web.Request) -> web.Response:
         raise ApiError("Unknown action")
     store.save("movienight", state)
     return web.json_response({"ok": True})
+
+
+async def _swap_poll_movie(request: web.Request, payload: dict[str, Any]) -> web.Response:
+    """Swap a movie in a running poll from the dashboard, like /pingwin movie swap: a watchlist movie (by id) or
+    a typed one. Its voters get a DM from Pingwin."""
+    bot = request.app[BOT]
+    viewer = viewer_of(request)
+    cog = _movie_cog(bot)
+    if cog is None:
+        raise ApiError("Movie night isn't loaded. Restart Pingwin.", 409)
+    if not bot.is_active:  # only the answering PC posts
+        where = bot.coordinator.leader or "the answering PC"
+        raise ApiError(f"This PC is on standby. Swap it from {where}'s dashboard, or in Discord.", 409)
+    s = cog.series(_str(payload, "series", 60))
+    if s is None:
+        raise ApiError("Pick a series.")
+    new = _str(payload, "typed", 300) or _str(payload, "new", 20)
+    try:
+        text = await cog.apply_swap(s, _str(payload, "old", 20), new, int(viewer.user_id or 0))
+    except ValueError as e:
+        raise ApiError(str(e)) from None
+    log.info("Swapped a movie in the %s poll from the dashboard (%s)", s.name, viewer.name)
+    return web.json_response({"ok": True, "message": text.replace("**", "")})
 
 
 async def _start_movie_poll(request: web.Request, payload: dict[str, Any]) -> web.Response:

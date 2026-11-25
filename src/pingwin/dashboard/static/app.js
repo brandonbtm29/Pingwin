@@ -951,10 +951,54 @@ async function loadWatchlist() {
       const waiting = s.nominations.filter((n) => !n.watched).length;
       return el("li", {}, el("strong", {}, s.name), el("span", { class: "hint" }, `${waiting} waiting`),
         s.open_poll ? el("span", { class: "tag live" }, "poll running")
-          : el("button", { class: "btn small", type: "button", onclick: () => pollDialog(s, data) }, "🗳️ Start a poll"));
+          : el("button", { class: "btn small", type: "button", onclick: () => pollDialog(s, data) }, "🗳️ Start a poll"),
+        s.poll && s.poll.swappable
+          ? el("button", { class: "btn small", type: "button", onclick: () => swapDialog(s, data) }, "🔁 Swap a movie") : null);
     })),
     el("p", { class: "hint" }, "Posters, who suggested what, and the buttons to mark a movie watched, move it to another list or remove it are on the movie pages. Movie Mods can use them too."),
     el("div", { class: "row-actions" }, el("a", { class: "btn", href: "/movies#watchlists", target: "_blank", rel: "noreferrer" }, "🍿 Open the watchlists ↗")));
+}
+
+// Swap a movie in a running poll, like /pingwin movie swap: a watchlist movie or a typed one takes its place, and
+// Pingwin DMs whoever had voted for it.
+function swapDialog(series, data) {
+  const d = $("d-poll");
+  const inPoll = new Set(series.poll.options.map((o) => o.id));
+  const old = el("select", {}, series.poll.options.map((o) => el("option", { value: o.id }, o.label)));
+  const waiting = series.nominations.filter((n) => !n.watched && !inPoll.has(n.id));
+  const pick = el("select", {},
+    waiting.map((n) => el("option", { value: n.id }, n.year ? `${n.title} (${n.year})` : n.title)),
+    el("option", { value: "" }, "Type a movie instead (below)"));
+  const typed = el("input", { maxlength: "300", placeholder: "Alien (1979), or an IMDb link" });
+  const go = el("button", { class: "btn primary", type: "button" }, "Swap");
+  const update = () => {
+    typed.disabled = !!pick.value;
+    go.disabled = !data.can_post || (!pick.value && !typed.value.trim());
+  };
+  pick.addEventListener("change", update);
+  typed.addEventListener("input", update);
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    try {
+      const res = await api("/api/watchlist", {
+        action: "swap", series: series.key, old: old.value, new: pick.value || null, typed: pick.value ? "" : typed.value,
+      });
+      d.close();
+      toast(res.message);
+      loadWatchlist();
+    } catch (err) { toast(err.message, true); update(); }
+  });
+  put(d,
+    el("div", { class: "dialog-head" }, el("h2", {}, `Swap a movie in the ${series.name} poll`),
+      el("button", { class: "btn icon", type: "button", "aria-label": "Close", onclick: () => d.close() }, "✕")),
+    data.can_post ? null : el("p", { class: "warn-text" }, `This PC is on standby, so it can't change the poll. Use ${data.leader || "the answering PC"}'s dashboard, or /pingwin movie swap in Discord.`),
+    el("label", {}, "Take out", old),
+    el("label", {}, "Put in, from the watchlist", pick),
+    el("label", {}, "Or type a movie (it joins the watchlist)", typed),
+    el("div", { class: "row-actions" }, go),
+    el("p", { class: "hint" }, "Votes for the movie taken out come off (on a ranked poll, the later picks move up), and Pingwin DMs those voters with a link back to the poll."));
+  update();
+  d.showModal();
 }
 
 // A movie poll from the dashboard: tick watchlist movies and/or type some, one per line. Typed ones are looked up

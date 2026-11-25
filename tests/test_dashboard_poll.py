@@ -80,3 +80,53 @@ def test_a_standby_pc_doesnt_post_polls():
         assert body["can_post"] is False and body["leader"] == "MAIN-PC"
 
     run(scenario, bot_with(cog, active=False))
+
+
+class SwapCog(PollCog):
+    swapped = None
+
+    async def apply_swap(self, s, old, new, by):
+        self.swapped = (s.name, old, new, by)
+        if old == "zzz":
+            raise ValueError("That movie isn't in the poll.")
+        return "Swapped **Alien (1979)** for **Dune (1984)**. Nobody had voted for it yet."
+
+
+def test_admins_swap_a_movie_from_the_dashboard():
+    cog = SwapCog()
+    swap = {"action": "swap", "series": "mmm", "old": "a", "new": "d", "typed": ""}
+
+    async def scenario(client, app):
+        r = await client.post("/api/watchlist", json=swap, headers=OWNER)
+        assert r.status == 200 and cog.swapped == ("MMM", "a", "d", 0)
+        assert (await r.json())["message"] == "Swapped Alien (1979) for Dune (1984). Nobody had voted for it yet."
+        r = await client.post("/api/watchlist", json={**swap, "new": None, "typed": "Heat (1995)"}, headers=OWNER)
+        assert r.status == 200 and cog.swapped[2] == "Heat (1995)"  # a typed movie
+        r = await client.post("/api/watchlist", json={**swap, "old": "zzz"}, headers=OWNER)
+        assert r.status == 400 and (await r.json())["error"] == "That movie isn't in the poll."
+        cog.swapped = None
+        r = await client.post("/api/watchlist", json=swap, headers=signed_in(app, "member"))
+        assert r.status == 403 and cog.swapped is None
+
+    run(scenario, bot_with(cog))
+    cog.swapped = None
+
+    async def standby(client, app):
+        r = await client.post("/api/watchlist", json=swap, headers=OWNER)
+        assert r.status == 409 and "MAIN-PC" in (await r.json())["error"] and cog.swapped is None
+
+    run(standby, bot_with(cog, active=False))
+
+
+def test_the_watchlist_shows_the_running_poll():
+    from pingwin.dashboard.server import poll_summary
+
+    noms = [{"id": "a", "title": "Alien"}, {"id": "b", "title": "Brazil"}]
+    assert poll_summary({"nominations": noms, "polls": [{"status": "done", "options": ["a"]}]}) is None
+    own = {"status": "open", "kind": "approval", "options": ["a", "b"], "labels": {"a": "Alien (1979)"}}
+    assert poll_summary({"nominations": noms, "polls": [own]}) == {
+        "swappable": True,
+        "options": [{"id": "a", "label": "Alien (1979)"}, {"id": "b", "label": "Brazil"}],
+    }
+    discord_poll = {"status": "open", "options": ["a"]}  # an older Discord poll: no kind, can't be changed
+    assert poll_summary({"nominations": noms, "polls": [discord_poll]})["swappable"] is False

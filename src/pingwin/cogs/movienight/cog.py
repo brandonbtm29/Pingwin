@@ -26,7 +26,7 @@ from .nights import NightsMixin
 from .polls import PollsMixin
 from .queues import QueuesMixin
 from .ratings import RatingsMixin
-from .views import PICKED, ChooseView, FranchiseModal, open_rating, poll_view
+from .views import PICKED, ChooseView, FranchiseModal, open_rating
 from .weeks_off import WeeksOffMixin
 
 
@@ -562,11 +562,13 @@ class MovieNight(
             if not n.get("watched") and n["id"] not in taken and current.casefold() in n["title"].casefold()
         ][:25]
 
-    @app_commands.command(name="swap", description="Swap a movie in a running poll for another from the watchlist")
+    @app_commands.command(
+        name="swap", description="Swap a movie in a running poll for another (movie mods and whoever started it)"
+    )
     @app_commands.describe(
         series="Which movie night",
         old="The movie to take out of the poll",
-        new="The watchlist movie to put in its place",
+        new="A watchlist movie, or type any title or IMDb link (it joins the watchlist)",
     )
     @app_commands.autocomplete(series=series_autocomplete, old=in_poll_autocomplete, new=swap_in_autocomplete)
     async def swap(self, interaction: discord.Interaction, series: str, old: str, new: str) -> None:
@@ -583,29 +585,10 @@ class MovieNight(
             )
             return
         await interaction.response.defer(ephemeral=True)
-        problem, p, voters = self.swap_movie(s, old, new, interaction.user.id)
-        if problem or p is None:
-            await interaction.followup.send(problem, ephemeral=True)
-            return
-        link = ""
-        channel = self.bot.get_channel(p["channel_id"])
-        if isinstance(channel, discord.TextChannel):
-            msg = channel.get_partial_message(p["message_id"])
-            link = msg.jump_url
-            try:
-                await msg.edit(embed=self.poll_embed(s, p), view=poll_view(p))
-            except discord.HTTPException as e:
-                log.warning("Couldn't show the swap on the %s poll: %s", s.name, e)
-        swap = p["swaps"][-1]
-        text = f"Swapped **{swap['out']}** for **{swap['in']}**."
-        if voters:
-            missed = await self._tell_swapped(s, p, voters, link)
-            who = "1 person" if len(voters) == 1 else f"{len(voters)} people"
-            text += f" {who} had voted for it; I let them know by DM, with a link back to the poll."
-            if missed:
-                text += f" ({missed} couldn't get it: DMs turned off.)"
-        else:
-            text += " Nobody had voted for it yet."
+        try:
+            text = await self.apply_swap(s, old, new, interaction.user.id)
+        except ValueError as e:
+            text = str(e)
         await interaction.followup.send(text, ephemeral=True)
 
     @app_commands.command(name="skip", description="Skip weeks of a movie night series (movie mods)")

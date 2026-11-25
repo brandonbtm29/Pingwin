@@ -460,17 +460,9 @@ class PollsMixin:
         state = store.load(STATE)
         data = self._data(state, s)
         p = next((x for x in data["polls"] if x["status"] == "open"), None)
-        if p is None:
-            return "No poll is running.", None, []
-        if p.get("kind") not in PINGWIN_POLLS:
-            return (
-                "That one's a Discord poll, and Discord doesn't let anyone change a poll once it's posted. Polls "
-                "started from now on are Pingwin's own, so they can be changed.",
-                None,
-                [],
-            )
-        if old not in p["options"]:
-            return "That movie isn't in the poll.", None, []
+        problem = self._swap_problem(p, old)
+        if problem:
+            return problem, None, []
         n = next((x for x in data["nominations"] if x["id"] == new and not x.get("watched")), None)
         if n is None:
             return f"Pick a movie from the {s.name} watchlist (nominate it first if it isn't there).", None, []
@@ -518,6 +510,87 @@ class PollsMixin:
             except (discord.HTTPException, ValueError):
                 missed += 1
         return missed
+
+    @staticmethod
+    def _swap_problem(p: dict[str, Any] | None, old: str) -> str:
+        """Why the running poll `p` can't have `old` swapped out ("" if it can)."""
+        if p is None:
+            return "No poll is running."
+        if p.get("kind") not in PINGWIN_POLLS:
+            return (
+                "That one's a Discord poll, and Discord doesn't let anyone change a poll once it's posted. Polls "
+                "started from now on are Pingwin's own, so they can be changed."
+            )
+        if old not in p["options"]:
+            return "That movie isn't in the poll."
+        return ""
+
+    async def resolve_swap_in(self, s, new: str, by: int) -> str:
+        """The watchlist ID of the movie to swap in: a watchlist movie's ID as it is, or a typed title (or IMDb
+        link), looked up and put on the watchlist. Raises ValueError when it can't be found."""
+        new = (new or "").strip()
+        if not new:
+            raise ValueError("Pick or type the movie to put in.")
+        if any(n["id"] == new for n in self._data(store.load(STATE), s)["nominations"]):
+            return new
+        found, missed = await self.look_up_typed(new)
+        if missed or not found:
+            raise ValueError(f"Couldn't find {new}. Try the title with its year, like Alien (1979).")
+        return self.add_to_watchlist(s, found[0], by)["id"]
+
+    async def apply_swap(self, s, old: str, new: str, by: int) -> str:
+        """Swap a movie in the series' running poll (from /pingwin movie swap or the dashboard): `new` is a
+        watchlist movie's ID or a typed title. Shows it on the poll and DMs whoever had voted for the old one.
+        Returns what to tell whoever swapped; raises ValueError with what's wrong."""
+        running = next((x for x in self._data(store.load(STATE), s)["polls"] if x["status"] == "open"), None)
+        problem = self._swap_problem(running, old)  # checked first, so a typed movie isn't added for nothing
+        if problem:
+            raise ValueError(problem)
+        problem, p, voters = self.swap_movie(s, old, await self.resolve_swap_in(s, new, by), by)
+        if problem or p is None:
+            raise ValueError(problem)
+        link = ""
+        channel = self.bot.get_channel(p["channel_id"])
+        if isinstance(channel, discord.TextChannel):
+            msg = channel.get_partial_message(p["message_id"])
+            link = msg.jump_url
+            try:
+                await msg.edit(embed=self.poll_embed(s, p), view=poll_view(p))
+            except discord.HTTPException as e:
+                log.warning("Couldn't show the swap on the %s poll: %s", s.name, e)
+        swap = p["swaps"][-1]
+        text = f"Swapped **{swap['out']}** for **{swap['in']}**."
+        if not voters:
+            return text + " Nobody had voted for it yet."
+        missed = await self._tell_swapped(s, p, voters, link)
+        who = "1 person" if len(voters) == 1 else f"{len(voters)} people"
+        text += f" {who} had voted for it; I let them know by DM, with a link back to the poll."
+        return text + (f" ({missed} couldn't get it: DMs turned off.)" if missed else "")
+
+    def who_voted(self, pid: str, member: discord.abc.User) -> str:
+        """Who voted for what in one of Pingwin's polls, for a movie mod (its Who voted button)."""
+        if not self.is_movie_mod(member):
+            return "Only the movie mods can see who voted."
+        found = self.find_poll(pid)
+        if found is None:
+            return "I can't find that poll anymore."
+        p = found[1]
+        labels = p.get("labels", {})
+        ballots = {uid: b for uid, b in p.get("ballots", {}).items() if b}
+        if not ballots:
+            return "Nobody has voted yet."
+        if p.get("kind") == "ranked":
+            lines = [
+                f"<@{uid}>: " + " · ".join(f"{i}. {labels.get(c, '?')}" for i, c in enumerate(b, 1))
+                for uid, b in ballots.items()
+            ]
+        else:
+            lines = []
+            for c in p["options"]:
+                who = [f"<@{uid}>" for uid, b in ballots.items() if c in b]
+                lines.append(f"**{labels.get(c, '?')}** ({len(who)}): " + (", ".join(who) or "nobody"))
+        text = f"🗳️ {len(ballots)} voted so far:\n" + "\n".join(lines)
+        return text if len(text) <= 1900 else text[:1890] + "\n…"
 
     def save_ballot(self, pid: str, uid: str, ranking: list[str]) -> tuple[str, dict[str, Any] | None]:
         """Save someone's ranking (replacing their last one). Returns (problem, the poll)."""

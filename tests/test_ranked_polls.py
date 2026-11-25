@@ -111,7 +111,7 @@ def test_a_ranked_poll_from_start_to_finish(monkeypatch):
         await cog.start_poll(inter, cog.series("MMM"), noms, 3, "MMM: what should we watch?", closes, ranked=True)
         post = ch.kw[-1]
         assert "embed" in post and "poll" not in post  # Pingwin's own message, not a Discord poll
-        assert [c.custom_id for c in post["view"].children] == [f"pingwin:rcv:{the_poll()['pid']}"]
+        assert [c.custom_id for c in post["view"].children][0] == f"pingwin:rcv:{the_poll()['pid']}"
         p = the_poll()
         assert p["kind"] == "ranked" and p["labels"]["a"] == "Alien (1979)" and p["ranks"] == 3
         assert "rank up to 3" in post["embed"].footer.text and "0 voted" in post["embed"].footer.text

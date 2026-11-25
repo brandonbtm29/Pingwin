@@ -323,16 +323,47 @@ class PollVoteButton(
         cog.refresh_poll_soon(self.pid)
 
 
+class WhoVotedButton(discord.ui.DynamicItem[discord.ui.Button], template=r"pingwin:pwho:(?P<pid>[0-9a-f]+)"):
+    """Who voted, under one of Pingwin's polls: only the movie mods get an answer (just for them)."""
+
+    def __init__(self, pid: str) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Who voted (mods)",
+                emoji="👀",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"pingwin:pwho:{pid}",
+            )
+        )
+        self.pid = pid
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match):
+        return cls(match["pid"])
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return getattr(interaction.client, "is_active", True)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog: MovieNight | None = interaction.client.get_cog("MovieNight")  # type: ignore[union-attr]
+        if cog is None:
+            return
+        await interaction.response.send_message(
+            cog.who_voted(self.pid, interaction.user), ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+        )
+
+
 def poll_view(p: dict[str, Any]) -> discord.ui.View:
     """The buttons under one of Pingwin's polls: Vote on a ranked poll (it opens the ranking form), else a button
-    for each movie."""
+    for each movie. Then Who voted, for the movie mods."""
     view = discord.ui.View(timeout=None)
     if p.get("kind") == "ranked":
         view.add_item(RankedVoteButton(p["pid"]))
-        return view
-    labels = p.get("labels", {})
-    for i, c in enumerate(p["options"][:25]):
-        view.add_item(PollVoteButton(p["pid"], i, labels.get(c, "?")))
+    else:
+        labels = p.get("labels", {})
+        for i, c in enumerate(p["options"][:24]):
+            view.add_item(PollVoteButton(p["pid"], i, labels.get(c, "?")))
+    view.add_item(WhoVotedButton(p["pid"]))
     return view
 
 

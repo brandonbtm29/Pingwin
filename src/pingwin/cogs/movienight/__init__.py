@@ -74,6 +74,7 @@ from .views import (
     StarterMenu,
     StarterPick,
     TypeMoviesModal,
+    WhoVotedButton,
     open_rating,
     pick_asked,
     poll_view,
@@ -118,6 +119,7 @@ __all__ = [
     "StarterPick",
     "TYPED_YEAR",
     "TypeMoviesModal",
+    "WhoVotedButton",
     "candidate_label",
     "describe_request",
     "imdb_url",
@@ -144,6 +146,14 @@ __all__ = [
 
 async def setup(bot: Pingwin) -> None:
     bot.add_dynamic_items(
-        RequestButton, RateButton, NightPick, BreakButton, StarterPick, StarterButton, RankedVoteButton, PollVoteButton
+        RequestButton,
+        RateButton,
+        NightPick,
+        BreakButton,
+        StarterPick,
+        StarterButton,
+        RankedVoteButton,
+        PollVoteButton,
+        WhoVotedButton,
     )
     await bot.add_cog(MovieNight(bot))

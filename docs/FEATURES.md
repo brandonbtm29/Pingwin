@@ -209,7 +209,8 @@ each series' channel. Rate it buttons always go to the series' channel.
 **Plurality** (one vote each: tap a movie, tap another to change it, or the same one to take it back; most votes
 wins), **Ranked** (below) or **Approval** (tap every movie you'd be happy to watch; most votes wins). The poll shows
 the votes so far as bars. Left blank, a series with *Ranked polls* ticked gets a ranked poll, and the others
-follow *Let people vote for more than one*. Polls started before 0.42.0 were Discord polls; they still finish as
+follow *Let people vote for more than one*. Under each poll, **Who voted (mods)** shows the movie mods who voted
+for what (just for them; anyone else is told it's for the mods). Polls started before 0.42.0 were Discord polls; they still finish as
 before.
 
 **Ranked-choice polls:** tick *Ranked polls* on a series (or pick `poll-type: Ranked`). Everyone taps **Vote**
@@ -222,7 +223,9 @@ choice, round after round. The poll then shows the winner and how each round wen
 through the same steps as any poll's (ties, the movie mods' card, franchise queues).
 
 **Swapping a movie while a poll runs:** `/pingwin movie swap series old new` (movie mods, and whoever started
-the poll) takes `old` out and puts `new`, a movie from the series' watchlist, in its place. Votes for the old
+the poll) takes `old` out and puts `new` in its place: a movie from the series' watchlist, or any title or
+IMDb link you type (it joins the watchlist). The dashboard's **Movie watchlists** panel has **Swap a movie**
+beside a running poll, which does the same. Votes for the old
 one come off: on a ranked ballot the picks after it move up, and an approval voter's other picks still count.
 Pingwin DMs everyone who had voted for it, with a link back to the poll, and the poll notes the swap. Older
 Discord polls can't be changed (Discord doesn't allow it).
@@ -264,7 +267,7 @@ queues. Turning it on starts with the next showing.
 | `/pingwin movie poll series [hours] [question] [poll-type] [ranks]` | Start a poll and ping the series' role, in *Polls go to* (or the series' channel). Pick its movies from the watchlist, type them in with **Type movies** (one per line), or both, up to 10, then **Post poll**; typed movies join the watchlist. The dashboard's **Movie watchlists** panel (Features → Movie night) has a **Start a poll** button that does the same. `poll-type`: Plurality, Ranked or Approval (blank: the series' *Ranked polls* box). `ranks`: how many each voter ranks on a ranked poll, 2 to 5 (given alone, it makes the poll ranked). With *Movies in a poll* set to one of Pingwin's ways, it picks them for you |
 | `/pingwin movie pollinfo [series]` | Everyone: the IMDb links, ratings, runtimes, genres and short plots of the movies in a running poll, just for you. Each poll mentions it (turn that off with *Point polls to the movie details*) |
 | `/pingwin movie endpoll series` | End the running poll now |
-| `/pingwin movie swap series old new` | Movie mods and whoever started the poll: swap a movie in the running poll for another from the watchlist (its voters get a DM) |
+| `/pingwin movie swap series old new` | Movie mods and whoever started the poll: swap a movie in the running poll for a watchlist movie, or any title you type (its voters get a DM). The dashboard's **Swap a movie** does the same |
 | `/pingwin movie skip series [weeks] [starting] [reason]` | Movie mods: skip showings (a week off, or a break between franchises; up to 26). `starting` is a date like `11/13`, `Nov 13` or `friday` (default the next showing) |
 | `/pingwin movie unskip series` | Movie mods: end a break early |
 
