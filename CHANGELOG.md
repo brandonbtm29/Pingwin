@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.43.0 (2026-11-25)
+- **Every PC installs the same library versions.** `constraints.txt` lists the exact versions; Pingwin installs
+  from it after each update (so do the installer, `setup.cmd` and CI), so NOVA and BMAX can't drift apart. To move
+  to newer versions, update the file (it says how).
+- Needs discord.py 2.7 or newer, which brings what Python 3.13 took out (`audioop`), so a Python upgrade doesn't
+  break Pingwin. CI already tests Python 3.11 to 3.13.
+- Dashboard sign-in redirects are plain responses (aiohttp is phasing out returning its redirect errors).
+
 ## 0.42.0 (2026-11-25)
 - **Every poll is Pingwin's own message now**, not a Discord poll: a button for each movie (one vote each, or as
   many as you like on an Approval poll) with the votes so far as bars, or the Vote button on a ranked poll. Tap a

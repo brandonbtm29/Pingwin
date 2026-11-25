@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pingwin"
-version = "0.42.0"
+version = "0.43.0"
 description = "A friendly, self-hosted Discord bot for friends' servers: opt-in ping roles, movie nights, birthdays, event reminders, game days and stream alerts."
 readme = "README.md"
 license = "MIT"
@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Communications :: Chat",
 ]
 dependencies = [
-    "discord.py>=2.4,<3",
+    "discord.py>=2.7,<3",  # 2.7 brings audioop-lts on Python 3.13 (which removed audioop)
     "python-dotenv>=1.0",
     "tomlkit>=0.12",
     "tzdata>=2024.1; sys_platform == 'win32'",  # Windows has no time-zone database

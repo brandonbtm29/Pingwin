@@ -8,7 +8,7 @@ if not exist ".venv\Scripts\python.exe" (
     py -3.12 -m venv .venv 2>nul || py -3 -m venv .venv 2>nul || python -m venv .venv || goto :error
 )
 ".venv\Scripts\python.exe" -m pip install --upgrade pip --quiet --disable-pip-version-check
-".venv\Scripts\python.exe" -m pip install -e ".[dev]" --quiet --disable-pip-version-check || goto :error
+".venv\Scripts\python.exe" -m pip install -e ".[dev]" -c constraints.txt --quiet --disable-pip-version-check || goto :error
 
 if exist ".env" (
     echo .env already exists; leaving it alone.

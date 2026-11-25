@@ -28,7 +28,7 @@ Each feature is a cog in `src/pingwin/cogs/` with its own slash commands. Add it
 ## Workflow
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]" -c constraints.txt
 pip install pre-commit && pre-commit install
 pytest
 ruff check src tests && ruff format src tests

@@ -33,7 +33,7 @@ The short version, on a Windows PC that stays on:
 5. Optional: `scripts\install_autostart.cmd` starts Pingwin in the background (no window) when you sign
    in, and adds a **Pingwin Dashboard** shortcut to your desktop. Stop it with **Status → Stop Pingwin**.
 6. Optional: to let people rate movies by voice message, also run
-   `.venv\Scripts\python -m pip install -e ".[voice]"` in the Pingwin folder (on every PC that may answer).
+   `.venv\Scripts\python -m pip install -e ".[voice]" -c constraints.txt` in the Pingwin folder (on every PC that may answer).
    See [Rate by voice](docs/FEATURES.md#rate-it).
 
 ## Commands

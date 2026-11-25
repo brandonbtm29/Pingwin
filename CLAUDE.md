@@ -23,7 +23,7 @@ A new cog in `src/pingwin/cogs/`, added to `EXTENSIONS` in `bot.py`; user-facing
 
 ## Run / test
 ```bash
-pip install -e ".[dev]"             # Python 3.11+; ".[voice]" adds speech-to-text for voice ratings
+pip install -e ".[dev]" -c constraints.txt   # Python 3.11+; ".[voice]" adds speech-to-text for voice ratings
 pip install pre-commit && pre-commit install
 pytest
 ruff check src tests && ruff format src tests     # line length 120

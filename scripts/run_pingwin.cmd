@@ -61,7 +61,7 @@ git merge --ff-only --quiet @{u} 2>nul || call :rewritten
 for /f %%h in ('git rev-parse HEAD 2^>nul') do set AFTER=%%h
 if not "%BEFORE%"=="%AFTER%" (
     echo Updated to %AFTER:~0,7%. Installing...
-    ".venv\Scripts\python.exe" -m pip install -e . --quiet --disable-pip-version-check
+    ".venv\Scripts\python.exe" -m pip install -e . -c constraints.txt --quiet --disable-pip-version-check
 )
 exit /b 0
 

@@ -271,7 +271,7 @@ async def guard(request: web.Request, handler):
                 )
             if request.path == "/movies" and "view" in request.query:
                 # Remember the link in a cookie and take the secret out of the address bar.
-                response = web.HTTPFound("/movies")
+                response = _redirect("/movies")
                 response.set_cookie(
                     VIEW_COOKIE,
                     request.query["view"],
@@ -354,10 +354,16 @@ def need_full_access(request: web.Request) -> Viewer:
 
 
 # --------------------------------------------------------------------- pages
+def _redirect(location: str, status: int = 302) -> web.Response:
+    """A redirect to return with cookies on it. aiohttp wants its HTTPFound raised, not returned (returning it is
+    deprecated), and a raised one may lose the cookies, so this is a plain response."""
+    return web.Response(status=status, headers={"Location": location})
+
+
 async def login(request: web.Request) -> web.StreamResponse:
     if request[PUBLIC] or not hmac.compare_digest(request.query.get("key", ""), request.app[KEY]):
         return web.Response(text=LOCKED_PAGE, content_type="text/html", status=401)
-    response = web.HTTPFound("/")
+    response = _redirect("/")
     response.set_cookie(COOKIE, request.app[KEY], httponly=True, samesite="Strict", path="/", max_age=365 * 86400)
     return response
 
@@ -410,7 +416,7 @@ async def auth_login(request: web.Request) -> web.StreamResponse:
         return _secure(request, signin_page(request, "Discord sign-in isn't set up yet."))
     state = secrets.token_urlsafe(24)
     nxt = "/movies" if request.query.get("next") == "/movies" else "/"
-    response = web.HTTPFound(authorize_url(str(bot.application_id), f"{remote.url}/auth/callback", state))
+    response = _redirect(authorize_url(str(bot.application_id), f"{remote.url}/auth/callback", state))
     response.set_cookie(
         STATE_COOKIE, f"{state}|{nxt}", httponly=True, secure=True, samesite="Lax", path="/auth", max_age=600
     )
@@ -527,7 +533,7 @@ async def movies_login(request: web.Request) -> web.StreamResponse:
     }
     token = request.app[SESSIONS].create(user)
     log.info("%s signed in to the movie pages with a personal link (%s)", user["name"], level)
-    response = web.HTTPSeeOther("/movies")
+    response = _redirect("/movies", 303)
     response.set_cookie(
         SESSION_COOKIE,
         token,

@@ -210,7 +210,7 @@ try {
     if (-not (Test-Path $venvPy)) { & $python -m venv (Join-Path $InstallDir ".venv") }
     Say "  Installing Pingwin's parts (a minute or two the first time)..."
     & $venvPy -m pip install --upgrade pip --quiet --disable-pip-version-check 2>&1 | Out-Null
-    & $venvPy -m pip install -e $InstallDir --quiet --disable-pip-version-check
+    & $venvPy -m pip install -e $InstallDir -c (Join-Path $InstallDir "constraints.txt") --quiet --disable-pip-version-check
     if ($LASTEXITCODE -ne 0) { Stop-Setup "Installing Pingwin's Python packages failed (see above)." }
     Ok "Pingwin is installed."
 
