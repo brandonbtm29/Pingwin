@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.42.0 (2026-11-25)
+- **Every poll is Pingwin's own message now**, not a Discord poll: a button for each movie (one vote each, or as
+  many as you like on an Approval poll) with the votes so far as bars, or the Vote button on a ranked poll. Tap a
+  movie again to take the vote back. A Discord poll that's already running finishes as before.
+- **How many to rank, for each poll:** `/pingwin movie poll`'s `ranks` (2 to 5) and *How many to rank* in the
+  dashboard's **Start a poll**, so a poll of 5 movies can ask for the top 3 or all 5 (never more than it has).
+  *Ranked polls: choices to rank* is the usual when it's left blank.
+- **`/pingwin movie swap series old new`** swaps a movie in a running poll for another from the watchlist (movie
+  mods, and whoever started the poll). Votes for it come off (on a ranked ballot the later picks move up), Pingwin
+  DMs those voters with a link back to the poll, and the poll notes the swap.
+- Event reminders count people, not votes, on an Approval poll.
+- **Polls that post themselves.** Tick *Post the next poll by itself* on a series. After each showing (*Post
+  the next poll*, 90 minutes after showtime by default), once a movie mod has answered the night's "Did ...
+  happen?" card, Pingwin posts next week's poll. Not after a week off, while a poll is running, or for
+  franchise queues; turning it on starts with the next showing.
+- **New ways to pick a poll's movies** (*Movies in a poll*, and *Automatic polls pick*): **last poll's movies**,
+  with the one you watched swapped for a random movie from the same watchlist list (Horror for Horror); or a
+  **random mix** by watchlist list or by IMDb genre (*Mix for random by list or genre*, like Horror 2, Not horror 4).
+- **`/pingwin movie poll` has `poll-type`** instead of `ranked`: **Plurality** (one vote each), **Ranked**
+  (instant runoff) or **Approval** (vote for every movie you'd be happy to watch). Blank keeps the series' setting.
+  The dashboard's **Start a poll** has the same **Poll type** choice instead of its Ranked choice box.
+
 ## 0.41.0 (2026-11-23)
 - **The movie pages warn movie mods about a waiting night.** While a night's "Did ... happen?" card is waiting,
   the top of the movie pages says so, with **Post the Rate it button**, **Log it, no Rate it** and **We didn't

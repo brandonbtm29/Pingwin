@@ -10,7 +10,7 @@ every PC gets them. You can also edit `config.toml` by hand: each feature is its
 |---|---|---|
 | [Event reminders](#event-reminders) | Pings the right roles when a Discord Event is created, and before it starts | Nothing extra (*Manage Events* to keep repeating events at their local time) |
 | [Birthdays](#birthdays) | Members save their birthday; Pingwin posts a shout-out on the day, plus a Star birthdays message for people without Discord | Nothing extra |
-| [Movie night](#movie-night) | Watchlists, Discord or ranked-choice polls, a Rate it button after each movie (typed or by voice message), and movie pages with your history | Optional free OMDb key; optional `voice` install |
+| [Movie night](#movie-night) | Watchlists, polls (one vote each, ranked or approval; a movie can be swapped mid-poll), a Rate it button after each movie (typed or by voice message), and movie pages with your history | Optional free OMDb key; optional `voice` install |
 | [Game day sign-ups](#game-day-sign-ups) | A "Who's in?" card with buttons, plus a reminder to everyone who's in | Nothing extra |
 | [Event attendance](#event-attendance-and-frumples) | Takes attendance at Discord Events and adds a reward (like Frumples) in UnbelievaBoat | A free UnbelievaBoat API token |
 | [Stream alerts](#stream-alerts) | Posts once when a streamer goes live on Twitch, YouTube or Discord (Go Live) | Free Twitch and/or YouTube keys (none for Go Live) |
@@ -196,7 +196,8 @@ Each **series** (for example *Movie Mondays* and *Franchise Fridays*) has a shor
 `MM`), a **full name** shown on the movie pages and used to recognise it when importing, and its own
 watchlist, role and channel. There's always a **General** watchlist too, for movies that aren't for a
 particular series. Members nominate movies, then a mod (or whoever you allow) turns the watchlist into a
-native Discord poll. When the poll ends, Pingwin replies with the winner.
+poll. Polls are Pingwin's own message, with a button for each movie, so they can rank and a movie can be
+swapped while one runs. When the poll ends, Pingwin replies with the winner.
 
 **Where things go:** polls go to *Polls go to* (like #polls), or each series' own channel when that's blank
 (a General poll then goes where it was started). Pingwin also reads the polls there, like a Horror / Not
@@ -204,18 +205,49 @@ Horror round followed by a movie poll for each side, for event reminders and to 
 was. *Announcements go to* (like #events) gets franchise queue posts and new watchlist suggestions; blank =
 each series' channel. Rate it buttons always go to the series' channel.
 
-**Ranked-choice polls:** tick *Ranked polls* on a series (or start one with `ranked:True`) and Pingwin posts
-its own poll instead of a Discord one, since Discord's can't rank. Everyone taps **Vote** and ranks their top
-picks (*Ranked polls: choices to rank*, 3 by default, up to 5); voting again changes their ranking. While it's
+**Poll types:** `/pingwin movie poll`'s `poll-type` (and *Poll type* in the dashboard's **Start a poll**) picks
+**Plurality** (one vote each: tap a movie, tap another to change it, or the same one to take it back; most votes
+wins), **Ranked** (below) or **Approval** (tap every movie you'd be happy to watch; most votes wins). The poll shows
+the votes so far as bars. Left blank, a series with *Ranked polls* ticked gets a ranked poll, and the others
+follow *Let people vote for more than one*. Polls started before 0.42.0 were Discord polls; they still finish as
+before.
+
+**Ranked-choice polls:** tick *Ranked polls* on a series (or pick `poll-type: Ranked`). Everyone taps **Vote**
+and ranks their top picks: how many is set for each poll with `ranks` (*How many to rank* on the dashboard), 2 to
+5, else *Ranked polls: choices to rank* (3 by default), and never more than the poll has. So a poll of 5 movies
+can ask for the top 3, or all 5. Voting again changes their ranking. While it's
 open, the poll shows each option's first-choice votes. When it closes, it's counted as an instant runoff:
 if no option has more than half the votes, the last one drops out and its votes go to each voter's next
 choice, round after round. The poll then shows the winner and how each round went, and the winner goes
-through the same steps as a Discord poll's (ties, the movie mods' card, franchise queues).
+through the same steps as any poll's (ties, the movie mods' card, franchise queues).
+
+**Swapping a movie while a poll runs:** `/pingwin movie swap series old new` (movie mods, and whoever started
+the poll) takes `old` out and puts `new`, a movie from the series' watchlist, in its place. Votes for the old
+one come off: on a ranked ballot the picks after it move up, and an approval voter's other picks still count.
+Pingwin DMs everyone who had voted for it, with a link back to the poll, and the poll notes the swap. Older
+Discord polls can't be changed (Discord doesn't allow it).
 
 **Showtimes:** give a series a weekly showtime, like `Mon 8:30pm` (in the time zone under *General*). Then
 `/pingwin movie poll` closes the poll exactly when the movie starts, and the poll message shows the closing time
-in everyone's own time zone. (Discord polls can only run whole hours, so Pingwin ends it early at showtime.)
+in everyone's own time zone.
 Passing `hours` still overrides it.
+
+**How Pingwin picks a poll's movies** (*Movies in a poll*, or *Automatic polls pick* for the polls below):
+
+- **Oldest** or **Random** nominations: *How many Pingwin picks* of them.
+- **Last poll's movies, the one we watched swapped for a random one:** the series' last poll again, in the same
+  order. The movie you watched (and any taken off the watchlist) gives way to a random movie from the same
+  watchlist list, so a Horror movie is replaced by a Horror movie; from the whole watchlist if that list has none
+  left. If the night was skipped, every movie stays.
+- **Random, a set number from each watchlist list** or **from each IMDb genre:** set the mix under *Mix for random
+  by list or genre* (like Horror 2, Not horror 4, or Comedy 2, Thriller 2). Genres come from the movie details,
+  so a movie Pingwin hasn't looked up yet isn't picked by genre.
+
+**Polls that post themselves:** tick *Post the next poll by itself* on a series with a showtime. *Post the next
+poll* minutes after showtime (90 by default), once a movie mod has answered that night's
+[did it happen?](#did-movie-night-happen) card, Pingwin posts next week's poll the way *Automatic polls pick* says,
+closing at the next showtime. Not after a week off, not while a poll is already running, and not for franchise
+queues. Turning it on starts with the next showing.
 
 | Command | What |
 |---|---|
@@ -229,9 +261,10 @@ Passing `hours` still overrides it.
 | `/pingwin movie page` | The movie pages: the view-only link and your own sign-in link |
 | `/pingwin movie queue series` | Where a franchise series is up to |
 | `/pingwin movie franchise series` | Movie mods: line up a franchise's movies |
-| `/pingwin movie poll series [hours] [question] [ranked]` | Start a poll and ping the series' role, in *Polls go to* (or the series' channel). Pick its movies from the watchlist, type them in with **Type movies** (one per line), or both, up to 10, then **Post poll**; typed movies join the watchlist. The dashboard's **Movie watchlists** panel (Features → Movie night) has a **Start a poll** button that does the same. `ranked` for a ranked-choice poll; the default is the series' *Ranked polls* box |
+| `/pingwin movie poll series [hours] [question] [poll-type] [ranks]` | Start a poll and ping the series' role, in *Polls go to* (or the series' channel). Pick its movies from the watchlist, type them in with **Type movies** (one per line), or both, up to 10, then **Post poll**; typed movies join the watchlist. The dashboard's **Movie watchlists** panel (Features → Movie night) has a **Start a poll** button that does the same. `poll-type`: Plurality, Ranked or Approval (blank: the series' *Ranked polls* box). `ranks`: how many each voter ranks on a ranked poll, 2 to 5 (given alone, it makes the poll ranked). With *Movies in a poll* set to one of Pingwin's ways, it picks them for you |
 | `/pingwin movie pollinfo [series]` | Everyone: the IMDb links, ratings, runtimes, genres and short plots of the movies in a running poll, just for you. Each poll mentions it (turn that off with *Point polls to the movie details*) |
 | `/pingwin movie endpoll series` | End the running poll now |
+| `/pingwin movie swap series old new` | Movie mods and whoever started the poll: swap a movie in the running poll for another from the watchlist (its voters get a DM) |
 | `/pingwin movie skip series [weeks] [starting] [reason]` | Movie mods: skip showings (a week off, or a break between franchises; up to 26). `starting` is a date like `11/13`, `Nov 13` or `friday` (default the next showing) |
 | `/pingwin movie unskip series` | Movie mods: end a break early |
 
@@ -240,8 +273,9 @@ What you control (all on the dashboard):
 - **Who can nominate:** everyone, members with a certain role, or mods only. Plus a limit per person per
   series (0 = no limit).
 - **Who can start polls:** mods only, a role, or everyone.
-- **Poll options come from:** whoever starts the poll ticks the movies from a list, or the oldest
-  nominations, or random ones. Plus how many movies go in a poll (2 to 10).
+- **Poll options come from:** whoever starts the poll ticks the movies from a list, or one of Pingwin's ways
+  (oldest, random, last poll's movies with the watched one swapped, or a random mix by list or genre). Plus how
+  many movies go in a poll (2 to 10), and whether a series posts its next poll by itself.
 - **Approvals, Rate it, and how long ratings stay open.**
 - **Poll length, single or multiple votes,** whether the movie mods are asked to confirm the winner, and
   **what happens on a tie** (announce it so a mod decides, or pick one at random). With *Ask the movie mods

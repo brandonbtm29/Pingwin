@@ -220,6 +220,7 @@ SECTIONS: list[dict[str, Any]] = [
                     {"key": "showtime", "type": "text", "label": "Showtime"},
                     {"key": "franchises", "type": "toggle", "label": "Franchise queue"},
                     {"key": "ranked", "type": "toggle", "label": "Ranked polls"},
+                    {"key": "auto_poll", "type": "toggle", "label": "Post the next poll by itself"},
                 ],
             ),
             F(
@@ -376,6 +377,9 @@ SECTIONS: list[dict[str, Any]] = [
                     ["choose", "Whoever starts it picks (or types them in)"],
                     ["oldest", "Oldest nominations"],
                     ["random", "Random nominations"],
+                    ["carryover", "Last poll's movies, the one we watched swapped for a random one"],
+                    ["by_list", "Random, a set number from each watchlist list"],
+                    ["by_genre", "Random, a set number from each IMDb genre"],
                 ],
                 group="Polls",
                 half=True,
@@ -388,6 +392,48 @@ SECTIONS: list[dict[str, Any]] = [
                 "For oldest or random. Picking by hand allows up to 10.",
                 min=2,
                 max=10,
+                group="Polls",
+                half=True,
+            ),
+            F(
+                "pick_mix",
+                "rows",
+                "Mix for random by list or genre",
+                [],
+                "How many movies each poll gets from each watchlist list (like Horror) or IMDb genre (like Comedy), "
+                "for the two random-mix choices. Up to 10 in all.",
+                add_label="+ Add a list or genre",
+                columns=[
+                    {"key": "name", "type": "text", "label": "List or genre"},
+                    {"key": "count", "type": "text", "label": "How many"},
+                ],
+                group="Polls",
+            ),
+            F(
+                "auto_pick",
+                "select",
+                "Automatic polls pick",
+                "carryover",
+                "For series with Post the next poll by itself. Last poll's movies: the movie we watched gives way to a "
+                "random one from the same watchlist list.",
+                options=[
+                    ["carryover", "Last poll's movies, the one we watched swapped for a random one"],
+                    ["random", "Random nominations"],
+                    ["oldest", "Oldest nominations"],
+                    ["by_list", "Random, a set number from each watchlist list"],
+                    ["by_genre", "Random, a set number from each IMDb genre"],
+                ],
+                group="Polls",
+                half=True,
+            ),
+            F(
+                "auto_poll_minutes",
+                "number",
+                "Post the next poll (minutes after showtime)",
+                90,
+                "It also waits until a movie mod has answered that night's Did ... happen? card.",
+                min=0,
+                max=1440,
                 group="Polls",
                 half=True,
             ),
@@ -417,8 +463,9 @@ SECTIONS: list[dict[str, Any]] = [
                 "number",
                 "Ranked polls: choices to rank (2-5)",
                 3,
-                "For a series with Ranked polls ticked (or /pingwin movie poll ranked:True): people rank their top "
-                "picks, and the count is an instant runoff.",
+                "The usual for a ranked poll (a series with Ranked polls ticked, or poll-type Ranked): people rank "
+                "their top picks, and the count is an instant runoff. Each poll can set its own with How many to "
+                "rank (/pingwin movie poll's ranks).",
                 min=2,
                 max=5,
                 group="Polls",

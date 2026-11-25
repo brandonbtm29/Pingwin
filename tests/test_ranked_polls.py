@@ -119,7 +119,7 @@ def test_a_ranked_poll_from_start_to_finish(monkeypatch):
         for uid, ranking in {"1": ["b"], "2": ["b", "a"], "3": ["a"], "4": ["a", "c"], "5": ["c", "a"]}.items():
             assert cog.save_ballot(p["pid"], uid, ranking)[0] == ""
         assert cog.save_ballot(p["pid"], "6", ["zzz"])[0] == "Pick at least your first choice."
-        embed = cog.ranked_embed(cog.series("MMM"), the_poll())
+        embed = cog.poll_embed(cog.series("MMM"), the_poll())
         assert "**2** · Brazil (1985)" in embed.description and "5 voted" in embed.footer.text
         # Where it stands, for event reminders and the voice check: the runoff so far.
         polls = await cog._read_polls(cog.series("MMM"), discord.utils.utcnow() - timedelta(days=1))
@@ -160,7 +160,7 @@ def test_the_vote_form(monkeypatch):
         async def send_message(text, **kw):
             said["text"] = text
 
-        cog.refresh_ranked_soon = lambda pid: said.setdefault("refresh", pid)
+        cog.refresh_poll_soon = lambda pid: said.setdefault("refresh", pid)
         await form.on_submit(NS(client=NS(get_cog=lambda n: cog), response=NS(send_message=send_message)))
         assert the_poll()["ballots"]["9"] == ["b", "a"]
         assert "1. Brazil (1985) · 2. Alien (1979)" in said["text"] and "counts once" in said["text"]
@@ -193,8 +193,8 @@ def test_polls_go_to_the_polls_channel(monkeypatch):
         inter = NS(user=NS(id=5), channel=events, followup=NS(send=lambda *a, **k: asyncio.sleep(0)))
         closes = discord.utils.utcnow() + timedelta(hours=3)
         await cog.start_poll(inter, cog.series("MMM"), noms, 3, "Pick!", closes, ranked=True)
-        await cog.start_poll(inter, cog.series("MMM"), noms, 3, "Pick!", closes)  # a Discord poll too
-        assert len(polls.kw) == 2 and events.kw == [] and "poll" in polls.kw[1]
+        await cog.start_poll(inter, cog.series("MMM"), noms, 3, "Pick!", closes)  # one vote each
+        assert len(polls.kw) == 2 and events.kw == [] and "poll" not in polls.kw[1] and "view" in polls.kw[1]
         assert {p["channel_id"] for p in store.load(movienight.STATE)["mmm"]["polls"]} == {2}
 
     asyncio.run(go())

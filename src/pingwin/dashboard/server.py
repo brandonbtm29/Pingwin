@@ -795,7 +795,11 @@ async def _start_movie_poll(request: web.Request, payload: dict[str, Any]) -> we
     raw_ids = payload.get("ids", [])
     ids = [i[:20] for i in raw_ids if isinstance(i, str)][:50] if isinstance(raw_ids, list) else []
     hours = None if payload.get("hours") in (None, "") else _int(payload, "hours", 24, 1, 768)
-    ranked = payload.get("ranked")
+    ranks = None if payload.get("ranks") in (None, "") else _int(payload, "ranks", 3, 2, 5)  # ranked: how many
+    poll_type = payload.get("poll_type")
+    if poll_type not in ("plurality", "ranked", "approval"):
+        ranked = payload.get("ranked")  # a page from before poll types: its Ranked choice box
+        poll_type = ("ranked" if ranked else "plurality") if isinstance(ranked, bool) else None
     try:
         msg = await cog.poll_from_dashboard(
             s,
@@ -803,8 +807,9 @@ async def _start_movie_poll(request: web.Request, payload: dict[str, Any]) -> we
             _str(payload, "typed", 3000),
             hours,
             _str(payload, "question", 300),
-            ranked if isinstance(ranked, bool) else None,
+            poll_type,
             int(viewer.user_id or 0),
+            ranks=ranks,
         )
     except ValueError as e:
         raise ApiError(str(e)) from None

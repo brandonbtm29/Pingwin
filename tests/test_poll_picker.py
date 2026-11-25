@@ -67,8 +67,8 @@ def setup(monkeypatch, noms, **cfg):
     cog.details = details
     posted = {}
 
-    async def start_poll(interaction, s, picks, hours, question, closes=None, ranked=False):
-        posted["picks"] = picks
+    async def start_poll(interaction, s, picks, hours, question, closes=None, ranked=False, multiple=None, ranks=None):
+        posted.update(picks=picks, ranked=ranked, multiple=multiple, ranks=ranks)
         return NS(jump_url="https://discord.com/channels/1/2/3")
 
     cog.start_poll = start_poll
@@ -150,13 +150,16 @@ def test_starting_a_poll_from_the_dashboard(monkeypatch):
         cog, _ = setup(monkeypatch, noms, poll_hours=24)
         sent = {}
 
-        async def post_poll(s, picks, hours, question, closes=None, ranked=False, *, by=0, fallback=None):
-            sent.update(picks=picks, hours=hours, question=question, ranked=ranked, by=by)
+        async def post_poll(
+            s, picks, hours, question, closes=None, ranked=False, *, by=0, fallback=None, multiple=None, ranks=None
+        ):
+            sent.update(picks=picks, hours=hours, question=question, ranked=ranked, by=by, multiple=multiple)
             return NS(channel=NS(name="polls")), ""
 
         cog.post_poll = post_poll
         cog.series_breaks = lambda s: []
-        msg = await cog.poll_from_dashboard(cog.series("MMM"), ["c", "nope"], "Brazil (1985)\nalien", 6, "", True, 42)
+        mmm_ = cog.series("MMM")
+        msg = await cog.poll_from_dashboard(mmm_, ["c", "nope"], "Brazil (1985)\nalien", 6, "", "ranked", 42)
         assert msg == "Poll posted in #polls with 3 movies."
         assert [p["title"] for p in sent["picks"]] == ["Coherence", "Alien", "Brazil"]  # "nope" isn't there
         assert (
@@ -197,5 +200,26 @@ def test_an_empty_watchlist_opens_the_picker_to_type_movies(monkeypatch):
         view = sent["view"]
         assert isinstance(view, ChooseView) and "type them with **Type movies**" in sent["text"]
         assert list(buttons(view)) == ["Type movies", "Post poll"]  # no watchlist menu
+
+    asyncio.run(go())
+
+
+def test_poll_type_picks_plurality_ranked_or_approval(monkeypatch):
+    async def go():
+        noms = [nom("a", "Alien", 1979), nom("c", "Coherence", 2013), nom("b", "Brazil", 1985)]
+        cog, posted = setup(monkeypatch, noms, pick="random", poll_options=3, poll_hours=24, multiple=False)
+        cog.series_breaks = lambda s: []
+        for value, want in (("plurality", (False, False)), ("ranked", (True, False)), ("approval", (False, True))):
+            choice = discord.app_commands.Choice(name=value, value=value)
+            await cog.poll.callback(cog, Inter(), "MMM", poll_type=choice)
+            assert (posted["ranked"], posted["multiple"]) == want, value
+            assert len(posted["picks"]) == 3
+        await cog.poll.callback(cog, Inter(), "MMM")  # left blank: the series' and the server's settings
+        assert (posted["ranked"], posted["multiple"], posted["ranks"]) == (False, None, None)
+        await cog.poll.callback(cog, Inter(), "MMM", ranks=4)  # How many to rank, alone: a ranked poll
+        assert (posted["ranked"], posted["ranks"]) == (True, 4)
+        plurality = discord.app_commands.Choice(name="plurality", value="plurality")
+        await cog.poll.callback(cog, Inter(), "MMM", poll_type=plurality, ranks=4)  # a poll type wins
+        assert posted["ranked"] is False
 
     asyncio.run(go())

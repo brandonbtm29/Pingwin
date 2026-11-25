@@ -967,7 +967,15 @@ function pollDialog(series, data) {
   const typed = el("textarea", { rows: "5", maxlength: "3000", placeholder: "Alien (1979)\nBrazil\nhttps://www.imdb.com/title/tt0078748/" });
   const question = el("input", { maxlength: "300", placeholder: `${series.name}: what should we watch?` });
   const hours = el("input", { type: "number", min: "1", max: "768", placeholder: series.showtime ? "until showtime" : "default" });
-  const ranked = el("input", { type: "checkbox", checked: series.ranked });
+  const pollType = el("select", {},  // the same choices as /pingwin movie poll's poll-type
+    el("option", { value: "" }, `The series' usual (${series.ranked ? "ranked" : "one vote each"})`),
+    el("option", { value: "plurality" }, "Plurality: one vote each"),
+    el("option", { value: "ranked" }, "Ranked: rank your top picks"),
+    el("option", { value: "approval" }, "Approval: vote for every movie you'd watch"));
+  const ranks = el("select", {},  // ranked polls: how many each voter ranks (more than the movies counts as all)
+    el("option", { value: "" }, "As set (Ranked polls: choices to rank)"),
+    ...[2, 3, 4, 5].map((n) => el("option", { value: String(n) }, `Top ${n}`)));
+  const rankable = () => pollType.value === "ranked" || (!pollType.value && series.ranked);
   const count = el("span", { class: "hint", "aria-live": "polite" });
   const post = el("button", { class: "btn primary", type: "button" }, "Post poll");
   const lines = () => typed.value.split("\n").filter((l) => l.trim()).length;
@@ -975,15 +983,18 @@ function pollDialog(series, data) {
     const n = boxes.filter((b) => b.checked).length + lines();
     count.textContent = `${n} movie${n === 1 ? "" : "s"} (2 to ${max})`;
     post.disabled = !data.can_post || n < 2 || n > max;
+    ranks.disabled = !rankable();
   };
   boxes.forEach((b) => b.addEventListener("change", update));
+  pollType.addEventListener("change", update);
   typed.addEventListener("input", update);
   post.addEventListener("click", async () => {
     post.disabled = true;
     try {
       const res = await api("/api/watchlist", {
         action: "poll", series: series.key, ids: boxes.filter((b) => b.checked).map((b) => b.value),
-        typed: typed.value, question: question.value, hours: hours.value, ranked: ranked.checked,
+        typed: typed.value, question: question.value, hours: hours.value, poll_type: pollType.value || null,
+        ranks: rankable() && ranks.value ? Number(ranks.value) : null,
       });
       d.close();
       toast(res.message);
@@ -1001,7 +1012,8 @@ function pollDialog(series, data) {
     el("div", { class: "poll-row" },
       el("label", {}, "Question (optional)", question),
       el("label", {}, "Hours (optional)", hours),
-      el("label", { class: "check" }, ranked, "Ranked choice")),
+      el("label", {}, "Poll type", pollType),
+      el("label", {}, "How many to rank", ranks)),
     el("div", { class: "row-actions" }, post, count),
     el("p", { class: "hint" }, "Typed movies are looked up and added to the watchlist. The poll goes to the ", el("em", {}, "Polls go to"),
       " channel (or the series' own channel) and pings the series' role."));

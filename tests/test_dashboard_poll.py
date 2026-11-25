@@ -13,8 +13,9 @@ class PollCog:
     def series(self, name):
         return NS(name="MMM") if name == "mmm" else None
 
-    async def poll_from_dashboard(self, s, ids, typed, hours, question, ranked, by):
-        self.calls.append((s.name, ids, typed, hours, question, ranked, by))
+    async def poll_from_dashboard(self, s, ids, typed, hours, question, poll_type, by, ranks=None):
+        self.calls.append((s.name, ids, typed, hours, question, poll_type, by))
+        self.ranks = ranks
         if typed == "boom":
             raise ValueError("Pick 2 to 10 movies (that's 1).")
         return "Poll posted in #polls with 3 movies."
@@ -27,7 +28,14 @@ def bot_with(cog, active=True):
     return bot
 
 
-POLL = {"action": "poll", "series": "mmm", "ids": ["a", 7], "typed": "Brazil (1985)", "hours": "", "ranked": True}
+POLL = {
+    "action": "poll",
+    "series": "mmm",
+    "ids": ["a", 7],
+    "typed": "Brazil (1985)",
+    "hours": "",
+    "poll_type": "ranked",
+}
 
 
 def test_admins_start_a_poll_from_the_dashboard():
@@ -36,9 +44,18 @@ def test_admins_start_a_poll_from_the_dashboard():
     async def scenario(client, app):
         r = await client.post("/api/watchlist", json=POLL, headers=OWNER)
         assert r.status == 200 and (await r.json())["message"] == "Poll posted in #polls with 3 movies."
-        assert cog.calls[-1] == ("MMM", ["a"], "Brazil (1985)", None, "", True, 0)  # the owner: no Discord ID
-        r = await client.post("/api/watchlist", json={**POLL, "hours": "6", "ranked": "yes"}, headers=signed_in(app))
-        assert r.status == 200 and cog.calls[-1][3:] == (6, "", None, 42)
+        assert cog.calls[-1] == ("MMM", ["a"], "Brazil (1985)", None, "", "ranked", 0)  # the owner: no Discord ID
+        r = await client.post("/api/watchlist", json={**POLL, "hours": "6", "poll_type": "yes"}, headers=signed_in(app))
+        assert r.status == 200 and cog.calls[-1][3:] == (6, "", None, 42)  # not a poll type: the series' usual
+        r = await client.post("/api/watchlist", json={**POLL, "poll_type": "approval"}, headers=OWNER)
+        assert cog.calls[-1][5] == "approval" and cog.ranks is None  # How many to rank left as usual
+        r = await client.post("/api/watchlist", json={**POLL, "ranks": "4"}, headers=OWNER)
+        assert r.status == 200 and cog.ranks == 4
+        r = await client.post("/api/watchlist", json={**POLL, "ranks": "9"}, headers=OWNER)
+        assert r.status == 200 and cog.ranks == 5  # kept in range
+        old_page = {k: v for k, v in POLL.items() if k != "poll_type"}
+        r = await client.post("/api/watchlist", json={**old_page, "ranked": False}, headers=OWNER)
+        assert cog.calls[-1][5] == "plurality"  # a page from before poll types: its Ranked choice box, unticked
         r = await client.post("/api/watchlist", json={**POLL, "typed": "boom"}, headers=OWNER)
         assert r.status == 400 and "Pick 2 to 10" in (await r.json())["error"]
         r = await client.post("/api/watchlist", json={**POLL, "series": "nope"}, headers=OWNER)

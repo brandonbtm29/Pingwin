@@ -178,7 +178,14 @@ def standings(polls: list[dict[str, Any]], since: float) -> dict[str, Any] | Non
         lead = [_side(a) or a.casefold() for a, n in genre if n == top] if top else []
         votes = sum(n for _, n in genre)
     else:
-        votes = max((sum(int(n or 0) for _, n in p.get("answers", [])) for p in this_week), default=0)
+        # How many voted: Pingwin's polls know; for a Discord poll, its votes (one each).
+        votes = max(
+            (
+                int(p["voters"]) if "voters" in p else sum(int(n or 0) for _, n in p.get("answers", []))
+                for p in this_week
+            ),
+            default=0,
+        )
     pick = None
     if len(lead) == 1 and lead[0] in picks:
         pick = picks[lead[0]][0]
